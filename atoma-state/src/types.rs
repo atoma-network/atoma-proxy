@@ -24,16 +24,8 @@ pub struct Task {
     pub valid_until_epoch: Option<i64>,
     /// Optional epoch timestamp when the task was deprecated
     pub deprecated_at_epoch: Option<i64>,
-    /// String representation of task optimizations
-    pub optimizations: String,
     /// Security level of the task (encoded as an integer)
     pub security_level: i64,
-    /// Compute units required for the task
-    pub task_metrics_compute_unit: i64,
-    /// Optional time units for task metrics
-    pub task_metrics_time_unit: Option<i64>,
-    /// Optional value for task metrics
-    pub task_metrics_value: Option<i64>,
     /// Optional minimum reputation score required for the task
     pub minimum_reputation_score: Option<i64>,
 }
@@ -45,18 +37,11 @@ impl From<TaskRegisteredEvent> for Task {
             task_small_id: event.task_small_id.inner as i64,
             role: event.role.inner as i64,
             model_name: event.model_name,
-            is_deprecated: event.is_deprecated,
-            valid_until_epoch: event.valid_until_epoch.map(|epoch| epoch as i64),
-            deprecated_at_epoch: event.deprecated_at_epoch.map(|epoch| epoch as i64),
-            optimizations: serde_json::to_string(&event.optimizations).unwrap(),
-            security_level: event.security_level as i64,
+            is_deprecated: false,
+            valid_until_epoch: None,
+            deprecated_at_epoch: None,
+            security_level: event.security_level.inner as i64,
             minimum_reputation_score: event.minimum_reputation_score.map(|score| score as i64),
-            task_metrics_compute_unit: event.task_metrics.compute_unit as i64,
-            task_metrics_time_unit: event
-                .task_metrics
-                .time_unit
-                .map(|time_unit| time_unit as i64),
-            task_metrics_value: event.task_metrics.value.map(|value| value as i64),
         }
     }
 }
@@ -65,7 +50,7 @@ impl From<TaskRegisteredEvent> for Task {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Stack {
     /// Address of the owner of the stack
-    pub owner_address: String,
+    pub owner: String,
     /// Unique small integer identifier for the stack
     pub stack_small_id: i64,
     /// Unique string identifier for the stack
@@ -75,30 +60,30 @@ pub struct Stack {
     /// Identifier of the selected node for computation
     pub selected_node_id: i64,
     /// Total number of compute units in this stack
-    pub num_compute_units: i64,
+    pub num_compute_units: i32,
     /// Price of the stack (likely in smallest currency unit)
-    pub price: i64,
+    pub price: i32,
     /// Number of compute units already processed
-    pub already_computed_units: i64,
+    pub already_computed_units: i32,
     /// Indicates whether the stack is currently in the settle period
     pub in_settle_period: bool,
     /// Joint concatenation of Blake2b hashes of each payload and response pairs that was already processed
     /// by the node for this stack.
     pub total_hash: Vec<u8>,
     /// Number of payload requests that were received by the node for this stack.
-    pub num_total_messages: i64,
+    pub num_total_messages: i32,
 }
 
 impl From<StackCreatedEvent> for Stack {
     fn from(event: StackCreatedEvent) -> Self {
         Stack {
-            owner_address: event.owner_address,
+            owner: event.owner,
             stack_id: event.stack_id,
             stack_small_id: event.stack_small_id.inner as i64,
             task_small_id: event.task_small_id.inner as i64,
             selected_node_id: event.selected_node_id.inner as i64,
-            num_compute_units: event.num_compute_units as i64,
-            price: event.price as i64,
+            num_compute_units: event.num_compute_units as i32,
+            price: event.price as i32,
             already_computed_units: 0,
             in_settle_period: false,
             total_hash: vec![],
@@ -237,5 +222,22 @@ pub enum AtomaAtomaStateManagerEvent {
         total_num_tokens: i64,
         /// Oneshot channel to send the result back to the sender channel
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
+    },
+    GetStacksForModel {
+        model: String,
+        free_compute_units: i32,
+        result_sender: oneshot::Sender<Result<Vec<Stack>>>,
+    },
+    GetTasksForModel {
+        model: String,
+        result_sender: oneshot::Sender<Result<Vec<Task>>>,
+    },
+    UpdateNodePublicAddress {
+        node_small_id: i64,
+        public_address: String,
+    },
+    GetNodePublicAddress {
+        node_small_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
     },
 }

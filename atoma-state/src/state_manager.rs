@@ -41,16 +41,17 @@ impl AtomaStateManager {
         }
     }
 
-    async fn create_database_if_not_exists(db_url:&str, db_name: &str) -> Result<()> {
+    async fn create_database_if_not_exists(db_url: &str, db_name: &str) -> Result<()> {
         // Connect to the PostgreSQL server (default database)
         let pool: PgPool = PgPool::connect(db_url).await?;
-      
+
         // Check if the database exists
-        let exists: (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-            .bind(db_name)
-            .fetch_one(&pool)
-            .await?;
-      
+        let exists: (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+                .bind(db_name)
+                .fetch_one(&pool)
+                .await?;
+
         // Create the database if it does not exist
         if !exists.0 {
             sqlx::query(&format!("CREATE DATABASE {}", db_name))
@@ -60,11 +61,9 @@ impl AtomaStateManager {
         } else {
             println!("Database '{}' already exists.", db_name);
         }
-      
+
         Ok(())
-      }
-      
-      
+    }
 
     /// Creates a new `AtomaStateManager` instance from a database URL.
     ///
@@ -115,9 +114,12 @@ impl AtomaStateManager {
     /// ```
     #[tracing::instrument(level = "trace", skip_all)]
     pub async fn run(self, mut shutdown_signal: Receiver<bool>) -> Result<()> {
+        dbg!("wakanda");
         loop {
             tokio::select! {
                 atoma_event = self.event_subscriber_receiver.recv_async() => {
+                    dbg!("wakanda2");
+                    dbg!(&atoma_event);
                     match atoma_event {
                         Ok(atoma_event) => {
                             tracing::trace!(
@@ -230,11 +232,37 @@ impl AtomaState {
         fields(task_small_id = %task_small_id)
     )]
     pub async fn get_task_by_small_id(&self, task_small_id: i64) -> Result<Task> {
-        let task = sqlx::query("SELECT * FROM tasks WHERE task_small_id = ?")
+        let task = sqlx::query("SELECT * FROM tasks WHERE task_small_id = $1")
             .bind(task_small_id)
             .fetch_one(&self.db)
             .await?;
         Ok(Task::from_row(&task)?)
+    }
+
+    pub async fn get_stacks_for_model(&self, model: &str, free_units: i32) -> Result<Vec<Stack>> {
+        let tasks = sqlx::query(
+            "SELECT stacks.* FROM stacks
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id 
+                WHERE tasks.model_name = $1 AND stacks.num_compute_units - stacks.already_computed_units >= $2")
+        .bind(model)
+        .bind(free_units)
+        .fetch_all(&self.db).await?;
+        tasks
+            .into_iter()
+            .map(|task| Stack::from_row(&task).map_err(AtomaStateManagerError::from))
+            .collect()
+    }
+
+    pub async fn get_tasks_for_model(&self, model: &str) -> Result<Vec<Task>> {
+        let tasks = sqlx::query("SELECT * FROM tasks WHERE model_name = $1 AND is_deprecated = $2")
+            .bind(model)
+            .bind(false)
+            .fetch_all(&self.db)
+            .await?;
+        tasks
+            .into_iter()
+            .map(|task| Task::from_row(&task).map_err(AtomaStateManagerError::from))
+            .collect()
     }
 
     /// Retrieves all tasks from the database.
@@ -310,11 +338,8 @@ impl AtomaState {
         sqlx::query(
             "INSERT INTO tasks (
                 task_small_id, task_id, role, model_name, is_deprecated,
-                valid_until_epoch, deprecated_at_epoch, optimizations,
-                security_level, task_metrics_compute_unit,
-                task_metrics_time_unit, task_metrics_value,
-                minimum_reputation_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                valid_until_epoch, security_level, minimum_reputation_score
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(task.task_small_id)
         .bind(task.task_id)
@@ -322,12 +347,7 @@ impl AtomaState {
         .bind(task.model_name)
         .bind(task.is_deprecated)
         .bind(task.valid_until_epoch)
-        .bind(task.deprecated_at_epoch)
-        .bind(task.optimizations)
         .bind(task.security_level)
-        .bind(task.task_metrics_compute_unit)
-        .bind(task.task_metrics_time_unit)
-        .bind(task.task_metrics_value)
         .bind(task.minimum_reputation_score)
         .execute(&self.db)
         .await?;
@@ -368,7 +388,7 @@ impl AtomaState {
         fields(task_small_id = %task_small_id)
     )]
     pub async fn deprecate_task(&self, task_small_id: i64, epoch: i64) -> Result<()> {
-        sqlx::query("UPDATE tasks SET is_deprecated = TRUE, deprecated_at_epoch = ? WHERE task_small_id = ?")
+        sqlx::query("UPDATE tasks SET is_deprecated = TRUE, deprecated_at_epoch = $1 WHERE task_small_id = $2")
             .bind(epoch)
             .bind(task_small_id)
             .execute(&self.db)
@@ -415,7 +435,7 @@ impl AtomaState {
         let tasks = sqlx::query(
             "SELECT tasks.* FROM tasks
             INNER JOIN node_subscriptions ON tasks.task_small_id = node_subscriptions.task_small_id
-            WHERE node_subscriptions.node_small_id = ?",
+            WHERE node_subscriptions.node_small_id = $1",
         )
         .bind(node_small_id)
         .fetch_all(&self.db)
@@ -524,7 +544,7 @@ impl AtomaState {
         task_small_id: i64,
     ) -> Result<bool> {
         let result = sqlx::query(
-            "SELECT COUNT(*) FROM node_subscriptions WHERE node_small_id = ? AND task_small_id = ?",
+            "SELECT COUNT(*) FROM node_subscriptions WHERE node_small_id = $1 AND task_small_id = $2",
         )
         .bind(node_small_id)
         .bind(task_small_id)
@@ -585,7 +605,7 @@ impl AtomaState {
         sqlx::query(
             "INSERT INTO node_subscriptions 
                 (node_small_id, task_small_id, price_per_compute_unit, max_num_compute_units, valid) 
-                VALUES (?, ?, ?, ?, TRUE)",
+                VALUES ($1, $2, $3, $4, TRUE)",
         )
             .bind(node_small_id)
             .bind(task_small_id)
@@ -636,7 +656,7 @@ impl AtomaState {
         &self,
         task_small_id: i64,
     ) -> Result<NodeSubscription> {
-        let subscription = sqlx::query("SELECT * FROM node_subscriptions WHERE task_small_id = ?")
+        let subscription = sqlx::query("SELECT * FROM node_subscriptions WHERE task_small_id = $1")
             .bind(task_small_id)
             .fetch_one(&self.db)
             .await?;
@@ -693,7 +713,7 @@ impl AtomaState {
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE node_subscriptions SET price_per_compute_unit = ?, max_num_compute_units = ? WHERE node_small_id = ? AND task_small_id = ?",
+            "UPDATE node_subscriptions SET price_per_compute_unit = $1, max_num_compute_units = $2 WHERE node_small_id = $3 AND task_small_id = $4",
         )
             .bind(price_per_compute_unit)
             .bind(max_num_compute_units)
@@ -739,7 +759,7 @@ impl AtomaState {
         node_small_id: i64,
         task_small_id: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE node_subscriptions SET valid = FALSE WHERE node_small_id = ? AND task_small_id = ?")
+        sqlx::query("UPDATE node_subscriptions SET valid = FALSE WHERE node_small_id = $1 AND task_small_id = $2")
             .bind(node_small_id)
             .bind(task_small_id)
             .execute(&self.db)
@@ -782,7 +802,7 @@ impl AtomaState {
         fields(stack_small_id = %stack_small_id)
     )]
     pub async fn get_stack(&self, stack_small_id: i64) -> Result<Stack> {
-        let stack = sqlx::query("SELECT * FROM stacks WHERE stack_small_id = ?")
+        let stack = sqlx::query("SELECT * FROM stacks WHERE stack_small_id = $1")
             .bind(stack_small_id)
             .fetch_one(&self.db)
             .await?;
@@ -927,7 +947,7 @@ impl AtomaState {
         fields(node_small_id = %node_small_id)
     )]
     pub async fn get_stack_by_id(&self, node_small_id: i64) -> Result<Vec<Stack>> {
-        let stacks = sqlx::query("SELECT * FROM stacks WHERE selected_node_id = ?")
+        let stacks = sqlx::query("SELECT * FROM stacks WHERE selected_node_id = $1")
             .bind(node_small_id)
             .fetch_all(&self.db)
             .await?;
@@ -1078,7 +1098,7 @@ impl AtomaState {
             UPDATE stacks
             SET already_computed_units = already_computed_units + $1
             WHERE stack_small_id = $2
-            AND owner_address = $3
+            AND owner = $3
             AND num_compute_units - already_computed_units >= $1
             AND in_settle_period = false
             RETURNING *
@@ -1133,10 +1153,10 @@ impl AtomaState {
     pub async fn insert_new_stack(&self, stack: Stack) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks 
-                (owner_address, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price, already_computed_units, in_settle_period, total_hash, num_total_messages) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price, already_computed_units, in_settle_period, total_hash, num_total_messages) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
-            .bind(stack.owner_address)
+            .bind(stack.owner)
             .bind(stack.stack_small_id)
             .bind(stack.stack_id)
             .bind(stack.task_small_id)
@@ -1191,7 +1211,7 @@ impl AtomaState {
         stack_small_id: i64,
         already_computed_units: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE stacks SET already_computed_units = ? WHERE stack_small_id = ?")
+        sqlx::query("UPDATE stacks SET already_computed_units = $1 WHERE stack_small_id = $2")
             .bind(already_computed_units)
             .bind(stack_small_id)
             .execute(&self.db)
@@ -1241,8 +1261,8 @@ impl AtomaState {
     ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE stacks 
-            SET already_computed_units = already_computed_units - (? - ?) 
-            WHERE stack_small_id = ?",
+            SET already_computed_units = already_computed_units - ($1 - $2) 
+            WHERE stack_small_id = $3",
         )
         .bind(estimated_total_tokens)
         .bind(total_tokens)
@@ -1298,7 +1318,7 @@ impl AtomaState {
         stack_small_id: i64,
     ) -> Result<StackSettlementTicket> {
         let stack_settlement_ticket =
-            sqlx::query("SELECT * FROM stack_settlement_tickets WHERE stack_small_id = ?")
+            sqlx::query("SELECT * FROM stack_settlement_tickets WHERE stack_small_id = $1")
                 .bind(stack_small_id)
                 .fetch_one(&self.db)
                 .await?;
@@ -1410,7 +1430,7 @@ impl AtomaState {
                     is_in_dispute, 
                     user_refund_amount, 
                     is_claimed) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(stack_settlement_ticket.stack_small_id)
         .bind(stack_settlement_ticket.selected_node_id)
@@ -1427,7 +1447,7 @@ impl AtomaState {
         .await?;
 
         // Also update the stack to set in_settle_period to true
-        sqlx::query("UPDATE stacks SET in_settle_period = true WHERE stack_small_id = ?")
+        sqlx::query("UPDATE stacks SET in_settle_period = true WHERE stack_small_id = $1")
             .bind(stack_settlement_ticket.stack_small_id)
             .execute(&mut *tx)
             .await?;
@@ -1531,7 +1551,7 @@ impl AtomaState {
     )]
     pub async fn get_stack_total_hash(&self, stack_small_id: i64) -> Result<Vec<u8>> {
         let total_hash = sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT total_hash FROM stacks WHERE stack_small_id = ?",
+            "SELECT total_hash FROM stacks WHERE stack_small_id = $1",
         )
         .bind(stack_small_id)
         .fetch_one(&self.db)
@@ -1750,7 +1770,7 @@ impl AtomaState {
         stack_small_id: i64,
         dispute_settled_at_epoch: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE stack_settlement_tickets SET dispute_settled_at_epoch = ? WHERE stack_small_id = ?")
+        sqlx::query("UPDATE stack_settlement_tickets SET dispute_settled_at_epoch = $1 WHERE stack_small_id = $2")
             .bind(dispute_settled_at_epoch)
             .bind(stack_small_id)
             .execute(&self.db)
@@ -1803,9 +1823,9 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "UPDATE stack_settlement_tickets 
-                SET user_refund_amount = ?,
+                SET user_refund_amount = $1,
                     is_claimed = true
-                WHERE stack_small_id = ?",
+                WHERE stack_small_id = $2",
         )
         .bind(user_refund_amount)
         .bind(stack_small_id)
@@ -1916,7 +1936,7 @@ impl AtomaState {
     ) -> Result<Vec<StackAttestationDispute>> {
         let disputes = sqlx::query(
             "SELECT * FROM stack_attestation_disputes 
-                WHERE stack_small_id = ? AND attestation_node_id = ?",
+                WHERE stack_small_id = $1 AND attestation_node_id = $2",
         )
         .bind(stack_small_id)
         .bind(attestation_node_id)
@@ -2087,7 +2107,7 @@ impl AtomaState {
         sqlx::query(
             "INSERT INTO stack_attestation_disputes 
                 (stack_small_id, attestation_commitment, attestation_node_id, original_node_id, original_commitment) 
-                VALUES (?, ?, ?, ?, ?)",
+                VALUES ($1, $2, $3, $4, $5)",
         )
             .bind(stack_attestation_dispute.stack_small_id)
             .bind(stack_attestation_dispute.attestation_commitment)
@@ -2098,6 +2118,84 @@ impl AtomaState {
             .await?;
 
         Ok(())
+    }
+
+    /// Stores the public address of a node in the database.
+    ///
+    /// This method inserts or updates the public address of a node in the `node_public_addresses` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `small_id` - The unique small identifier of the node.
+    /// * `address` - The public address of the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_address(state_manager: &AtomaStateManager, small_id: i64, address: String) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_node_public_address(small_id, address).await
+    /// }
+    /// ```
+    pub async fn update_node_public_address(&self, small_id: i64, address: String) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO node_public_addresses 
+                    (node_small_id, public_address) 
+                    VALUES ($1, $2) 
+                    ON CONFLICT (node_small_id)
+                    DO UPDATE SET public_address = EXCLUDED.public_address",
+        )
+        .bind(small_id)
+        .bind(address)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Retrieves the public address of a node from the database.
+    ///
+    /// This method fetches the public address of a node from the `node_public_addresses` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `small_id` - The unique small identifier of the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_address(state_manager: &AtomaStateManager, small_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_node_public_address(small_id).await
+    /// }    
+    /// ```
+    pub async fn get_node_public_address(&self, small_id: i64) -> Result<Option<String>> {
+        let address = sqlx::query_scalar(
+            "SELECT public_address FROM node_public_addresses WHERE node_small_id = $1",
+        )
+        .bind(small_id)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(address)
     }
 }
 
@@ -2154,19 +2252,15 @@ pub(crate) mod queries {
     pub(crate) async fn create_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tasks (
-                task_small_id INTEGER PRIMARY KEY,
+                task_small_id BIGINT PRIMARY KEY,
                 task_id TEXT UNIQUE NOT NULL,
-                role INTEGER NOT NULL,
+                role BIGINT NOT NULL,
                 model_name TEXT,
                 is_deprecated BOOLEAN NOT NULL,
-                valid_until_epoch INTEGER,
-                deprecated_at_epoch INTEGER,
-                optimizations TEXT NOT NULL,
-                security_level INTEGER NOT NULL,
-                task_metrics_compute_unit INTEGER NOT NULL,
-                task_metrics_time_unit INTEGER,
-                task_metrics_value INTEGER,
-                minimum_reputation_score INTEGER
+                valid_until_epoch BIGINT,
+                deprecated_at_epoch BIGINT,
+                security_level BIGINT NOT NULL,
+                minimum_reputation_score BIGINT
             )",
         )
         .execute(db)
@@ -2179,8 +2273,8 @@ pub(crate) mod queries {
     /// This table stores information about node subscriptions to tasks.
     ///
     /// # Table Structure
-    /// - `task_small_id`: INTEGER NOT NULL - The ID of the task being subscribed to.
-    /// - `node_small_id`: INTEGER NOT NULL - The ID of the node subscribing to the task.
+    /// - `task_small_id`: BIGINT NOT NULL - The ID of the task being subscribed to.
+    /// - `node_small_id`: BIGINT NOT NULL - The ID of the node subscribing to the task.
     /// - `price_per_compute_unit`: INTEGER NOT NULL - The price per compute unit for this subscription.
     ///
     /// # Primary Key
@@ -2194,8 +2288,8 @@ pub(crate) mod queries {
     pub(crate) async fn create_subscribed_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_subscriptions (
-            task_small_id INTEGER NOT NULL,
-            node_small_id INTEGER NOT NULL,
+            task_small_id BIGINT NOT NULL,
+            node_small_id BIGINT NOT NULL,
             price_per_compute_unit INTEGER NOT NULL,
             max_num_compute_units INTEGER NOT NULL,
             valid BOOLEAN NOT NULL,
@@ -2233,25 +2327,28 @@ pub(crate) mod queries {
     /// A `String` containing the SQL query to create the `stacks` table.
     pub(crate) async fn create_stacks(db: &PgPool) -> Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS stacks (
-                stack_small_id INTEGER PRIMARY KEY,
-                owner_address TEXT NOT NULL,
+                stack_small_id BIGINT PRIMARY KEY,
+                owner TEXT NOT NULL,
                 stack_id TEXT UNIQUE NOT NULL,
-                task_small_id INTEGER NOT NULL,
-                selected_node_id INTEGER NOT NULL,
+                task_small_id BIGINT NOT NULL,
+                selected_node_id BIGINT NOT NULL,
                 num_compute_units INTEGER NOT NULL,
                 price INTEGER NOT NULL,
                 already_computed_units INTEGER NOT NULL,
                 in_settle_period BOOLEAN NOT NULL,
                 total_hash BYTEA NOT NULL,
                 num_total_messages INTEGER NOT NULL,
+                FOREIGN KEY (task_small_id) REFERENCES tasks (task_small_id),
                 FOREIGN KEY (selected_node_id, task_small_id) REFERENCES node_subscriptions (node_small_id, task_small_id)
             );").execute(db).await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_stacks_owner_address ON stacks (owner_address);")
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_stacks_owner_address ON stacks (owner);")
             .execute(db)
             .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_stacks_stack_small_id ON stacks (stack_small_id);")
-            .execute(db)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_stacks_stack_small_id ON stacks (stack_small_id);",
+        )
+        .execute(db)
+        .await?;
         Ok(())
     }
 
@@ -2286,7 +2383,7 @@ pub(crate) mod queries {
     pub(crate) async fn create_stack_settlement_tickets(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_settlement_tickets (
-            stack_small_id INTEGER PRIMARY KEY,
+            stack_small_id BIGINT PRIMARY KEY,
             selected_node_id INTEGER NOT NULL,
             num_claimed_compute_units INTEGER NOT NULL,
             requested_attestation_nodes TEXT NOT NULL,
@@ -2327,13 +2424,58 @@ pub(crate) mod queries {
     pub(crate) async fn create_stack_attestation_disputes(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_attestation_disputes (
-                stack_small_id INTEGER NOT NULL,
+                stack_small_id BIGINT NOT NULL,
                 attestation_commitment BYTEA NOT NULL,
                 attestation_node_id INTEGER NOT NULL,
                 original_node_id INTEGER NOT NULL,
                 original_commitment BYTEA NOT NULL,
                 PRIMARY KEY (stack_small_id, attestation_node_id),
                 FOREIGN KEY (stack_small_id) REFERENCES stacks (stack_small_id)
+            )",
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    /// Creates the `nodes_public_addresses` table in the database.
+    ///
+    /// This table stores the public addresses of nodes in the system.
+    /// - `node_small_id`: INTEGER PRIMARY KEY - The unique identifier for the node.
+    /// - `public_address`: TEXT NOT NULL - The public address of the node.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A reference to the Postgres database pool.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the table is created successfully, or an error if any operation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the SQL query fails to execute.
+    /// Possible reasons for failure include:
+    /// - Database connection issues
+    /// - Insufficient permissions
+    /// - Syntax errors in the SQL query
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::PgPool;
+    /// use atoma_node::atoma_state::queries;
+    ///
+    /// async fn setup_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    ///     queries::create_nodes_public_addresses(pool).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub(crate) async fn create_nodes_public_addresses(db: &PgPool) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS node_public_addresses (
+                node_small_id BIGINT PRIMARY KEY,
+                public_address TEXT NOT NULL
             )",
         )
         .execute(db)
@@ -2383,6 +2525,7 @@ pub(crate) mod queries {
         create_stacks(db).await?;
         create_stack_settlement_tickets(db).await?;
         create_stack_attestation_disputes(db).await?;
+        create_nodes_public_addresses(db).await?;
 
         Ok(())
     }

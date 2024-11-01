@@ -2,10 +2,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use atoma_state::{AtomaStateManager, AtomaStateManagerConfig};
-use atoma_sui::AtomaSuiConfig;
+use atoma_sui::{client::AtomaSuiClient, AtomaSuiConfig};
 use clap::Parser;
-use tokio::sync::watch;
-use tracing::error;
+use server::{start_server, AtomaServiceConfig};
+use sui::Sui;
+use sui_keys::keystore::FileBasedKeystore;
+use sui_sdk::wallet_context::WalletContext;
+use tokio::{sync::watch, try_join};
 use tracing_appender::{
     non_blocking,
     rolling::{RollingFileAppender, Rotation},
@@ -16,6 +19,9 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter, Registry,
 };
+
+mod server;
+mod sui;
 
 /// The directory where the logs are stored.
 const LOGS: &str = "./logs";
@@ -39,6 +45,9 @@ struct Config {
     /// Configuration for the Sui component.
     sui: AtomaSuiConfig,
 
+    /// Configuration for the service component.
+    service: AtomaServiceConfig,
+
     /// Configuration for the state manager component.
     state: AtomaStateManagerConfig,
 }
@@ -47,6 +56,7 @@ impl Config {
     async fn load(path: String) -> Self {
         Self {
             sui: AtomaSuiConfig::from_file_path(path.clone()),
+            service: AtomaServiceConfig::from_file_path(path.clone()),
             state: AtomaStateManagerConfig::from_file_path(path),
         }
     }
@@ -104,12 +114,15 @@ async fn main() {
     let args = Args::parse();
     let config = Config::load(args.config_path).await;
 
-    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    let (_shutdown_sender, shutdown_receiver) = watch::channel(false);
     let (event_subscriber_sender, event_subscriber_receiver) = flume::unbounded();
     let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
-    let sui_subscriber =
-        atoma_sui::SuiEventSubscriber::new(config.sui, event_subscriber_sender, shutdown_receiver);
+    let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
+        config.sui.clone(),
+        event_subscriber_sender,
+        shutdown_receiver.clone(),
+    );
 
     // Initialize your StateManager here
     let state_manager = AtomaStateManager::new_from_url(
@@ -117,8 +130,22 @@ async fn main() {
         event_subscriber_receiver,
         state_manager_receiver,
     )
-    .await;
-    if let Err(e) = state_manager {
-        error!("State manager error {}", e);
-    }
+    .await
+    .unwrap();
+
+    let shutdown_receiver_clone = shutdown_receiver.clone();
+    let state_manager_handle = tokio::spawn(async move {
+        state_manager.run(shutdown_receiver_clone).await.unwrap();
+    });
+
+    let sui_subscriber_handle = tokio::spawn(async move {
+        sui_subscriber.run().await.unwrap();
+    });
+    let server_handle = tokio::spawn(async move {
+        let atoma_sui_client = AtomaSuiClient::new(config.sui.clone()).await.unwrap();
+        let sui = Sui::new(&config.sui).await.unwrap();
+        start_server(config.service, atoma_sui_client, state_manager_sender, sui).await;
+    });
+
+    try_join!(sui_subscriber_handle, server_handle, state_manager_handle).unwrap();
 }
