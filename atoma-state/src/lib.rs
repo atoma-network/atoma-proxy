@@ -50,4 +50,3 @@ pub(crate) fn build_query_with_in<'a, T: sqlx::Type<Postgres> + sqlx::Encode<'a,
 
     builder
 }
-

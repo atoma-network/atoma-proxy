@@ -5,15 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anyhow = "1.0.91"
-async-trait = "0.1.83"
+anyhow.workspace = true
+async-trait.workspace = true
 atoma-state.workspace = true
 atoma-sui.workspace = true
-axum = "0.7.7"
-clap = "4.5.20"
+axum.workspace = true
+clap.workspace = true
+config.workspace = true
 flume.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 sqlx.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tracing-appender.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "time"] }
 tracing.workspace = true
-tracing-appender = "0.2.3"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "time"] }
