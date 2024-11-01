@@ -114,9 +114,12 @@ impl AtomaStateManager {
     /// ```
     #[tracing::instrument(level = "trace", skip_all)]
     pub async fn run(self, mut shutdown_signal: Receiver<bool>) -> Result<()> {
+        dbg!("wakanda");
         loop {
             tokio::select! {
                 atoma_event = self.event_subscriber_receiver.recv_async() => {
+                    dbg!("wakanda2");
+                    dbg!(&atoma_event);
                     match atoma_event {
                         Ok(atoma_event) => {
                             tracing::trace!(
@@ -234,6 +237,32 @@ impl AtomaState {
             .fetch_one(&self.db)
             .await?;
         Ok(Task::from_row(&task)?)
+    }
+
+    pub async fn get_stacks_for_model(&self, model: &str, free_units: i32) -> Result<Vec<Stack>> {
+        let tasks = sqlx::query(
+            "SELECT stacks.* FROM stacks
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id 
+                WHERE tasks.model_name = $1 AND stacks.num_compute_units - stacks.already_computed_units >= $2")
+        .bind(model)
+        .bind(free_units)
+        .fetch_all(&self.db).await?;
+        tasks
+            .into_iter()
+            .map(|task| Stack::from_row(&task).map_err(AtomaStateManagerError::from))
+            .collect()
+    }
+
+    pub async fn get_tasks_for_model(&self, model: &str) -> Result<Vec<Task>> {
+        let tasks = sqlx::query("SELECT * FROM tasks WHERE model_name = $1 AND is_deprecated = $2")
+            .bind(model)
+            .bind(false)
+            .fetch_all(&self.db)
+            .await?;
+        tasks
+            .into_iter()
+            .map(|task| Task::from_row(&task).map_err(AtomaStateManagerError::from))
+            .collect()
     }
 
     /// Retrieves all tasks from the database.
@@ -1069,7 +1098,7 @@ impl AtomaState {
             UPDATE stacks
             SET already_computed_units = already_computed_units + $1
             WHERE stack_small_id = $2
-            AND owner_address = $3
+            AND owner = $3
             AND num_compute_units - already_computed_units >= $1
             AND in_settle_period = false
             RETURNING *
@@ -1124,10 +1153,10 @@ impl AtomaState {
     pub async fn insert_new_stack(&self, stack: Stack) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks 
-                (owner_address, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price, already_computed_units, in_settle_period, total_hash, num_total_messages) 
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price, already_computed_units, in_settle_period, total_hash, num_total_messages) 
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
-            .bind(stack.owner_address)
+            .bind(stack.owner)
             .bind(stack.stack_small_id)
             .bind(stack.stack_id)
             .bind(stack.task_small_id)
@@ -2114,11 +2143,11 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn store_address(state_manager: &AtomaStateManager, small_id: i64, address: String) -> Result<(), AtomaStateManagerError> {
-    ///    state_manager.store_node_public_address(small_id, address).await
+    /// async fn update_address(state_manager: &AtomaStateManager, small_id: i64, address: String) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_node_public_address(small_id, address).await
     /// }
     /// ```
-    pub async fn store_node_public_address(&self, small_id: i64, address: String) -> Result<()> {
+    pub async fn update_node_public_address(&self, small_id: i64, address: String) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_public_addresses 
                     (node_small_id, public_address) 
@@ -2131,6 +2160,42 @@ impl AtomaState {
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+
+    /// Retrieves the public address of a node from the database.
+    ///
+    /// This method fetches the public address of a node from the `node_public_addresses` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `small_id` - The unique small identifier of the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_address(state_manager: &AtomaStateManager, small_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_node_public_address(small_id).await
+    /// }    
+    /// ```
+    pub async fn get_node_public_address(&self, small_id: i64) -> Result<Option<String>> {
+        let address = sqlx::query_scalar(
+            "SELECT public_address FROM node_public_addresses WHERE node_small_id = $1",
+        )
+        .bind(small_id)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(address)
     }
 }
 
@@ -2187,19 +2252,15 @@ pub(crate) mod queries {
     pub(crate) async fn create_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tasks (
-                task_small_id INTEGER PRIMARY KEY,
+                task_small_id BIGINT PRIMARY KEY,
                 task_id TEXT UNIQUE NOT NULL,
-                role INTEGER NOT NULL,
+                role BIGINT NOT NULL,
                 model_name TEXT,
                 is_deprecated BOOLEAN NOT NULL,
-                valid_until_epoch INTEGER,
-                deprecated_at_epoch INTEGER,
-                optimizations TEXT NOT NULL,
-                security_level INTEGER NOT NULL,
-                task_metrics_compute_unit INTEGER NOT NULL,
-                task_metrics_time_unit INTEGER,
-                task_metrics_value INTEGER,
-                minimum_reputation_score INTEGER
+                valid_until_epoch BIGINT,
+                deprecated_at_epoch BIGINT,
+                security_level BIGINT NOT NULL,
+                minimum_reputation_score BIGINT
             )",
         )
         .execute(db)
@@ -2212,8 +2273,8 @@ pub(crate) mod queries {
     /// This table stores information about node subscriptions to tasks.
     ///
     /// # Table Structure
-    /// - `task_small_id`: INTEGER NOT NULL - The ID of the task being subscribed to.
-    /// - `node_small_id`: INTEGER NOT NULL - The ID of the node subscribing to the task.
+    /// - `task_small_id`: BIGINT NOT NULL - The ID of the task being subscribed to.
+    /// - `node_small_id`: BIGINT NOT NULL - The ID of the node subscribing to the task.
     /// - `price_per_compute_unit`: INTEGER NOT NULL - The price per compute unit for this subscription.
     ///
     /// # Primary Key
@@ -2227,8 +2288,8 @@ pub(crate) mod queries {
     pub(crate) async fn create_subscribed_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_subscriptions (
-            task_small_id INTEGER NOT NULL,
-            node_small_id INTEGER NOT NULL,
+            task_small_id BIGINT NOT NULL,
+            node_small_id BIGINT NOT NULL,
             price_per_compute_unit INTEGER NOT NULL,
             max_num_compute_units INTEGER NOT NULL,
             valid BOOLEAN NOT NULL,
@@ -2266,24 +2327,23 @@ pub(crate) mod queries {
     /// A `String` containing the SQL query to create the `stacks` table.
     pub(crate) async fn create_stacks(db: &PgPool) -> Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS stacks (
-                stack_small_id INTEGER PRIMARY KEY,
-                owner_address TEXT NOT NULL,
+                stack_small_id BIGINT PRIMARY KEY,
+                owner TEXT NOT NULL,
                 stack_id TEXT UNIQUE NOT NULL,
-                task_small_id INTEGER NOT NULL,
-                selected_node_id INTEGER NOT NULL,
+                task_small_id BIGINT NOT NULL,
+                selected_node_id BIGINT NOT NULL,
                 num_compute_units INTEGER NOT NULL,
                 price INTEGER NOT NULL,
                 already_computed_units INTEGER NOT NULL,
                 in_settle_period BOOLEAN NOT NULL,
                 total_hash BYTEA NOT NULL,
                 num_total_messages INTEGER NOT NULL,
+                FOREIGN KEY (task_small_id) REFERENCES tasks (task_small_id),
                 FOREIGN KEY (selected_node_id, task_small_id) REFERENCES node_subscriptions (node_small_id, task_small_id)
             );").execute(db).await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_stacks_owner_address ON stacks (owner_address);",
-        )
-        .execute(db)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_stacks_owner_address ON stacks (owner);")
+            .execute(db)
+            .await?;
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_stacks_stack_small_id ON stacks (stack_small_id);",
         )
@@ -2323,7 +2383,7 @@ pub(crate) mod queries {
     pub(crate) async fn create_stack_settlement_tickets(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_settlement_tickets (
-            stack_small_id INTEGER PRIMARY KEY,
+            stack_small_id BIGINT PRIMARY KEY,
             selected_node_id INTEGER NOT NULL,
             num_claimed_compute_units INTEGER NOT NULL,
             requested_attestation_nodes TEXT NOT NULL,
@@ -2364,7 +2424,7 @@ pub(crate) mod queries {
     pub(crate) async fn create_stack_attestation_disputes(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_attestation_disputes (
-                stack_small_id INTEGER NOT NULL,
+                stack_small_id BIGINT NOT NULL,
                 attestation_commitment BYTEA NOT NULL,
                 attestation_node_id INTEGER NOT NULL,
                 original_node_id INTEGER NOT NULL,
@@ -2414,7 +2474,7 @@ pub(crate) mod queries {
     pub(crate) async fn create_nodes_public_addresses(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_public_addresses (
-                node_small_id INTEGER PRIMARY KEY,
+                node_small_id BIGINT PRIMARY KEY,
                 public_address TEXT NOT NULL
             )",
         )

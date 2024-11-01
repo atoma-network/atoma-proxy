@@ -50,7 +50,7 @@ impl From<TaskRegisteredEvent> for Task {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Stack {
     /// Address of the owner of the stack
-    pub owner_address: String,
+    pub owner: String,
     /// Unique small integer identifier for the stack
     pub stack_small_id: i64,
     /// Unique string identifier for the stack
@@ -60,30 +60,30 @@ pub struct Stack {
     /// Identifier of the selected node for computation
     pub selected_node_id: i64,
     /// Total number of compute units in this stack
-    pub num_compute_units: i64,
+    pub num_compute_units: i32,
     /// Price of the stack (likely in smallest currency unit)
-    pub price: i64,
+    pub price: i32,
     /// Number of compute units already processed
-    pub already_computed_units: i64,
+    pub already_computed_units: i32,
     /// Indicates whether the stack is currently in the settle period
     pub in_settle_period: bool,
     /// Joint concatenation of Blake2b hashes of each payload and response pairs that was already processed
     /// by the node for this stack.
     pub total_hash: Vec<u8>,
     /// Number of payload requests that were received by the node for this stack.
-    pub num_total_messages: i64,
+    pub num_total_messages: i32,
 }
 
 impl From<StackCreatedEvent> for Stack {
     fn from(event: StackCreatedEvent) -> Self {
         Stack {
-            owner_address: event.owner_address,
+            owner: event.owner,
             stack_id: event.stack_id,
             stack_small_id: event.stack_small_id.inner as i64,
             task_small_id: event.task_small_id.inner as i64,
             selected_node_id: event.selected_node_id.inner as i64,
-            num_compute_units: event.num_compute_units as i64,
-            price: event.price as i64,
+            num_compute_units: event.num_compute_units as i32,
+            price: event.price as i32,
             already_computed_units: 0,
             in_settle_period: false,
             total_hash: vec![],
@@ -222,5 +222,22 @@ pub enum AtomaAtomaStateManagerEvent {
         total_num_tokens: i64,
         /// Oneshot channel to send the result back to the sender channel
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
+    },
+    GetStacksForModel {
+        model: String,
+        free_compute_units: i32,
+        result_sender: oneshot::Sender<Result<Vec<Stack>>>,
+    },
+    GetTasksForModel {
+        model: String,
+        result_sender: oneshot::Sender<Result<Vec<Task>>>,
+    },
+    UpdateNodePublicAddress {
+        node_small_id: i64,
+        public_address: String,
+    },
+    GetNodePublicAddress {
+        node_small_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
     },
 }

@@ -671,6 +671,49 @@ pub(crate) async fn handle_state_manager_event(
                 .update_stack_total_hash(stack_small_id, total_hash)
                 .await?;
         }
+        AtomaAtomaStateManagerEvent::GetStacksForModel {
+            model,
+            free_compute_units,
+            result_sender,
+        } => {
+            let stacks = state_manager
+                .state
+                .get_stacks_for_model(&model, free_compute_units)
+                .await;
+            result_sender
+                .send(stacks)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetTasksForModel {
+            model,
+            result_sender,
+        } => {
+            let tasks = state_manager.state.get_tasks_for_model(&model).await;
+            result_sender
+                .send(tasks)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::UpdateNodePublicAddress {
+            node_small_id,
+            public_address,
+        } => {
+            state_manager
+                .state
+                .update_node_public_address(node_small_id, public_address)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::GetNodePublicAddress {
+            node_small_id,
+            result_sender,
+        } => {
+            let public_address = state_manager
+                .state
+                .get_node_public_address(node_small_id)
+                .await;
+            result_sender
+                .send(public_address)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
     }
     Ok(())
 }

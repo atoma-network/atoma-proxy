@@ -5,6 +5,9 @@ use atoma_state::{AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::{client::AtomaSuiClient, AtomaSuiConfig};
 use clap::Parser;
 use server::{start_server, AtomaServiceConfig};
+use sui::Sui;
+use sui_keys::keystore::FileBasedKeystore;
+use sui_sdk::wallet_context::WalletContext;
 use tokio::{sync::watch, try_join};
 use tracing_appender::{
     non_blocking,
@@ -18,6 +21,7 @@ use tracing_subscriber::{
 };
 
 mod server;
+mod sui;
 
 /// The directory where the logs are stored.
 const LOGS: &str = "./logs";
@@ -112,12 +116,12 @@ async fn main() {
 
     let (_shutdown_sender, shutdown_receiver) = watch::channel(false);
     let (event_subscriber_sender, event_subscriber_receiver) = flume::unbounded();
-    let (_state_manager_sender, state_manager_receiver) = flume::unbounded();
+    let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
         config.sui.clone(),
         event_subscriber_sender,
-        shutdown_receiver,
+        shutdown_receiver.clone(),
     );
 
     // Initialize your StateManager here
@@ -129,13 +133,19 @@ async fn main() {
     .await
     .unwrap();
 
+    let shutdown_receiver_clone = shutdown_receiver.clone();
+    let state_manager_handle = tokio::spawn(async move {
+        state_manager.run(shutdown_receiver_clone).await.unwrap();
+    });
+
     let sui_subscriber_handle = tokio::spawn(async move {
         sui_subscriber.run().await.unwrap();
     });
     let server_handle = tokio::spawn(async move {
         let atoma_sui_client = AtomaSuiClient::new(config.sui.clone()).await.unwrap();
-        start_server(config.service, atoma_sui_client, state_manager).await;
+        let sui = Sui::new(&config.sui).await.unwrap();
+        start_server(config.service, atoma_sui_client, state_manager_sender, sui).await;
     });
 
-    try_join!(sui_subscriber_handle, server_handle).unwrap();
+    try_join!(sui_subscriber_handle, server_handle, state_manager_handle).unwrap();
 }
