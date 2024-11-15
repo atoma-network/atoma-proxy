@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Body;
@@ -99,12 +99,19 @@ pub async fn chat_completions_handler(
             "include_usage": true
         });
     }
-    let (node_address, signature, selected_stack_small_id, headers, estimated_total_tokens) =
-        authenticate_and_process(&state, headers, &payload).await?;
+    let (
+        node_address,
+        node_id,
+        signature,
+        selected_stack_small_id,
+        headers,
+        estimated_total_tokens,
+    ) = authenticate_and_process(&state, headers, &payload).await?;
     if is_streaming {
         handle_streaming_response(
             state,
             node_address,
+            node_id,
             signature,
             selected_stack_small_id,
             headers,
@@ -116,6 +123,7 @@ pub async fn chat_completions_handler(
         handle_non_streaming_response(
             state,
             node_address,
+            node_id,
             signature,
             selected_stack_small_id,
             headers,
@@ -180,6 +188,7 @@ pub async fn chat_completions_handler(
 async fn handle_non_streaming_response(
     state: ProxyState,
     node_address: String,
+    node_id: i64,
     signature: String,
     selected_stack_small_id: i64,
     headers: HeaderMap,
@@ -187,6 +196,7 @@ async fn handle_non_streaming_response(
     estimated_total_tokens: i64,
 ) -> Result<Response<Body>, StatusCode> {
     let client = reqwest::Client::new();
+    let time = Instant::now();
     let response = client
         .post(format!("{}{}", node_address, CHAT_COMPLETIONS_PATH))
         .headers(headers)
@@ -216,6 +226,20 @@ async fn handle_non_streaming_response(
         .map(|n| n as i64)
         .unwrap_or(0);
 
+    let input_tokens = response
+        .get("usage")
+        .and_then(|usage| usage.get("completion_tokens"))
+        .and_then(|total_tokens| total_tokens.as_u64())
+        .map(|n| n as i64)
+        .unwrap_or(0);
+
+    let output_tokens = response
+        .get("usage")
+        .and_then(|usage| usage.get("prompt_tokens"))
+        .and_then(|total_tokens| total_tokens.as_u64())
+        .map(|n| n as i64)
+        .unwrap_or(0);
+
     // NOTE: We need to update the stack num tokens, because the inference response might have produced
     // less tokens than estimated what we initially estimated, from the middleware.
     if let Err(e) = utils::update_state_manager(
@@ -229,6 +253,21 @@ async fn handle_non_streaming_response(
         error!("Error updating state manager: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
+
+    state
+        .state_manager_sender
+        .send(
+            AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
+                node_small_id: node_id,
+                input_tokens,
+                output_tokens,
+                time: time.elapsed().as_secs_f64(),
+            },
+        )
+        .map_err(|err| {
+            error!("Error updating node throughput performance: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(response.into_response())
 }
@@ -281,6 +320,7 @@ async fn handle_non_streaming_response(
 async fn handle_streaming_response(
     state: ProxyState,
     node_address: String,
+    node_id: i64,
     signature: String,
     selected_stack_small_id: i64,
     headers: HeaderMap,
@@ -292,6 +332,7 @@ async fn handle_streaming_response(
     // that were processed for this request.
 
     let client = reqwest::Client::new();
+    let start = Instant::now();
     let response = client
         .post(format!("{}{}", node_address, CHAT_COMPLETIONS_PATH))
         .headers(headers)
@@ -319,6 +360,8 @@ async fn handle_streaming_response(
         state.state_manager_sender,
         selected_stack_small_id,
         estimated_total_tokens,
+        start,
+        node_id,
     ))
     .keep_alive(
         axum::response::sse::KeepAlive::new()
@@ -345,7 +388,7 @@ async fn authenticate_and_process(
     state: &ProxyState,
     headers: HeaderMap,
     payload: &Value,
-) -> Result<(String, String, i64, HeaderMap, u64), StatusCode> {
+) -> Result<(String, i64, String, i64, HeaderMap, u64), StatusCode> {
     // Authentication and payload extraction
     let (model, max_tokens, messages, tokenizer_index) =
         authenticate_and_extract(state, &headers, payload).await?;
@@ -354,6 +397,8 @@ async fn authenticate_and_process(
     let total_tokens =
         get_token_estimate(&messages, max_tokens, &state.tokenizers[tokenizer_index]).await?;
 
+    dbg!(&state.state_manager_sender);
+    dbg!(state.state_manager_sender.is_disconnected());
     // Get node selection
     let (selected_stack_small_id, selected_node_id) = get_selected_node(
         &model,
@@ -408,6 +453,7 @@ async fn authenticate_and_process(
 
     Ok((
         node_address,
+        selected_node_id,
         signature,
         selected_stack_small_id,
         headers,
@@ -594,6 +640,8 @@ async fn get_selected_node(
 ) -> Result<(i64, i64), StatusCode> {
     let (result_sender, result_receiver) = oneshot::channel();
 
+    dbg!(&model);
+    dbg!(total_tokens);
     state_manager_sender
         .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
             model: model.to_string(),
@@ -616,6 +664,7 @@ async fn get_selected_node(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    dbg!(&stacks);
     if stacks.is_empty() {
         let (result_sender, result_receiver) = oneshot::channel();
         state_manager_sender
