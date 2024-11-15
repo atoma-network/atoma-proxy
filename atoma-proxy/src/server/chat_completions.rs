@@ -185,6 +185,7 @@ pub async fn chat_completions_handler(
         payload_hash
     )
 )]
+#[allow(clippy::too_many_arguments)]
 async fn handle_non_streaming_response(
     state: ProxyState,
     node_address: String,
@@ -317,6 +318,7 @@ async fn handle_non_streaming_response(
         payload_hash
     )
 )]
+#[allow(clippy::too_many_arguments)]
 async fn handle_streaming_response(
     state: ProxyState,
     node_address: String,
