@@ -250,6 +250,16 @@ pub enum AtomaAtomaStateManagerEvent {
         output_tokens: i64,
         time: f64,
     },
+    UpdateNodePrefillPerformance {
+        node_small_id: i64,
+        tokens: i64,
+        time: f64,
+    },
+    UpdateNodeDecodePerformance {
+        node_small_id: i64,
+        tokens: i64,
+        time: f64,
+    },
     UpdateNodeLatencyPerformance {
         node_small_id: i64,
         latency: f64,

@@ -399,8 +399,6 @@ async fn authenticate_and_process(
     let total_tokens =
         get_token_estimate(&messages, max_tokens, &state.tokenizers[tokenizer_index]).await?;
 
-    dbg!(&state.state_manager_sender);
-    dbg!(state.state_manager_sender.is_disconnected());
     // Get node selection
     let (selected_stack_small_id, selected_node_id) = get_selected_node(
         &model,
@@ -642,8 +640,6 @@ async fn get_selected_node(
 ) -> Result<(i64, i64), StatusCode> {
     let (result_sender, result_receiver) = oneshot::channel();
 
-    dbg!(&model);
-    dbg!(total_tokens);
     state_manager_sender
         .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
             model: model.to_string(),
@@ -666,7 +662,6 @@ async fn get_selected_node(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    dbg!(&stacks);
     if stacks.is_empty() {
         let (result_sender, result_receiver) = oneshot::channel();
         state_manager_sender

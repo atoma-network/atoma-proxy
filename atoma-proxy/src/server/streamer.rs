@@ -38,10 +38,10 @@ pub struct Streamer {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// Start time of the request
     start: Instant,
+    /// Start time of the decode
+    start_decode: Option<Instant>,
     /// Node id that's running this request
     node_id: i64,
-    /// Updated latency
-    updated_latency: bool,
 }
 
 /// Represents the various states of a streaming process
@@ -74,8 +74,8 @@ impl Streamer {
             stack_small_id,
             state_manager_sender,
             start,
+            start_decode: None,
             node_id,
-            updated_latency: false,
         }
     }
 
@@ -174,6 +174,37 @@ impl Streamer {
             )));
         }
 
+        if let Err(e) = self.state_manager_sender.send(
+            AtomaAtomaStateManagerEvent::UpdateNodeDecodePerformance {
+                node_small_id: self.node_id,
+                tokens: output_tokens,
+                time: self
+                    .start_decode
+                    .expect("This should be filled on the first token")
+                    .elapsed()
+                    .as_secs_f64(),
+            },
+        ) {
+            error!("Error updating node decode performance: {}", e);
+            return Err(Error::new(format!(
+                "Error updating node decode performance: {}",
+                e
+            )));
+        }
+        if let Err(e) = self.state_manager_sender.send(
+            AtomaAtomaStateManagerEvent::UpdateNodePrefillPerformance {
+                node_small_id: self.node_id,
+                tokens: input_tokens,
+                time: (self.start_decode.unwrap() - self.start).as_secs_f64(),
+            },
+        ) {
+            error!("Error updating node prefill performance: {}", e);
+            return Err(Error::new(format!(
+                "Error updating node prefill performance: {}",
+                e
+            )));
+        }
+
         Ok(())
     }
 }
@@ -228,8 +259,8 @@ impl Stream for Streamer {
                     }
                 };
 
-                if !self.updated_latency {
-                    self.updated_latency = true;
+                if self.start_decode.is_none() {
+                    self.start_decode = Some(Instant::now());
                     let latency = self.start.elapsed().as_secs_f64();
                     self.state_manager_sender
                         .send(AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {

@@ -774,6 +774,26 @@ pub(crate) async fn handle_state_manager_event(
                 )
                 .await?;
         }
+        AtomaAtomaStateManagerEvent::UpdateNodePrefillPerformance {
+            node_small_id,
+            tokens,
+            time,
+        } => {
+            state_manager
+                .state
+                .update_node_prefill_performance(node_small_id, tokens, time)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::UpdateNodeDecodePerformance {
+            node_small_id,
+            tokens,
+            time,
+        } => {
+            state_manager
+                .state
+                .update_node_decode_performance(node_small_id, tokens, time)
+                .await?;
+        }
         AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {
             node_small_id,
             latency,
