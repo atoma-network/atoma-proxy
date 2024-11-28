@@ -8,7 +8,7 @@ info:
 servers:
 - url: http://localhost:8080
 paths:
-  /health/health:
+  /health:
     get:
       tags: []
       summary: Handles the health check request.
@@ -27,7 +27,7 @@ paths:
               schema: {}
         '500':
           description: Service is unhealthy
-  /node/registration/node/registration:
+  /node/registration:
     post:
       tags: []
       summary: Handles the registration of a node's public address.
@@ -75,7 +75,7 @@ paths:
               schema: {}
         '500':
           description: Failed to register node public address
-  /v1/chat/completions/v1/chat/completions:
+  /v1/chat/completions:
     post:
       tags: []
       summary: Handles the chat completions request.
@@ -121,7 +121,7 @@ paths:
           description: Unauthorized
         '500':
           description: Internal server error
-  /v1/embeddings/v1/embeddings:
+  /v1/embeddings:
     post:
       tags: []
       summary: Handles incoming embeddings requests by authenticating, processing, and forwarding them to the appropriate node.
@@ -174,7 +174,7 @@ paths:
           description: Unauthorized
         '500':
           description: Internal server error
-  /v1/images/generations/v1/images/generations:
+  /v1/images/generations:
     post:
       tags: []
       summary: Handles incoming requests for AI image generation.
@@ -224,7 +224,7 @@ paths:
           description: Unauthorized
         '500':
           description: Internal server error
-  /v1/models/v1/models:
+  /v1/models:
     get:
       tags: []
       summary: Handles requests to list available AI models.

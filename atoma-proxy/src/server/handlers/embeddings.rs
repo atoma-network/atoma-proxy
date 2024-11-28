@@ -118,7 +118,7 @@ impl RequestModel for RequestModelEmbeddings {
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
-    path = EMBEDDINGS_PATH,
+    path = "",
     responses(
         (status = OK, description = "Embeddings generated successfully", body = Value),
         (status = BAD_REQUEST, description = "Bad request"),

@@ -115,7 +115,7 @@ impl RequestModel for RequestModelImageGenerations {
 /// ```
 #[utoipa::path(
     post,
-    path = IMAGE_GENERATIONS_PATH,
+    path = "",
     responses(
         (status = OK, description = "Image generations", body = Value),
         (status = BAD_REQUEST, description = "Bad request"),

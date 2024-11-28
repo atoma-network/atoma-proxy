@@ -126,7 +126,7 @@ impl RequestModel for RequestModelChatCompletions {
 /// Returns an error status code if the authentication fails, the model is not found, no tasks are found for the model, no node address is found, or an internal server error occurs.
 #[utoipa::path(
     post,
-    path = CHAT_COMPLETIONS_PATH,
+    path = "",
     responses(
         (status = OK, description = "Chat completions", body = Value),
         (status = BAD_REQUEST, description = "Bad request"),

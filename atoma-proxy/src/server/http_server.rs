@@ -158,7 +158,7 @@ pub(crate) struct ModelsOpenApi;
 /// ```
 #[utoipa::path(
     get,
-    path = MODELS_PATH,
+    path = "",
     responses(
         (status = OK, description = "List of available models", body = Value),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")
@@ -255,7 +255,7 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 /// ```
 #[utoipa::path(
     post,
-    path = NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
+    path = "",
     responses(
         (status = OK, description = "Node public address registered successfully", body = Value),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to register node public address")
@@ -300,7 +300,7 @@ pub(crate) struct HealthOpenApi;
 /// Returns a JSON response with the status "ok".  
 #[utoipa::path(
     get,
-    path = HEALTH_PATH,
+    path = "",
     responses(
         (status = OK, description = "Service is healthy", body = Value),
         (status = INTERNAL_SERVER_ERROR, description = "Service is unhealthy")
