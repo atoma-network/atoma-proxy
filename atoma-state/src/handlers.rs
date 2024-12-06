@@ -841,7 +841,9 @@ pub(crate) async fn handle_state_manager_event(
                 .state
                 .get_selected_node_x25519_public_key(selected_node_id)
                 .await;
-            result_sender.send(public_key)
+            result_sender
+                .send(public_key)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
             username,
