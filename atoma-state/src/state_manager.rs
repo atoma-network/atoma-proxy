@@ -868,11 +868,13 @@ impl AtomaState {
         node_small_id: i64,
         task_small_id: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE node_subscriptions SET valid = FALSE WHERE node_small_id = $1 AND task_small_id = $2")
-            .bind(node_small_id)
-            .bind(task_small_id)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "DELETE FROM node_subscriptions WHERE node_small_id = $1 AND task_small_id = $2",
+        )
+        .bind(node_small_id)
+        .bind(task_small_id)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 

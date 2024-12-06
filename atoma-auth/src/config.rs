@@ -66,7 +66,7 @@ impl AtomaAuthConfig {
             .build()
             .expect("Failed to generate atoma state configuration file");
         config
-            .get::<Self>("atoma_state")
+            .get::<Self>("atoma_auth")
             .expect("Failed to generate configuration instance")
     }
 }
