@@ -868,11 +868,13 @@ impl AtomaState {
         node_small_id: i64,
         task_small_id: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE node_subscriptions SET valid = FALSE WHERE node_small_id = $1 AND task_small_id = $2")
-            .bind(node_small_id)
-            .bind(task_small_id)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "DELETE FROM node_subscriptions WHERE node_small_id = $1 AND task_small_id = $2",
+        )
+        .bind(node_small_id)
+        .bind(task_small_id)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
@@ -2199,7 +2201,7 @@ impl AtomaState {
 
     /// Stores the public address of a node in the database.
     ///
-    /// This method inserts or updates the public address of a node in the `node_public_addresses` table.
+    /// This method updates the public address of a node in the `nodes` table.
     ///
     /// # Arguments
     ///
@@ -2226,23 +2228,17 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip_all, fields(%small_id, %address))]
     pub async fn update_node_public_address(&self, small_id: i64, address: String) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO node_public_addresses 
-                    (node_small_id, public_address) 
-                    VALUES ($1, $2) 
-                    ON CONFLICT (node_small_id)
-                    DO UPDATE SET public_address = EXCLUDED.public_address",
-        )
-        .bind(small_id)
-        .bind(address)
-        .execute(&self.db)
-        .await?;
+        sqlx::query("UPDATE nodes SET public_address = $2 WHERE node_small_id = $1")
+            .bind(small_id)
+            .bind(address)
+            .execute(&self.db)
+            .await?;
         Ok(())
     }
 
     /// Retrieves the public address of a node from the database.
     ///
-    /// This method fetches the public address of a node from the `node_public_addresses` table.
+    /// This method fetches the public address of a node from the `nodes` table.
     ///
     /// # Arguments
     ///
@@ -2251,6 +2247,9 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<Option<String>>`: A result containing either:
+    ///   - `Ok(Some(String))`: The public address of the node.
+    ///   - `Ok(None)`: If the node is not found.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
     ///
     /// # Errors
     ///
@@ -2268,12 +2267,49 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip_all, fields(%small_id))]
     pub async fn get_node_public_address(&self, small_id: i64) -> Result<Option<String>> {
-        let address = sqlx::query_scalar(
-            "SELECT public_address FROM node_public_addresses WHERE node_small_id = $1",
-        )
-        .bind(small_id)
-        .fetch_optional(&self.db)
-        .await?;
+        let address =
+            sqlx::query_scalar("SELECT public_address FROM nodes WHERE node_small_id = $1")
+                .bind(small_id)
+                .fetch_optional(&self.db)
+                .await?;
+        Ok(address)
+    }
+
+    /// Retrieves the sui address of a node from the database.
+    ///
+    /// This method fetches the sui address of a node from the `nodes` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `small_id` - The unique small identifier of the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///   - `Ok(Some(String))`: The sui address of the node.
+    ///   - `Ok(None)`: If the node does not have a sui address.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_address(state_manager: &AtomaStateManager, small_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_node_sui_address(small_id).await
+    /// }    
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%small_id))]
+    pub async fn get_node_sui_address(&self, small_id: i64) -> Result<Option<String>> {
+        let address = sqlx::query_scalar("SELECT sui_address FROM nodes WHERE node_small_id = $1")
+            .bind(small_id)
+            .fetch_optional(&self.db)
+            .await?;
         Ok(address)
     }
 
@@ -2582,6 +2618,27 @@ impl AtomaState {
                 .await?;
         Ok(public_key.map(|row| row.get::<Vec<u8>, _>("public_key")))
     }
+
+    /// Insert new node into the database.
+    ///
+    /// This method inserts a new node into the `nodes` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique small identifier of the node.
+    /// * `sui_address` - The sui address of the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
+        sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
+            .bind(node_small_id)
+            .bind(sui_address)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -2835,11 +2892,12 @@ pub(crate) mod queries {
         Ok(())
     }
 
-    /// Creates the `nodes_public_addresses` table in the database.
+    /// Creates the `nodes` table in the database.
     ///
     /// This table stores the public addresses of nodes in the system.
     /// - `node_small_id`: INTEGER PRIMARY KEY - The unique identifier for the node.
-    /// - `public_address`: TEXT NOT NULL - The public address of the node.
+    /// - `sui_address`: TEXT NOT NULL - The sui address of the node.
+    /// - `public_address`: TEXT - The public address of the node. NULL if the didn't receive the information yet.
     ///
     /// # Arguments
     ///
@@ -2864,16 +2922,17 @@ pub(crate) mod queries {
     /// use atoma_node::atoma_state::queries;
     ///
     /// async fn setup_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
-    ///     queries::create_nodes_public_addresses(pool).await?;
+    ///     queries::create_nodes(pool).await?;
     ///     Ok(())
     /// }
     /// ```
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_nodes_public_addresses(db: &PgPool) -> Result<()> {
+    pub(crate) async fn create_nodes(db: &PgPool) -> Result<()> {
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS node_public_addresses (
+            "CREATE TABLE IF NOT EXISTS nodes (
                 node_small_id BIGINT PRIMARY KEY,
-                public_address TEXT NOT NULL
+                sui_address TEXT NOT NULL,
+                public_address TEXT
             )",
         )
         .execute(db)
@@ -2922,7 +2981,7 @@ pub(crate) mod queries {
                 input_tokens BIGINT NOT NULL,
                 output_tokens BIGINT NOT NULL,
                 time DOUBLE PRECISION NOT NULL,
-                FOREIGN KEY (node_small_id) REFERENCES node_public_addresses (node_small_id)
+                FOREIGN KEY (node_small_id) REFERENCES nodes (node_small_id)
             )",
         )
         .execute(db)
@@ -2933,7 +2992,7 @@ pub(crate) mod queries {
                 queries BIGINT NOT NULL,
                 tokens BIGINT NOT NULL,
                 time DOUBLE PRECISION NOT NULL,
-                FOREIGN KEY (node_small_id) REFERENCES node_public_addresses (node_small_id)
+                FOREIGN KEY (node_small_id) REFERENCES nodes (node_small_id)
             )",
         )
         .execute(db)
@@ -2944,7 +3003,7 @@ pub(crate) mod queries {
                 queries BIGINT NOT NULL,
                 tokens BIGINT NOT NULL,
                 time DOUBLE PRECISION NOT NULL,
-                FOREIGN KEY (node_small_id) REFERENCES node_public_addresses (node_small_id)
+                FOREIGN KEY (node_small_id) REFERENCES nodes (node_small_id)
             )",
         )
         .execute(db)
@@ -2954,7 +3013,7 @@ pub(crate) mod queries {
                 node_small_id BIGINT PRIMARY KEY,
                 queries BIGINT NOT NULL,
                 latency DOUBLE PRECISION NOT NULL,
-                FOREIGN KEY (node_small_id) REFERENCES node_public_addresses (node_small_id)
+                FOREIGN KEY (node_small_id) REFERENCES nodes (node_small_id)
             )",
         )
         .execute(db)
@@ -3023,7 +3082,7 @@ pub(crate) mod queries {
     /// - stacks
     /// - stack_settlement_tickets
     /// - stack_attestation_disputes
-    /// - node_public_addresses
+    /// - nodes
     /// - node_throughput_performance
     /// - node_latency_performance
     /// - node_public_keys
@@ -3062,7 +3121,7 @@ pub(crate) mod queries {
         create_stacks(db).await?;
         create_stack_settlement_tickets(db).await?;
         create_stack_attestation_disputes(db).await?;
-        create_nodes_public_addresses(db).await?;
+        create_nodes(db).await?;
         create_nodes_performance(db).await?;
         create_node_public_keys(db).await?;
 

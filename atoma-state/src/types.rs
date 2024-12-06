@@ -255,6 +255,10 @@ pub enum AtomaAtomaStateManagerEvent {
         node_small_id: i64,
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
+    GetNodeSuiAddress {
+        node_small_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
+    },
     NewStackAcquired {
         event: StackCreatedEvent,
         already_computed_units: i64,

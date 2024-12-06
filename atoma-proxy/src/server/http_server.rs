@@ -1,19 +1,29 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use axum::http::StatusCode;
+use atoma_utils::constants::SIGNATURE;
+use atoma_utils::verify_signature;
+use axum::body::Body;
+use axum::extract::Request;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::{
     extract::State,
     routing::{get, post},
     Json, Router,
 };
+use blake2::digest::consts::U32;
+use blake2::digest::generic_array::GenericArray;
+use blake2::{Blake2b, Digest};
 use flume::Sender;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sui_sdk::types::base_types::SuiAddress;
+use sui_sdk::types::crypto::{PublicKey as SuiPublicKey, Signature, SuiSignature};
 use tokenizers::Tokenizer;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
 use tracing::{error, instrument};
@@ -53,6 +63,12 @@ pub const MODELS_PATH: &str = "/v1/models";
 /// This endpoint is used to register or update the public address of a node
 /// in the system, ensuring that the system has the correct address for routing requests.
 pub const NODE_PUBLIC_ADDRESS_REGISTRATION_PATH: &str = "/node/registration";
+
+/// Body size limit for signature verification (contains the body size of the request)
+const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
+
+/// Size of the blake2b hash in bytes
+const BODY_HASH_SIZE: usize = 32;
 
 /// Represents the shared state of the application.
 ///
@@ -297,8 +313,91 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 #[instrument(level = "info", skip_all)]
 pub async fn node_public_address_registration(
     State(state): State<ProxyState>,
-    Json(payload): Json<NodePublicAddressAssignment>,
+    headers: HeaderMap,
+    request: Request<Body>,
 ) -> Result<Json<Value>, StatusCode> {
+    let base64_signature = headers
+        .get(SIGNATURE)
+        .ok_or_else(|| {
+            error!("Signature header not found");
+            StatusCode::BAD_REQUEST
+        })?
+        .to_str()
+        .map_err(|e| {
+            error!("Failed to extract base64 signature encoding, with error: {e}");
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let body_bytes = axum::body::to_bytes(request.into_body(), MAX_BODY_SIZE)
+        .await
+        .map_err(|_| {
+            error!("Failed to convert body to bytes");
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let signature = Signature::from_str(base64_signature).map_err(|_| {
+        error!("Failed to parse signature");
+        StatusCode::BAD_REQUEST
+    })?;
+
+    let public_key_bytes = signature.public_key_bytes();
+    let public_key =
+        SuiPublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
+            error!("Failed to extract public key from bytes, with error: {e}");
+            StatusCode::BAD_REQUEST
+        })?;
+    let sui_address = SuiAddress::from(&public_key);
+
+    let mut blake2b_hash = Blake2b::new();
+    blake2b_hash.update(&body_bytes);
+    let body_blake2b_hash: GenericArray<u8, U32> = blake2b_hash.finalize();
+    let body_blake2b_hash_bytes: [u8; BODY_HASH_SIZE] =
+        body_blake2b_hash.as_slice().try_into().map_err(|_| {
+            error!("Failed to convert blake2b hash to bytes");
+            StatusCode::BAD_REQUEST
+        })?;
+    verify_signature(base64_signature, &body_blake2b_hash_bytes)?;
+
+    let payload =
+        serde_json::from_slice::<NodePublicAddressAssignment>(&body_bytes).map_err(|e| {
+            error!("Failed to parse request body: {:?}", e);
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let (result_sender, result_receiver) = oneshot::channel();
+
+    state
+        .state_manager_sender
+        .send(AtomaAtomaStateManagerEvent::GetNodeSuiAddress {
+            node_small_id: payload.node_small_id as i64,
+            result_sender,
+        })
+        .map_err(|err| {
+            error!("Failed to send GetNodeSuiAddress event: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let node_sui_address = result_receiver
+        .await
+        .map_err(|err| {
+            error!("Failed to receive GetNodeSuiAddress result: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map_err(|err| {
+            error!("Failed to get node Sui address: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or_else(|| {
+            error!("Node Sui address not found");
+            StatusCode::NOT_FOUND
+        })?;
+
+    // Check if the address associated with the small ID in the request matches the Sui address in the signature.
+    if node_sui_address != sui_address.to_string() {
+        error!("The sui address associated with the node small ID does not match the signature sui address");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     state
         .state_manager_sender
         .send(AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {

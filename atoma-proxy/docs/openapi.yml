@@ -61,12 +61,6 @@ paths:
         }
         ```
       operationId: node_public_address_registration
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NodePublicAddressAssignment'
-        required: true
       responses:
         '200':
           description: Node public address registered successfully
@@ -282,26 +276,7 @@ paths:
               schema: {}
         '500':
           description: Failed to retrieve list of available models
-components:
-  schemas:
-    NodePublicAddressAssignment:
-      type: object
-      description: |-
-        Represents the payload for the node public address registration request.
-
-        This struct represents the payload for the node public address registration request.
-      required:
-      - node_small_id
-      - public_address
-      properties:
-        node_small_id:
-          type: integer
-          format: int64
-          description: Unique small integer identifier for the node
-          minimum: 0
-        public_address:
-          type: string
-          description: The public address of the node
+components: {}
 tags:
 - name: health
   description: Health check
