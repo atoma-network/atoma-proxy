@@ -283,4 +283,39 @@ pub enum AtomaAtomaStateManagerEvent {
         selected_node_id: i64,
         result_sender: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
+    GetUserIdByUsernamePassword {
+        username: String,
+        password: String,
+        result_sender: oneshot::Sender<Result<Option<i64>>>,
+    },
+    IsRefreshTokenValid {
+        user_id: i64,
+        refresh_token_hash: String,
+        result_sender: oneshot::Sender<Result<bool>>,
+    },
+    StoresRefreshToken {
+        user_id: i64,
+        refresh_token: String,
+    },
+    RevokeRefreshToken {
+        user_id: i64,
+        refresh_token: String,
+    },
+    IsApiTokenValid {
+        user_id: i64,
+        api_token: String,
+        result_sender: oneshot::Sender<Result<bool>>,
+    },
+    RevokeApiToken {
+        user_id: i64,
+        api_token: String,
+    },
+    StoreNewApiToken {
+        user_id: i64,
+        api_token: String,
+    },
+    GetApiTokensForUser {
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<Vec<String>>>,
+    },
 }

@@ -845,6 +845,84 @@ pub(crate) async fn handle_state_manager_event(
                 .send(public_key)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
+            username,
+            password,
+            result_sender,
+        } => {
+            let user_id = state_manager
+                .state
+                .get_user_id_by_username_password(&username, &password)
+                .await;
+            result_sender
+                .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+            user_id,
+            refresh_token_hash,
+            result_sender,
+        } => {
+            let is_valid = state_manager
+                .state
+                .is_refresh_token_valid(user_id, &refresh_token_hash)
+                .await;
+            result_sender
+                .send(is_valid)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::StoresRefreshToken {
+            user_id,
+            refresh_token,
+        } => {
+            state_manager
+                .state
+                .store_refresh_token(user_id, &refresh_token)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::RevokeRefreshToken {
+            user_id,
+            refresh_token,
+        } => {
+            state_manager
+                .state
+                .delete_refresh_token(user_id, &refresh_token)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::IsApiTokenValid {
+            user_id,
+            api_token,
+            result_sender,
+        } => {
+            let is_valid = state_manager
+                .state
+                .is_api_token_valid(user_id, &api_token)
+                .await;
+            result_sender
+                .send(is_valid)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::StoreNewApiToken { user_id, api_token } => {
+            state_manager
+                .state
+                .store_api_token(user_id, &api_token)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::RevokeApiToken { user_id, api_token } => {
+            state_manager
+                .state
+                .delete_api_token(user_id, &api_token)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::GetApiTokensForUser {
+            user_id,
+            result_sender,
+        } => {
+            let api_tokens = state_manager.state.get_api_tokens_for_user(user_id).await;
+            result_sender
+                .send(api_tokens)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
     }
     Ok(())
 }
