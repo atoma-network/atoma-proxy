@@ -18,7 +18,8 @@ async-trait = "0.1.83"
 atoma-proxy-service = { path = "./atoma-proxy-service" }
 atoma-state = { path = "./atoma-state" }
 atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
-atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
+# atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
+atoma-utils = { path = "../atoma-node/atoma-utils" }
 axum = "0.7.7"
 base64 = "0.22.1"
 blake2 = "0.10.6"
