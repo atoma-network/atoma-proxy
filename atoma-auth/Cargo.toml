@@ -1,0 +1,18 @@
+[package]
+name = "atoma-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+atoma-state.workspace = true
+blake2.workspace = true
+chrono.workspace = true
+config.workspace = true
+flume.workspace = true
+hex = "0.4.3"
+jsonwebtoken.workspace = true
+rand = "0.8.5"
+serde = { workspace = true, features = ["derive"] }
+tokio.workspace = true

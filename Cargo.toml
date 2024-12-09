@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-
-members = [
-  "atoma-proxy-service",
-  "atoma-proxy",
-  "atoma-state"
-]
+members = ["atoma-auth", "atoma-proxy-service", "atoma-proxy", "atoma-state"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +10,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 anyhow = "1.0.91"
 async-trait = "0.1.83"
+atoma-auth = { path = "./atoma-auth" }
 atoma-proxy-service = { path = "./atoma-proxy-service" }
 atoma-state = { path = "./atoma-state" }
 atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
@@ -22,11 +18,13 @@ atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package
 axum = "0.7.7"
 base64 = "0.22.1"
 blake2 = "0.10.6"
+chrono = "0.4.38"
 clap = "4.5.20"
 config = "0.14.1"
 flume = "0.11.1"
 futures = "0.3.31"
 hf-hub = "0.3.2"
+jsonwebtoken = "9.3.0"
 rand = "0.8.5"
 reqwest = "0.12.9"
 serde = "1.0.214"

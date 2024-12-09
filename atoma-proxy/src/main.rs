@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
+use atoma_auth::{AtomaAuthConfig, Auth};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::AtomaSuiConfig;
@@ -57,6 +58,9 @@ struct Config {
 
     /// Configuration for the proxy service component.
     proxy_service: AtomaProxyServiceConfig,
+
+    /// Configuration for the authentication component.
+    auth: AtomaAuthConfig,
 }
 
 impl Config {
@@ -65,7 +69,8 @@ impl Config {
             sui: AtomaSuiConfig::from_file_path(path.clone()),
             service: AtomaServiceConfig::from_file_path(path.clone()),
             state: AtomaStateManagerConfig::from_file_path(path.clone()),
-            proxy_service: AtomaProxyServiceConfig::from_file_path(path),
+            proxy_service: AtomaProxyServiceConfig::from_file_path(path.clone()),
+            auth: AtomaAuthConfig::from_file_path(path),
         }
     }
 }
@@ -126,6 +131,8 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
+    let auth = Auth::new(config.auth, state_manager_sender.clone());
+
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
         config.sui.clone(),
@@ -174,6 +181,7 @@ async fn main() -> Result<()> {
 
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
+        auth,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

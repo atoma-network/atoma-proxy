@@ -616,6 +616,44 @@ impl AtomaState {
             .collect()
     }
 
+    /// Register user with password.
+    ///
+    /// This method inserts a new entry into the `users` table to register a new user. In case the user already exists, it returns None.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username of the user.
+    /// * `password_hash` - The password hash of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<i64>>`: A result containing either:
+    ///   - `Ok(Some(i64))`: The ID of the user if the user was successfully registered.
+    ///   - `Ok(None)`: If the user already exists.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn register_user(state_manager: &AtomaStateManager, username: &str, password_hash: &str) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.register(username, password_hash).await
+    /// }
+    /// ```
+    pub async fn register(&self, username: &str, password_hash: &str) -> Result<Option<i64>> {
+        let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING RETURNING id")
+        .bind(username)
+        .bind(password_hash)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(result.map(|record| record.get("id")))
+    }
+
     /// Checks if a node is subscribed to a specific task.
     ///
     /// This method queries the `node_subscriptions` table to determine if there's
@@ -868,11 +906,13 @@ impl AtomaState {
         node_small_id: i64,
         task_small_id: i64,
     ) -> Result<()> {
-        sqlx::query("UPDATE node_subscriptions SET valid = FALSE WHERE node_small_id = $1 AND task_small_id = $2")
-            .bind(node_small_id)
-            .bind(task_small_id)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "DELETE FROM node_subscriptions WHERE node_small_id = $1 AND task_small_id = $2",
+        )
+        .bind(node_small_id)
+        .bind(task_small_id)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
@@ -2582,6 +2622,311 @@ impl AtomaState {
                 .await?;
         Ok(public_key.map(|row| row.get::<Vec<u8>, _>("public_key")))
     }
+
+    /// Get the user_id by username and password.
+    ///
+    /// This method queries the `users` table to get the user_id by username and password.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username of the user.
+    /// * `hashed_password` - The hashed password of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<i64>>`: A result containing either:
+    ///   - `Ok(Some(i64))`: The user_id of the user.
+    ///   - `Ok(None)`: If the user is not found.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_user_id(state_manager: &AtomaStateManager, username: &str, hashed_password: &str) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.get_user_id_by_username_password(username, hashed_password).await
+    /// }
+    /// ```
+    pub async fn get_user_id_by_username_password(
+        &self,
+        username: &str,
+        hashed_password: &str,
+    ) -> Result<Option<i64>> {
+        let user = sqlx::query("SELECT id FROM users WHERE username = $1 AND password_hash = $2")
+            .bind(username)
+            .bind(hashed_password)
+            .fetch_optional(&self.db)
+            .await?;
+
+        Ok(user.map(|user| user.get("id")))
+    }
+
+    /// Check if the refresh_token_hash is valid for the user.
+    ///
+    /// This method checks if the refresh token hash is valid for the user by querying the `refresh_tokens` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `refresh_token_hash` - The refresh token hash to check.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result indicating whether the refresh token is valid for the user.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn is_token_valid(state_manager: &AtomaStateManager, user_id: i64, refresh_token_hash: &str) -> Result<bool> {
+    ///   state_manager.is_refresh_token_valid(user_id, refresh_token_hash).await
+    /// }
+    /// ```
+    pub async fn is_refresh_token_valid(
+        &self,
+        user_id: i64,
+        refresh_token_hash: &str,
+    ) -> Result<bool> {
+        let is_valid = sqlx::query(
+            "SELECT EXISTS(SELECT 1 FROM refresh_tokens WHERE user_id = $1 AND token_hash = $2)",
+        )
+        .bind(user_id)
+        .bind(refresh_token_hash)
+        .fetch_one(&self.db)
+        .await?;
+
+        Ok(is_valid.get::<bool, _>(0))
+    }
+
+    /// Stores refresh token hash for the user.
+    ///
+    /// This method inserts a new refresh token hash into the `refresh_tokens` table for the specified user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `refresh_token` - The refresh token to store.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn store_token(state_manager: &AtomaStateManager, user_id: i64, refresh_token_hash: &str) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.store_refresh_token(user_id, refresh_token_hash).await
+    /// }
+    /// ```
+    pub async fn store_refresh_token(&self, user_id: i64, refresh_token_hash: &str) -> Result<()> {
+        sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(refresh_token_hash)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a refresh token hash for a user.
+    ///
+    /// This method deletes a refresh token hash from the `refresh_tokens` table for the specified user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `refresh_token_hash` - The refresh token hash to delete.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn delete_token(state_manager: &AtomaStateManager, user_id: i64, refresh_token_hash: &str) -> Result<(), AtomaStateManagerError> {
+    ///   state_manager.delete_refresh_token(user_id, refresh_token_hash).await
+    /// }
+    /// ```
+    pub async fn delete_refresh_token(&self, user_id: i64, refresh_token_hash: &str) -> Result<()> {
+        sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1 AND token_hash = $2")
+            .bind(user_id)
+            .bind(refresh_token_hash)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a api_token for a user.
+    ///
+    /// This method deletes a api token from the `api_tokens` table for the specified user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `api_token` - The api token to delete.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn delete_token(state_manager: &AtomaStateManager, user_id: i64, api_token: &str) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.delete_api_token(user_id, api_token).await
+    /// }
+    /// ```
+    pub async fn delete_api_token(&self, user_id: i64, api_token: &str) -> Result<()> {
+        sqlx::query("DELETE FROM api_tokens WHERE user_id = $1 AND token = $2")
+            .bind(user_id)
+            .bind(api_token)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Checks if the api token is valid for the user.
+    ///
+    /// This method checks if the api token is valid for the user by querying the `api_tokens` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `api_token` - The api token to check.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result indicating whether the api token is valid for the user.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn is_token_valid(state_manager: &AtomaStateManager, user_id: i64, api_token: &str) -> Result<bool> {
+    ///    state_manager.is_api_token_valid(user_id, api_token).await
+    /// }
+    /// ```
+    pub async fn is_api_token_valid(&self, user_id: i64, api_token: &str) -> Result<bool> {
+        let is_valid = sqlx::query(
+            "SELECT EXISTS(SELECT 1 FROM api_tokens WHERE user_id = $1 AND token = $2)",
+        )
+        .bind(user_id)
+        .bind(api_token)
+        .fetch_one(&self.db)
+        .await?;
+
+        Ok(is_valid.get::<bool, _>(0))
+    }
+
+    /// Stores a new api token for a user.
+    ///
+    /// This method inserts a new api token into the `api_tokens` table for the specified user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `api_token` - The api token to store.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn store_token(state_manager: &AtomaStateManager, user_id: i64, api_token: &str) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.store_api_token(user_id, api_token).await
+    /// }
+    /// ```
+    pub async fn store_api_token(&self, user_id: i64, api_token: &str) -> Result<()> {
+        sqlx::query("INSERT INTO api_tokens (user_id, token) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(api_token)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieves all API tokens for a user.
+    ///
+    /// This method fetches all API tokens from the `api_tokens` table for the specified user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<String>>`: A result containing either:
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_tokens(state_manager: &AtomaStateManager, user_id: i64) -> Result<Vec<String>, AtomaStateManagerError> {
+    ///    state_manager.get_api_tokens_for_user(user_id).await
+    /// }
+    /// ```
+    pub async fn get_api_tokens_for_user(&self, user_id: i64) -> Result<Vec<String>> {
+        let tokens = sqlx::query("SELECT token FROM api_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&self.db)
+            .await?;
+
+        Ok(tokens.into_iter().map(|row| row.get("token")).collect())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -2637,7 +2982,7 @@ pub(crate) mod queries {
     /// # Returns
     /// A `String` containing the SQL query to create the `tasks` table.
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_tasks(db: &PgPool) -> Result<()> {
+    async fn create_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tasks (
                 task_small_id BIGINT PRIMARY KEY,
@@ -2674,7 +3019,7 @@ pub(crate) mod queries {
     /// # Returns
     /// A `String` containing the SQL query to create the `node_subscriptions` table.
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_subscribed_tasks(db: &PgPool) -> Result<()> {
+    async fn create_subscribed_tasks(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_subscriptions (
             task_small_id BIGINT NOT NULL,
@@ -2715,7 +3060,7 @@ pub(crate) mod queries {
     /// # Returns
     /// A `String` containing the SQL query to create the `stacks` table.
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_stacks(db: &PgPool) -> Result<()> {
+    async fn create_stacks(db: &PgPool) -> Result<()> {
         sqlx::query("CREATE TABLE IF NOT EXISTS stacks (
                 stack_small_id BIGINT PRIMARY KEY,
                 owner TEXT NOT NULL,
@@ -2776,7 +3121,7 @@ pub(crate) mod queries {
     /// # Returns
     /// A `String` containing the SQL query to create the `stack_settlement_tickets` table.
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_stack_settlement_tickets(db: &PgPool) -> Result<()> {
+    async fn create_stack_settlement_tickets(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_settlement_tickets (
             stack_small_id BIGINT PRIMARY KEY,
@@ -2818,7 +3163,7 @@ pub(crate) mod queries {
     /// # Returns
     /// A `String` containing the SQL query to create the `stack_attestation_disputes` table.
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_stack_attestation_disputes(db: &PgPool) -> Result<()> {
+    async fn create_stack_attestation_disputes(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS stack_attestation_disputes (
                 stack_small_id BIGINT NOT NULL,
@@ -2869,7 +3214,7 @@ pub(crate) mod queries {
     /// }
     /// ```
     #[instrument(level = "trace", skip_all)]
-    pub(crate) async fn create_nodes_public_addresses(db: &PgPool) -> Result<()> {
+    async fn create_nodes_public_addresses(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_public_addresses (
                 node_small_id BIGINT PRIMARY KEY,
@@ -2914,7 +3259,7 @@ pub(crate) mod queries {
     ///     Ok(())
     /// }
     /// ```
-    pub(crate) async fn create_nodes_performance(db: &PgPool) -> Result<()> {
+    async fn create_nodes_performance(db: &PgPool) -> Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS node_throughput_performance (
                 node_small_id BIGINT PRIMARY KEY,
@@ -3015,6 +3360,150 @@ pub(crate) mod queries {
         Ok(())
     }
 
+    /// Creates the `users` table in the database.
+    ///
+    /// This table stores information about users in the system.
+    /// - `id`: BIGSERIAL PRIMARY KEY - The unique identifier for the user.
+    /// - `username`: VARCHAR(50) UNIQUE NOT NULL - The username of the user.
+    /// - `password`: VARCHAR(50) NOT NULL - The password of the user.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A reference to the Postgres database pool.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the table is created successfully, or an error if any operation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the SQL query fails to execute.
+    /// Possible reasons for failure include:
+    /// - Database connection issues
+    /// - Insufficient permissions
+    /// - Syntax errors in the SQL query
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::PgPool;
+    /// use atoma_node::atoma_state::queries;
+    ///
+    /// async fn setup_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    ///     queries::create_table_users(pool).await?;
+    ///     Ok(())
+    /// }
+    async fn create_table_users(db: &PgPool) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(64) NOT NULL
+            )",
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    /// Creates the `refresh_tokens` table in the database.
+    ///
+    /// This table stores information about refresh tokens in the system. Only tokens in this table are valid for refreshing access tokens. And access tokens referencing valid refresh tokens are valid.
+    /// - `id`: BIGSERIAL PRIMARY KEY - The unique identifier for the refresh token.
+    /// - `token_hash`: VARCHAR(255) UNIQUE NOT NULL - The refresh token.
+    /// - `user_id`: BIGINT NOT NULL - The ID of the user associated with the refresh token.
+    /// - `FOREIGN KEY (user_id) REFERENCES users (id)`: A foreign key constraint that references the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A reference to the Postgres database pool.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the table is created successfully, or an error if any operation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the SQL query fails to execute.
+    /// Possible reasons for failure include:
+    /// - Database connection issues
+    /// - Insufficient permissions
+    /// - Syntax errors in the SQL query
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::PgPool;
+    /// use atoma_node::atoma_state::queries;
+    ///
+    /// async fn setup_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    ///     queries::create_table_refresh_tokens(pool).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    async fn create_table_refresh_tokens(db: &PgPool) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                token_hash VARCHAR(255) UNIQUE NOT NULL,
+                user_id BIGINT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )",
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    /// Creates the `api_tokens` table in the database.
+    ///
+    /// This table stores information about API tokens in the system. API tokens are used to authenticate users for API requests.
+    /// - `id`: BIGSERIAL PRIMARY KEY - The unique identifier for the API token.
+    /// - `token`: VARCHAR(255) UNIQUE NOT NULL - The API token.
+    /// - `user_id`: BIGINT NOT NULL - The ID of the user associated with the API token.
+    /// - `FOREIGN KEY (user_id) REFERENCES users (id)`: A foreign key constraint that references the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A reference to the Postgres database pool.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the table is created successfully, or an error if any operation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the SQL query fails to execute.
+    /// Possible reasons for failure include:
+    /// - Database connection issues
+    /// - Insufficient permissions
+    /// - Syntax errors in the SQL query
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::PgPool;
+    /// use atoma_node::atoma_state::queries;
+    ///
+    /// async fn setup_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    ///     queries::create_table_api_tokens(pool).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    async fn create_table_api_tokens(db: &PgPool) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS api_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                token VARCHAR(255) UNIQUE NOT NULL,
+                user_id BIGINT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )",
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
     /// Creates all the necessary tables in the database.
     ///
     /// This function executes SQL queries to create the following tables:
@@ -3065,6 +3554,9 @@ pub(crate) mod queries {
         create_nodes_public_addresses(db).await?;
         create_nodes_performance(db).await?;
         create_node_public_keys(db).await?;
+        create_table_users(db).await?;
+        create_table_refresh_tokens(db).await?;
+        create_table_api_tokens(db).await?;
 
         Ok(())
     }

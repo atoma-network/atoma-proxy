@@ -26,3 +26,8 @@ hf_token = "<API_KEY>" # Hugging face api token, required if you want to access 
 
 [atoma_proxy_service]
 service_bind_address = "0.0.0.0:8081"
+
+[atoma_auth]
+secret_key = "secret_key" # Secret key for the tokens generation
+access_token_lifetime = 1 # In minutes
+refresh_token_lifetime = 1 # In days

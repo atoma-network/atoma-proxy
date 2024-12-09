@@ -548,11 +548,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "atoma-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atoma-state",
+ "blake2",
+ "chrono",
+ "config",
+ "flume",
+ "hex",
+ "jsonwebtoken",
+ "rand",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "atoma-proxy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "atoma-auth",
  "atoma-proxy-service",
  "atoma-state",
  "atoma-sui",
@@ -590,12 +608,14 @@ name = "atoma-proxy-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atoma-auth",
  "atoma-state",
  "atoma-sui",
  "axum",
  "config",
  "serde",
  "tokio",
+ "tower-http 0.6.2",
  "tracing",
  "tracing-subscriber",
  "utoipa",
@@ -3679,6 +3699,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "9.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9ae10193d25051e74945f1ea2d0b42e03cc3b890f7e4cc5faa44997d808193f"
+dependencies = [
+ "base64 0.21.7",
+ "js-sys",
+ "pem",
+ "ring 0.17.8",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
 name = "k256"
 version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4364,7 +4399,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tower 0.4.13",
- "tower-http",
+ "tower-http 0.5.2",
  "tracing",
 ]
 
@@ -6559,6 +6594,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16e78919e05c9b8e123d435a4ad104b488ad1585631830e413830985c214086e"
 
 [[package]]
+name = "simple_asn1"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc4e5204eb1910f40f9cfa375f6f05b68c3abac4b6fd879c8ff5e7ae8a0a085"
+dependencies = [
+ "num-bigint 0.4.6",
+ "num-traits",
+ "thiserror 1.0.69",
+ "time",
+]
+
+[[package]]
 name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7982,6 +8029,20 @@ dependencies = [
  "tower-service",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "403fa3b783d4b626a8ad51d766ab03cb6d2dbfc46b1c5d4448395e6628dc9697"
+dependencies = [
+ "bitflags 2.6.0",
+ "bytes",
+ "http 1.2.0",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
