@@ -348,6 +348,11 @@ mod test {
         let mock_handle = tokio::task::spawn(async move {
             let event = receiver.recv_async().await.unwrap();
             match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
                 AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
                     user_id: event_user_id,
                     refresh_token_hash: event_refresh_token,
@@ -392,6 +397,11 @@ mod test {
                     assert_eq!(hash_password, event_password);
                     result_sender.send(Ok(Some(user_id))).unwrap();
                 }
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
                 _ => panic!("Unexpected event"),
             }
             for _ in 0..2 {
