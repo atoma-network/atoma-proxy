@@ -7,6 +7,22 @@ use tokio::sync::oneshot;
 
 use crate::state_manager::Result;
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct RevokeApiTokenRequest {
+    pub api_token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct AuthRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct AuthResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}
 /// Represents a task in the system
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Task {
@@ -283,6 +299,11 @@ pub enum AtomaAtomaStateManagerEvent {
         selected_node_id: i64,
         result_sender: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
+    RegisterUserWithPassword {
+        username: String,
+        password: String,
+        result_sender: oneshot::Sender<Result<Option<i64>>>,
+    },
     GetUserIdByUsernamePassword {
         username: String,
         password: String,
@@ -293,13 +314,13 @@ pub enum AtomaAtomaStateManagerEvent {
         refresh_token_hash: String,
         result_sender: oneshot::Sender<Result<bool>>,
     },
-    StoresRefreshToken {
+    StoreRefreshToken {
         user_id: i64,
-        refresh_token: String,
+        refresh_token_hash: String,
     },
     RevokeRefreshToken {
         user_id: i64,
-        refresh_token: String,
+        refresh_token_hash: String,
     },
     IsApiTokenValid {
         user_id: i64,

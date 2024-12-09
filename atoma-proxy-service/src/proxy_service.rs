@@ -1,15 +1,17 @@
+use atoma_auth::Auth;
 use atoma_state::{
-    types::{NodeSubscription, Stack, Task},
+    types::{AuthRequest, AuthResponse, NodeSubscription, RevokeApiTokenRequest, Stack, Task},
     AtomaState,
 };
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    routing::get,
+    http::{HeaderMap, Method, StatusCode},
+    routing::{get, post},
     Json, Router,
 };
 
 use tokio::{net::TcpListener, sync::watch::Receiver};
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, instrument};
 
 type Result<T> = std::result::Result<T, StatusCode>;
@@ -46,6 +48,9 @@ pub struct ProxyServiceState {
     /// Manages the persistent state of nodes, tasks, and other system components.
     /// Handles database operations and state synchronization.
     pub atoma_state: AtomaState,
+
+    /// The authentication manager for the proxy service.
+    pub auth: Auth,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
@@ -153,14 +158,135 @@ pub async fn run_proxy_service(
 ///     .await?;
 /// ```
 pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_headers(Any);
     Router::new()
         .route("/subscriptions", get(get_all_subscriptions))
         .route("/tasks", get(get_all_tasks))
         .route("/task/:id", get(get_nodes_for_tasks))
         .route("/stacks/:id", get(get_node_stacks))
         .route("/get_stacks", get(get_current_stacks))
+        .route("/register", post(register))
+        .route("/login", post(login))
+        .route("/api_tokens", get(get_all_api_tokens))
+        .route("/generate_api_token", get(generate_api_token))
+        .route("/revoke_api_token", post(revoke_api_token))
+        .layer(cors)
         .with_state(proxy_service_state)
         .route("/health", get(health))
+}
+
+async fn get_all_api_tokens(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<String>>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(Json(
+        proxy_service_state
+            .auth
+            .get_all_api_tokens(jwt)
+            .await
+            .map_err(|e| {
+                error!("Failed to get all api tokens: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
+}
+
+async fn generate_api_token(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<String>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(Json(
+        proxy_service_state
+            .auth
+            .generate_api_token(jwt)
+            .await
+            .map_err(|e| {
+                error!("Failed to generate api token: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
+}
+
+async fn revoke_api_token(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+    body: Json<RevokeApiTokenRequest>,
+) -> Result<Json<()>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    proxy_service_state
+        .auth
+        .revoke_api_token(jwt, &body.api_token)
+        .await
+        .map_err(|e| {
+            error!("Failed to revoke api token: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(()))
+}
+
+async fn register(
+    State(proxy_service_state): State<ProxyServiceState>,
+    body: Json<AuthRequest>,
+) -> Result<Json<AuthResponse>> {
+    let (refresh_token, access_token) = proxy_service_state
+        .auth
+        .register(&body.username, &body.password)
+        .await
+        .map_err(|e| {
+            error!("Failed to register user: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token,
+    }))
+}
+
+async fn login(
+    State(proxy_service_state): State<ProxyServiceState>,
+    body: Json<AuthRequest>,
+) -> Result<Json<AuthResponse>> {
+    let (refresh_token, access_token) = proxy_service_state
+        .auth
+        .check_user_password(&body.username, &body.password)
+        .await
+        .map_err(|e| {
+            error!("Failed to register user: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token,
+    }))
 }
 
 /// Retrieves all stacks that are not settled.

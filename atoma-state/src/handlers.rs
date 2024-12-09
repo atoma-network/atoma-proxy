@@ -858,6 +858,16 @@ pub(crate) async fn handle_state_manager_event(
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
+            username,
+            password,
+            result_sender,
+        } => {
+            let user_id = state_manager.state.register(&username, &password).await;
+            result_sender
+                .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
         AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
             user_id,
             refresh_token_hash,
@@ -871,22 +881,22 @@ pub(crate) async fn handle_state_manager_event(
                 .send(is_valid)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::StoresRefreshToken {
+        AtomaAtomaStateManagerEvent::StoreRefreshToken {
             user_id,
-            refresh_token,
+            refresh_token_hash,
         } => {
             state_manager
                 .state
-                .store_refresh_token(user_id, &refresh_token)
+                .store_refresh_token(user_id, &refresh_token_hash)
                 .await?;
         }
         AtomaAtomaStateManagerEvent::RevokeRefreshToken {
             user_id,
-            refresh_token,
+            refresh_token_hash,
         } => {
             state_manager
                 .state
-                .delete_refresh_token(user_id, &refresh_token)
+                .delete_refresh_token(user_id, &refresh_token_hash)
                 .await?;
         }
         AtomaAtomaStateManagerEvent::IsApiTokenValid {

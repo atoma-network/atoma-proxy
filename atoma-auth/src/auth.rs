@@ -27,6 +27,7 @@ pub struct Claims {
 }
 
 /// The Auth struct
+#[derive(Clone)]
 pub struct Auth {
     /// The secret key for JWT authentication.
     secret_key: String,
@@ -66,7 +67,7 @@ impl Auth {
     /// # Errors
     ///
     /// * If the token generation fails
-    fn generate_refresh_token(&self, user_id: i64) -> Result<String> {
+    async fn generate_refresh_token(&self, user_id: i64) -> Result<String> {
         let expiration = Utc::now() + Duration::days(self.refresh_token_lifetime as i64);
         let claims = Claims {
             user_id,
@@ -78,6 +79,11 @@ impl Auth {
             &claims,
             &EncodingKey::from_secret(self.secret_key.as_ref()),
         )?;
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::StoreRefreshToken {
+                user_id,
+                refresh_token_hash: self.hash_string(&token),
+            })?;
         Ok(token)
     }
 
@@ -180,11 +186,32 @@ impl Auth {
     /// # Returns
     ///
     /// * `String` - The hashed password
-    fn hash_string(&self, text: &str) -> String {
+    pub fn hash_string(&self, text: &str) -> String {
         let mut hasher = Blake2b::new();
         hasher.update(text);
         let hash_result: GenericArray<u8, U32> = hasher.finalize();
         hex::encode(hash_result)
+    }
+
+    /// Register user with username/password.
+    /// This method will register a new user with a username and password
+    /// The password is hashed and stored in the DB
+    /// The method will generate a new refresh and access token
+    pub async fn register(&self, username: &str, password: &str) -> Result<(String, String)> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
+                username: username.to_string(),
+                password: self.hash_string(password),
+                result_sender,
+            })?;
+        let user_id = result_receiver
+            .await??
+            .map(|user_id| user_id as u64)
+            .ok_or_else(|| anyhow::anyhow!("User already registred"))?;
+        let refresh_token = self.generate_refresh_token(user_id as i64).await?;
+        let access_token = self.generate_access_token(&refresh_token).await?;
+        Ok((refresh_token, access_token))
     }
 
     /// Check the user password
@@ -208,7 +235,7 @@ impl Auth {
             .await??
             .map(|user_id| user_id as u64)
             .ok_or_else(|| anyhow::anyhow!("User not found"))?;
-        let refresh_token = self.generate_refresh_token(user_id as i64)?;
+        let refresh_token = self.generate_refresh_token(user_id as i64).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
     }
@@ -248,6 +275,50 @@ impl Auth {
                 api_token: api_token.clone(),
             })?;
         Ok(api_token)
+    }
+
+    pub async fn revoke_api_token(&self, jwt: &str, api_token: &str) -> Result<()> {
+        let claims = self.validate_token(jwt, false)?;
+        if !self
+            .check_refresh_token_validity(
+                claims.user_id,
+                &claims
+                    .refresh_token_hash
+                    .expect("Access token should have refresh token hash"),
+            )
+            .await?
+        {
+            return Err(anyhow::anyhow!("Access token was revoked"));
+        }
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::RevokeApiToken {
+                user_id: claims.user_id,
+                api_token: api_token.to_string(),
+            })?;
+        Ok(())
+    }
+
+    pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<String>> {
+        let claims = self.validate_token(jwt, false)?;
+        if !self
+            .check_refresh_token_validity(
+                claims.user_id,
+                &claims
+                    .refresh_token_hash
+                    .expect("Access token should have refresh token hash"),
+            )
+            .await?
+        {
+            return Err(anyhow::anyhow!("Access token was revoked"));
+        }
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetApiTokensForUser {
+                user_id: claims.user_id,
+                result_sender,
+            })?;
+        Ok(result_receiver.await??)
     }
 }
 

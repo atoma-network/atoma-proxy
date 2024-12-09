@@ -131,8 +131,7 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
-    // TODO: Use this in the proxy service
-    let _auth = Auth::new(config.auth, state_manager_sender.clone());
+    let auth = Auth::new(config.auth, state_manager_sender.clone());
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
@@ -182,6 +181,7 @@ async fn main() -> Result<()> {
 
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
+        auth,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

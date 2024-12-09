@@ -616,6 +616,44 @@ impl AtomaState {
             .collect()
     }
 
+    /// Register user with password.
+    ///
+    /// This method inserts a new entry into the `users` table to register a new user. In case the user already exists, it returns None.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username of the user.
+    /// * `password_hash` - The password hash of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<i64>>`: A result containing either:
+    ///   - `Ok(Some(i64))`: The ID of the user if the user was successfully registered.
+    ///   - `Ok(None)`: If the user already exists.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn register_user(state_manager: &AtomaStateManager, username: &str, password_hash: &str) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.register(username, password_hash).await
+    /// }
+    /// ```
+    pub async fn register(&self, username: &str, password_hash: &str) -> Result<Option<i64>> {
+        let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING RETURNING id")
+        .bind(username)
+        .bind(password_hash)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(result.map(|record| record.get("id")))
+    }
+
     /// Checks if a node is subscribed to a specific task.
     ///
     /// This method queries the `node_subscriptions` table to determine if there's
@@ -2620,7 +2658,7 @@ impl AtomaState {
         username: &str,
         hashed_password: &str,
     ) -> Result<Option<i64>> {
-        let user = sqlx::query("SELECT id FROM users WHERE username = $1 AND password = $2")
+        let user = sqlx::query("SELECT id FROM users WHERE username = $1 AND password_hash = $2")
             .bind(username)
             .bind(hashed_password)
             .fetch_optional(&self.db)
@@ -3360,7 +3398,7 @@ pub(crate) mod queries {
             "CREATE TABLE IF NOT EXISTS users (
                 id BIGSERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
-                password_hash VARCHAR(50) NOT NULL
+                password_hash VARCHAR(64) NOT NULL
             )",
         )
         .execute(db)
