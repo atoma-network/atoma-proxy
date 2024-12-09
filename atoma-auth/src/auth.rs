@@ -343,7 +343,7 @@ mod test {
     async fn test_access_token_regenerate() {
         let (auth, receiver) = setup_test();
         let user_id = 123;
-        let refresh_token = auth.generate_refresh_token(user_id).unwrap();
+        let refresh_token = auth.generate_refresh_token(user_id).await.unwrap();
         let refresh_token_hash = auth.hash_string(&refresh_token);
         let mock_handle = tokio::task::spawn(async move {
             let event = receiver.recv_async().await.unwrap();
