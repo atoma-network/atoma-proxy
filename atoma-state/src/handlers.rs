@@ -970,14 +970,10 @@ pub(crate) async fn handle_state_manager_event(
                 .await?;
         }
         AtomaAtomaStateManagerEvent::IsApiTokenValid {
-            user_id,
             api_token,
             result_sender,
         } => {
-            let is_valid = state_manager
-                .state
-                .is_api_token_valid(user_id, &api_token)
-                .await;
+            let is_valid = state_manager.state.is_api_token_valid(&api_token).await;
             result_sender
                 .send(is_valid)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;

@@ -372,7 +372,6 @@ pub enum AtomaAtomaStateManagerEvent {
         refresh_token_hash: String,
     },
     IsApiTokenValid {
-        user_id: i64,
         api_token: String,
         result_sender: oneshot::Sender<Result<bool>>,
     },

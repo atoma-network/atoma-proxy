@@ -2910,14 +2910,11 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn is_api_token_valid(&self, user_id: i64, api_token: &str) -> Result<bool> {
-        let is_valid = sqlx::query(
-            "SELECT EXISTS(SELECT 1 FROM api_tokens WHERE user_id = $1 AND token = $2)",
-        )
-        .bind(user_id)
-        .bind(api_token)
-        .fetch_one(&self.db)
-        .await?;
+    pub async fn is_api_token_valid(&self, api_token: &str) -> Result<bool> {
+        let is_valid = sqlx::query("SELECT EXISTS(SELECT 1 FROM api_tokens WHERE token = $1)")
+            .bind(api_token)
+            .fetch_one(&self.db)
+            .await?;
 
         Ok(is_valid.get::<bool, _>(0))
     }

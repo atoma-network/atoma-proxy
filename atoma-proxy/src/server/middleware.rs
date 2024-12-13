@@ -489,7 +489,7 @@ pub(crate) mod auth {
         payload: &Value,
     ) -> Result<ProcessedRequest, StatusCode> {
         // Authenticate
-        if !check_auth(&state.password, &headers) {
+        if !check_auth(&state.state_manager_sender, &headers).await? {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
@@ -578,27 +578,52 @@ pub(crate) mod auth {
     ///
     /// Returns `true` if the authentication is successful, `false` otherwise.
     ///
-    /// # Examples
+    /// # Errors
     ///
-    /// ```rust
-    /// let mut headers = HeaderMap::new();
-    /// headers.insert("Authorization", "Bearer password".parse().unwrap());
-    /// let password = "password";
+    /// Returns a `StatusCode` error if there is an internal server error.
     ///
-    /// assert_eq!(check_auth(password, &headers), true);
-    /// assert_eq!(check_auth("wrong_password", &headers), false);
+    /// # Example
+    ///
+    /// ```no_run
+    /// let is_authenticated = check_auth(
+    ///     &state_manager_sender,
+    ///     &headers
+    /// ).await?;
+    /// println!("Token is : {}", is_authenticated?"Valid":"Invalid");
     /// ```
     #[instrument(level = "info", skip_all)]
-    fn check_auth(password: &str, headers: &HeaderMap) -> bool {
+    async fn check_auth(
+        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+        headers: &HeaderMap,
+    ) -> Result<bool, StatusCode> {
         if let Some(auth) = headers.get("Authorization") {
             if let Ok(auth) = auth.to_str() {
-                if auth == format!("Bearer {}", password) {
-                    return true;
+                if let Some(token) = auth.strip_prefix("Bearer ") {
+                    let (sender, receiver) = oneshot::channel();
+                    state_manager_sender
+                        .send(AtomaAtomaStateManagerEvent::IsApiTokenValid {
+                            api_token: token.to_string(),
+                            result_sender: sender,
+                        })
+                        .map_err(|err| {
+                            error!("Failed to send IsApiTokenValid event: {:?}", err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
+                    return receiver
+                        .await
+                        .map_err(|err| {
+                            error!("Failed to receive IsApiTokenValid result: {:?}", err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?
+                        .map_err(|err| {
+                            error!("Failed to get IsApiTokenValid result: {:?}", err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        });
                 }
             }
         }
         error!("Invalid or missing password for request");
-        false
+        Ok(false)
     }
 
     /// Metadata returned when selecting a node for processing a model request
