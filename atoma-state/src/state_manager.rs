@@ -2741,12 +2741,118 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    #[instrument(level = "trace", skip(self))]
     pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
         sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
             .bind(node_small_id)
             .bind(sui_address)
             .execute(&self.db)
             .await?;
+        Ok(())
+    }
+
+    /// Updates the public URL and timestamp for an existing node in the database.
+    ///
+    /// This method updates the `public_url` and `timestamp` fields in the `nodes` table
+    /// for a specific node identified by its `node_small_id`. The update will only occur
+    /// if the node already exists in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique small identifier of the node to update.
+    /// * `public_url` - The new public URL to be associated with the node.
+    /// * `timestamp` - The timestamp of when this update occurs.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The specified node does not exist in the database (`AtomaStateManagerError::NodeNotFound`).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_node(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_small_id = 1;
+    ///     let public_url = "https://example.com".to_string();
+    ///     let timestamp = 1234567890;
+    ///
+    ///     state_manager.register_node_public_url(
+    ///         node_small_id,
+    ///         public_url,
+    ///         timestamp
+    ///     ).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn register_node_public_url(
+        &self,
+        node_small_id: i64,
+        public_url: String,
+        timestamp: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE nodes SET public_url = $2, timestamp = $3 WHERE node_small_id = $1",
+        )
+        .bind(node_small_id)
+        .bind(public_url)
+        .bind(timestamp)
+        .execute(&self.db)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AtomaStateManagerError::NodeNotFound);
+        }
+
+        Ok(())
+    }
+
+    /// Verifies the ownership of a node's small ID by checking the Sui address.
+    ///
+    /// This method fetches the node's small ID from the database and checks if the provided Sui address
+    /// matches the address stored in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The small ID of the node to verify.
+    /// * `sui_address` - The Sui address to verify against the node's small ID.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails to execute.
+    #[tracing::instrument(
+        level = "trace",
+        skip_all,
+        fields(node_small_id = %node_small_id, sui_address = %sui_address)
+    )]
+    pub async fn verify_node_small_id_ownership(
+        &self,
+        node_small_id: i64,
+        sui_address: String,
+    ) -> Result<()> {
+        let exists = sqlx::query(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE node_small_id = $1 AND node_address = $2)",
+        )
+        .bind(node_small_id as i64)
+        .bind(sui_address)
+        .fetch_one(&self.db)
+        .await?
+        .get::<bool, _>(0);
+
+        if !exists {
+            return Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed);
+        }
+
         Ok(())
     }
 
@@ -3343,4 +3449,8 @@ pub enum AtomaStateManagerError {
     InvalidTimestamp,
     #[error("Failed to run migrations")]
     FailedToRunMigrations(#[from] sqlx::migrate::MigrateError),
+    #[error("Node not found")]
+    NodeNotFound,
+    #[error("Node small id ownership verification failed")]
+    NodeSmallIdOwnershipVerificationFailed,
 }

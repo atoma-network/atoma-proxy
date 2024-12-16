@@ -118,6 +118,30 @@ pub async fn handle_atoma_event(
             info!("Text2Text prompt event: {:?}", event);
             Ok(())
         }
+        AtomaEvent::NodePublicUrlRegistrationEvent {
+            public_url,
+            node_small_id,
+            timestamp,
+        } => {
+            handle_node_public_url_registration_event(
+                state_manager,
+                public_url,
+                node_small_id,
+                timestamp,
+            )
+            .await
+        }
+        AtomaEvent::VerifyNodeSmallIdOwnership {
+            node_small_id,
+            sui_address,
+        } => {
+            handle_node_small_id_ownership_verification_event(
+                state_manager,
+                node_small_id,
+                sui_address,
+            )
+            .await
+        }
     }
 }
 
@@ -1108,6 +1132,148 @@ pub(crate) async fn handle_node_key_rotation_event(
             new_public_key,
             tee_remote_attestation_bytes,
         )
+        .await?;
+    Ok(())
+}
+
+/// Handles a node's public URL registration event by updating the node's URL in the state database.
+///
+/// This function processes events when nodes register or update their public URLs. It stores the URL
+/// along with the registration timestamp in the state database, allowing other components to discover
+/// and communicate with nodes in the network.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+/// * `public_url` - The public URL where the node can be reached
+/// * `node_small_id` - The unique identifier of the node registering its URL
+/// * `timestamp` - The Unix timestamp when the registration occurred
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the URL registration was successful, or an error if the operation failed
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The database operation to register the node's public URL fails
+/// * The state manager encounters any internal errors during the registration process
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+///
+/// async fn register_node_url(
+///     state_manager: &AtomaStateManager,
+///     url: String,
+///     node_id: i64,
+///     timestamp: i64
+/// ) {
+///     if let Err(e) = handle_node_public_url_registration_event(
+///         state_manager,
+///         url,
+///         node_id,
+///         timestamp
+///     ).await {
+///         eprintln!("Failed to register node URL: {}", e);
+///     }
+/// }
+/// ```
+///
+/// # Notes
+///
+/// The function uses the `tracing` crate to log information about the URL registration event,
+/// which can be useful for debugging and monitoring the system's behavior.
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_node_public_url_registration_event(
+    state_manager: &AtomaStateManager,
+    public_url: String,
+    node_small_id: i64,
+    timestamp: i64,
+) -> Result<()> {
+    info!(
+        target = "atoma-state-handlers",
+        event = "handle-node-public-url-registration-event",
+        public_url = public_url,
+        node_small_id = node_small_id,
+        timestamp = timestamp,
+        "Node public url registration event"
+    );
+    state_manager
+        .state
+        .register_node_public_url(node_small_id, public_url, timestamp)
+        .await?;
+    Ok(())
+}
+
+/// Handles a node small ID ownership verification event by updating the node's ownership status in the database.
+///
+/// This function processes events that verify the ownership of a node's small ID by associating it with a
+/// Sui blockchain address. This verification is crucial for ensuring that only authorized nodes can participate
+/// in the network and that node identifiers cannot be spoofed.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+/// * `node_small_id` - The small ID of the node being verified (as an i64)
+/// * `sui_address` - The Sui blockchain address claiming ownership of the node (as a String)
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the verification was successful, or an error if the operation failed
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The database operation to verify the node's ownership fails
+/// * The state manager encounters any internal errors during the verification process
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+///
+/// async fn verify_node_ownership(
+///     state_manager: &AtomaStateManager,
+///     node_id: i64,
+///     address: String,
+/// ) {
+///     if let Err(e) = handle_node_small_id_ownership_verification_event(
+///         state_manager,
+///         node_id,
+///         address,
+///     ).await {
+///         eprintln!("Failed to verify node ownership: {}", e);
+///     }
+/// }
+/// ```
+///
+/// # Notes
+///
+/// The function uses the `tracing` crate to log information about the verification event,
+/// which can be useful for debugging and monitoring the system's behavior. The logging
+/// includes the node's small ID and the Sui address claiming ownership.
+///
+/// This verification is an important security measure that helps maintain the integrity
+/// of the node network by ensuring that node identifiers are properly associated with
+/// blockchain addresses.
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_node_small_id_ownership_verification_event(
+    state_manager: &AtomaStateManager,
+    node_small_id: i64,
+    sui_address: String,
+) -> Result<()> {
+    info!(
+        target = "atoma-state-handlers",
+        event = "handle-node-small-id-ownership-verification-event",
+        node_small_id = node_small_id,
+        sui_address = sui_address,
+        "Node small id ownership verification event"
+    );
+    state_manager
+        .state
+        .verify_node_small_id_ownership(node_small_id, sui_address)
         .await?;
     Ok(())
 }
