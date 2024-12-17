@@ -1702,7 +1702,7 @@ impl AtomaState {
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         // Also update the stack to set in_settle_period to true
         sqlx::query(
-            "INSERT into stats_stacks (timestamp,settled_num_compute_units) SET ($1,$2)
+            "INSERT into stats_stacks (timestamp,settled_num_compute_units) VALUES ($1,$2)
              ON CONFLICT (timestamp) 
              DO UPDATE SET 
                 settled_num_compute_units = stats_stacks.settled_num_compute_units + EXCLUDED.settled_num_compute_units"
@@ -3352,7 +3352,7 @@ impl AtomaState {
             .and_then(|t| t.with_nanosecond(0))
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
-            "INSERT into stats_stacks (timestamp,num_compute_units) SET ($1,$2)
+            "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
                  ON CONFLICT (timestamp) 
                  DO UPDATE SET 
                     num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",

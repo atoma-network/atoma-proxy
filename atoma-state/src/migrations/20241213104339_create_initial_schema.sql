@@ -177,8 +177,8 @@ CREATE INDEX IF NOT EXISTS idx_stats_latency ON stats_latency (timestamp);
 -- Create stats_stacks table
 CREATE TABLE IF NOT EXISTS stats_stacks (
     timestamp TIMESTAMPTZ PRIMARY KEY NOT NULL,
-    num_compute_units BIGINT NOT NULL,
-    settled_num_compute_units BIGINT NOT NULL,
+    num_compute_units BIGINT NOT NULL DEFAULT 0,
+    settled_num_compute_units BIGINT NOT NULL DEFAULT 0,
     CHECK (date_part('minute', timestamp) = 0 AND date_part('second', timestamp) = 0 AND date_part('milliseconds', timestamp) = 0)
 );
 
