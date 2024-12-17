@@ -668,7 +668,7 @@ impl AtomaState {
             .checked_sub_signed(chrono::Duration::hours(last_hours as i64))
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         let stats_stacks =
-            sqlx::query("SELECT * FROM stats_stack WHERE timestamp >= $1 ORDER BY timestamp ASC")
+            sqlx::query("SELECT * FROM stats_stacks WHERE timestamp >= $1 ORDER BY timestamp ASC")
                 .bind(start_timestamp)
                 .fetch_all(&self.db)
                 .await?;
