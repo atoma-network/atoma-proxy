@@ -468,6 +468,62 @@ paths:
           description: Internal server error
       security:
       - bearerAuth: []
+  /v1/encryption/public-key:
+    get:
+      tags:
+      - Node Public Key Selection
+      summary: Handles requests to select a node's public key for confidential compute operations.
+      description: |-
+        This endpoint attempts to find a suitable node and retrieve its public key for encryption
+        through a two-step process:
+
+        1. First, it tries to select an existing node with a public key directly.
+        2. If no node is immediately available, it falls back to finding the cheapest compatible node
+           and acquiring a new stack entry for it.
+
+        # Parameters
+        - `state`: The shared proxy state containing connections to the state manager and Sui
+        - `metadata`: Request metadata from middleware
+        - `request`: JSON payload containing the requested model name
+
+        # Returns
+        Returns a `Result` containing either:
+        - `Json<SelectNodePublicKeyResponse>` with:
+          - The selected node's public key (base64 encoded)
+          - The node's small ID
+          - Optional stack entry digest (if a new stack entry was acquired)
+        - `StatusCode` error if:
+          - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
+          - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
+
+        # Example Response
+        ```json
+        {
+            "public_key": [base64_encoded_bytes],
+            "node_small_id": 123,
+            "stack_entry_digest": "transaction_digest_string"
+        }
+        ```
+
+        This endpoint is specifically designed for confidential compute scenarios where
+        requests need to be encrypted before being processed by nodes.
+      operationId: select_node_public_key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectNodePublicKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: Node DH public key requested successfully
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to request node DH public key
+        '503':
+          description: No node found for model with confidential compute enabled for requested model
 components:
   schemas:
     ChatCompletionChoice:
@@ -900,6 +956,17 @@ components:
           type: string
         url:
           type: string
+    SelectNodePublicKeyRequest:
+      type: object
+      description: |-
+        The request body for selecting a node's public key for encryption
+        from a client.
+      required:
+      - model_name
+      properties:
+        model_name:
+          type: string
+          description: The request model name
   securitySchemes:
     bearerAuth:
       type: http
@@ -923,6 +990,8 @@ tags:
   description: OpenAI's API images v1 endpoint
 - name: Confidential Images
   description: Atoma's API confidential images v1 endpoint
+- name: Node Public Key Selection
+  description: Node public key selection
 x-speakeasy-name-override:
 - operationId: chat_completions_create
   methodNameOverride: create

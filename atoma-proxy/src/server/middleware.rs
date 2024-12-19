@@ -725,6 +725,7 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
                     model: model.to_string(),
+                    is_confidential,
                     result_sender,
                 })
                 .map_err(|err| {

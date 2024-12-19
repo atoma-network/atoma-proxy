@@ -16,9 +16,13 @@ use crate::server::handlers::image_generations::{
     ConfidentialImageGenerationsOpenApi, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use crate::server::handlers::{
-    chat_completions::ChatCompletionsOpenApi, chat_completions::CHAT_COMPLETIONS_PATH,
-    embeddings::EmbeddingsOpenApi, embeddings::EMBEDDINGS_PATH,
-    image_generations::ImageGenerationsOpenApi, image_generations::IMAGE_GENERATIONS_PATH,
+    chat_completions::ChatCompletionsOpenApi,
+    chat_completions::CHAT_COMPLETIONS_PATH,
+    embeddings::EmbeddingsOpenApi,
+    embeddings::EMBEDDINGS_PATH,
+    image_generations::ImageGenerationsOpenApi,
+    image_generations::IMAGE_GENERATIONS_PATH,
+    select_node_public_key::{SelectNodePublicKeyOpenApi, ENCRYPTION_PUBLIC_KEY_ENDPOINT},
 };
 use crate::server::http_server::{
     HealthOpenApi, ModelsOpenApi, NodePublicAddressRegistrationOpenApi, HEALTH_PATH, MODELS_PATH,
@@ -39,6 +43,7 @@ pub fn openapi_routes() -> Router {
             (path = CONFIDENTIAL_EMBEDDINGS_PATH, api = ConfidentialEmbeddingsOpenApi, tags = ["Confidential Embeddings"]),
             (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = CONFIDENTIAL_IMAGE_GENERATIONS_PATH, api = ConfidentialImageGenerationsOpenApi, tags = ["Confidential Images"]),
+            (path = ENCRYPTION_PUBLIC_KEY_ENDPOINT, api = SelectNodePublicKeyOpenApi, tags = ["Node Public Key Selection"])
         ),
         tags(
             (name = "Health", description = "Health check"),
@@ -49,7 +54,8 @@ pub fn openapi_routes() -> Router {
             (name = "Embeddings", description = "OpenAI's API embeddings v1 endpoint"),
             (name = "Confidential Embeddings", description = "Atoma's API confidential embeddings v1 endpoint"),
             (name = "Images", description = "OpenAI's API images v1 endpoint"),
-            (name = "Confidential Images", description = "Atoma's API confidential images v1 endpoint")
+            (name = "Confidential Images", description = "Atoma's API confidential images v1 endpoint"),
+            (name = "Node Public Key Selection", description = "Node public key selection")
         ),
         servers(
             (url = "http://localhost:8080"),

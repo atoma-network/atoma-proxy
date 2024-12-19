@@ -17,3 +17,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 utoipa = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+serial_test = { workspace = true }
+uuid = { workspace = true }

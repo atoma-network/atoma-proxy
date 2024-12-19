@@ -140,6 +140,8 @@ pub struct CheapestNode {
     pub price_per_compute_unit: i64,
     /// Maximum number of compute units for the task that is offered by the cheapest node
     pub max_num_compute_units: i64,
+    /// Unique small integer identifier for the node
+    pub node_small_id: i64,
 }
 
 /// Response for getting the node distribution
@@ -300,6 +302,16 @@ pub struct NodeSubscription {
     pub valid: bool,
 }
 
+/// Represents a node's Diffie-Hellman public key so that a client
+/// can encrypt a message and the selected node can decrypt it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct NodePublicKey {
+    /// Unique small integer identifier for the node
+    pub node_small_id: i64,
+    /// Public key of the node
+    pub public_key: Vec<u8>,
+}
+
 pub enum AtomaAtomaStateManagerEvent {
     /// Represents an update to the number of tokens in a stack
     UpdateStackNumTokens {
@@ -354,9 +366,28 @@ pub enum AtomaAtomaStateManagerEvent {
     GetCheapestNodeForModel {
         /// The name/identifier of the model to query the cheapest node for
         model: String,
+        /// Indicates whether the stacks are associated with confidential compute or not
+        is_confidential: bool,
         /// Channel to send back the cheapest node
         /// Returns Ok(Option<CheapestNode>) with the cheapest node or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<CheapestNode>>>,
+    },
+    /// Selects a node's public key for encryption
+    SelectNodePublicKeyForEncryption {
+        /// The name/identifier of the model to query the cheapest node for
+        model: String,
+        /// The maxinum number of tokens to be processed
+        max_num_tokens: i64,
+        /// Channel to send back the public key
+        /// Returns Ok(Option<NodePublicKey>) with the public key or an error if the query fails
+        result_sender: oneshot::Sender<Option<NodePublicKey>>,
+    },
+    SelectNodePublicKeyForEncryptionForNode {
+        /// Unique small integer identifier for the node
+        node_small_id: i64,
+        /// Channel to send back the public key
+        /// Returns Ok(Option<NodePublicKey>) with the public key or an error if the query fails
+        result_sender: oneshot::Sender<Option<NodePublicKey>>,
     },
     /// Upserts a node's public address
     UpsertNodePublicAddress {

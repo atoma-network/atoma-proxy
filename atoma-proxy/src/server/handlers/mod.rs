@@ -10,6 +10,7 @@ pub mod chat_completions;
 pub mod embeddings;
 pub mod image_generations;
 pub mod request_model;
+pub mod select_node_public_key;
 
 /// Extracts encryption metadata from a JSON response containing encrypted data.
 ///

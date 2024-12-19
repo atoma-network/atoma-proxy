@@ -821,6 +821,7 @@ pub(crate) async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
             model,
+            is_confidential,
             result_sender,
         } => {
             trace!(
@@ -831,8 +832,33 @@ pub(crate) async fn handle_state_manager_event(
             );
             let node = state_manager
                 .state
-                .get_cheapest_node_for_model(&model)
+                .get_cheapest_node_for_model(&model, is_confidential)
                 .await;
+            result_sender
+                .send(node)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
+            model,
+            max_num_tokens,
+            result_sender,
+        } => {
+            let node = state_manager
+                .state
+                .select_node_public_key_for_encryption(&model, max_num_tokens)
+                .await?;
+            result_sender
+                .send(node)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryptionForNode {
+            node_small_id,
+            result_sender,
+        } => {
+            let node = state_manager
+                .state
+                .select_node_public_key_for_encryption_for_node(node_small_id)
+                .await?;
             result_sender
                 .send(node)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
