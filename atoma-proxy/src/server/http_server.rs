@@ -48,6 +48,9 @@ use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_E
 use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
+use super::handlers::select_node_public_key::{
+    select_node_public_key, ENCRYPTION_PUBLIC_KEY_ENDPOINT,
+};
 use super::middleware::{authenticate_middleware, confidential_compute_middleware};
 use super::AtomaServiceConfig;
 
@@ -494,6 +497,7 @@ pub fn create_router(state: ProxyState) -> Router {
                     confidential_compute_middleware,
                 )),
         )
+        .route(ENCRYPTION_PUBLIC_KEY_ENDPOINT, get(select_node_public_key))
         .with_state(state.clone());
 
     Router::new()
