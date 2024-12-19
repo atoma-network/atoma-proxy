@@ -165,6 +165,37 @@ paths:
           description: Failed to get all api tokens
       security:
       - bearerAuth: []
+  /update_sui_address:
+    post:
+      tags:
+      - Auth
+      summary: Updates the sui address for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+        * `body` - The request body containing the signature of the proof of address
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: update_sui_address
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofRequest'
+        required: true
+      responses:
+        '200':
+          description: Proof of address request
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to proof of address request
+      security:
+      - bearerAuth: []
   /stacks:
     get:
       tags:
@@ -409,6 +440,13 @@ components:
         username:
           type: string
           description: The user's unique identifier
+    ProofRequest:
+      type: object
+      required:
+      - signature
+      properties:
+        signature:
+          type: string
     RevokeApiTokenRequest:
       type: object
       description: Request payload for revoking an API token

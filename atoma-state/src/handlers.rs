@@ -1077,6 +1077,15 @@ pub(crate) async fn handle_state_manager_event(
                 .send(api_tokens)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::UpdateSuiAddress {
+            user_id,
+            sui_address,
+        } => {
+            state_manager
+                .state
+                .update_sui_address(user_id, sui_address)
+                .await?;
+        }
     }
     Ok(())
 }

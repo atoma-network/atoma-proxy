@@ -1,4 +1,4 @@
-use atoma_state::types::{AuthRequest, AuthResponse, RevokeApiTokenRequest};
+use atoma_state::types::{AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -26,6 +26,9 @@ pub(crate) const REVOKE_API_TOKEN_PATH: &str = "/revoke_api_token";
 /// The path for the api_tokens endpoint.
 pub(crate) const GET_ALL_API_TOKENS_PATH: &str = "/api_tokens";
 
+/// The path for the update_sui_address endpoint.
+pub(crate) const UPDATE_SUI_ADDRESS_PATH: &str = "/update_sui_address";
+
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// OpenAPI documentation for the get_all_api_tokens endpoint.
@@ -48,6 +51,7 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(REVOKE_API_TOKEN_PATH, post(revoke_api_token))
         .route(REGISTER_PATH, post(register))
         .route(LOGIN_PATH, post(login))
+        .route(UPDATE_SUI_ADDRESS_PATH, post(update_sui_address))
 }
 
 /// Retrieves all API tokens for the user.
@@ -302,4 +306,62 @@ pub(crate) async fn login(
         access_token,
         refresh_token,
     }))
+}
+
+/// OpenAPI documentation for the update_sui_address endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the update_sui_address
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(update_sui_address))]
+pub(crate) struct UpdateSuiAddress;
+
+/// Updates the sui address for the user.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+/// * `body` - The request body containing the signature of the proof of address
+///
+/// # Returns
+///
+/// * `Result<Json<()>>` - A JSON response indicating the success of the operation
+#[utoipa::path(
+    post,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Proof of address request"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to proof of address request")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub(crate) async fn update_sui_address(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+    body: Json<ProofRequest>,
+) -> Result<Json<()>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    proxy_service_state
+        .auth
+        .update_sui_address(jwt, &body.signature)
+        .await
+        .map_err(|e| {
+            error!("Failed to update sui address request: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(()))
 }

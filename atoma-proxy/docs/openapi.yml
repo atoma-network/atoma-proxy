@@ -471,7 +471,7 @@ paths:
   /v1/encryption/public-key:
     get:
       tags:
-      - Node Public Key Selection
+      - Confidential Node Public Key Selection
       summary: Handles requests to select a node's public key for confidential compute operations.
       description: |-
         This endpoint attempts to find a suitable node and retrieve its public key for encryption

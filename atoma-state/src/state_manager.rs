@@ -3655,6 +3655,43 @@ impl AtomaState {
         .await?;
         Ok(())
     }
+
+    /// Updates the sui address for the user.
+    ///
+    /// This method updates the `sui_address` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `sui_address` - The SUI address to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn store_sui_address(state_manager: &AtomaStateManager, user_id: i64, sui_address: String) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.store_sui_address(user_id, sui_address).await
+    /// }
+    /// ```
+    pub async fn update_sui_address(&self, user_id: i64, sui_address: String) -> Result<()> {
+        sqlx::query("UPDATE users SET sui_address = $1 WHERE id = $2")
+            .bind(sui_address)
+            .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]

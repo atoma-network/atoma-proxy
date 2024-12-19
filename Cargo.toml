@@ -17,6 +17,7 @@ atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package =
 atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
 axum = "0.7.7"
 base64 = "0.22.1"
+bcs = "0.1.6"
 blake2 = "0.10.6"
 chrono = "0.4.38"
 clap = "4.5.20"
@@ -32,6 +33,7 @@ serde = "1.0.214"
 serde_json = "1.0.132"
 serde_yaml = "0.9.34"
 serial_test = "3.1.1"
+shared-crypto = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.39.1" }
 sqlx = { version = "0.8.2", features = [
   "postgres",
   "runtime-tokio-native-tls",
@@ -51,3 +53,5 @@ utoipa-swagger-ui = "8.0.3"
 uuid = "1.11.0"
 x25519-dalek = "2.0.1"
 zeroize = "1.8.1"
+fastcrypto = "0.1.8"
+tower-http = "0.6.2"

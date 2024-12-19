@@ -38,6 +38,14 @@ pub struct AuthResponse {
     pub refresh_token: String,
 }
 
+/// Request payload for updating the sui address for the user.
+///
+/// Contains the signature of the user to prove ownership of the sui address.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ProofRequest {
+    pub signature: String,
+}
+
 /// Represents a computed units processed response
 /// This struct is used to represent the response for the get_compute_units_processed endpoint.
 /// The timestamp of the computed units processed measurement. We measure the computed units processed on hourly basis. We do these measurements for each model.
@@ -547,5 +555,12 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Channel to send back the list of API tokens
         /// Returns Ok(Vec<String>) with the list of API tokens or an error if the query fails
         result_sender: oneshot::Sender<Result<Vec<String>>>,
+    },
+    /// Stores the sui_address with proven ownership
+    UpdateSuiAddress {
+        /// The user ID
+        user_id: i64,
+        /// Proven Sui address
+        sui_address: String,
     },
 }

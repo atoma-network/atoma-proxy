@@ -1,14 +1,28 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
+use atoma_utils::hashing::blake2b_hash;
 use blake2::{
     digest::{consts::U32, generic_array::GenericArray},
     Blake2b, Digest,
 };
 use chrono::{Duration, Utc};
+use fastcrypto::{
+    ed25519::{Ed25519PublicKey, Ed25519Signature},
+    secp256k1::{Secp256k1PublicKey, Secp256k1Signature},
+    secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
+    traits::{ToFromBytes, VerifyingKey},
+};
 use flume::Sender;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
+use sui_sdk::types::{
+    base_types::SuiAddress,
+    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
+};
 use tokio::sync::oneshot;
 use tracing::{error, instrument};
 
@@ -354,6 +368,69 @@ impl Auth {
                 result_sender,
             })?;
         Ok(result_receiver.await??)
+    }
+
+    /// Stores the wallet address for the user. The user needs to send a signed message to prove ownership of the wallet.
+    /// The wallet address is stored in the signature.
+    ///
+    /// # Arguments
+    /// * `jwt` - The access token to be used to store the wallet address
+    /// * `signature` - The signature of the message
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - If the wallet address was stored
+    #[instrument(level = "info", skip(self))]
+    pub async fn update_sui_address(&self, jwt: &str, signature: &str) -> Result<()> {
+        let claims = self.validate_token(jwt, false)?;
+        let signature = Signature::from_str(signature).map_err(|e| {
+            error!("Failed to parse signature: {}", e);
+            anyhow::anyhow!("Failed to parse signature {e}")
+        })?;
+        let signature_bytes = signature.signature_bytes();
+        let public_key_bytes = signature.public_key_bytes();
+        let signature_scheme = signature.scheme();
+        let intent_msg = IntentMessage::new(
+            Intent::personal_message(),
+            PersonalMessage {
+                message: "Sign this message to prove you are the owner of this wallet"
+                    .as_bytes()
+                    .to_vec(),
+            },
+        );
+
+        let intent_bcs = bcs::to_bytes(&intent_msg)?;
+        let message_hash = blake2b_hash(&intent_bcs);
+
+        match signature_scheme {
+            SignatureScheme::ED25519 => {
+                let public_key = Ed25519PublicKey::from_bytes(public_key_bytes)?;
+                let signature = Ed25519Signature::from_bytes(signature_bytes)?;
+                public_key.verify(message_hash.as_slice(), &signature)?
+            }
+            SignatureScheme::Secp256k1 => {
+                let public_key = Secp256k1PublicKey::from_bytes(public_key_bytes)?;
+                let signature = Secp256k1Signature::from_bytes(signature_bytes)?;
+                public_key.verify(message_hash.as_slice(), &signature)?;
+            }
+            SignatureScheme::Secp256r1 => {
+                let public_key = Secp256r1PublicKey::from_bytes(public_key_bytes)?;
+                let signature = Secp256r1Signature::from_bytes(signature_bytes)?;
+                public_key.verify(message_hash.as_slice(), &signature)?;
+            }
+            _ => {
+                error!("Currently unsupported signature scheme");
+                return Err(anyhow::anyhow!("Currently unsupported signature scheme"));
+            }
+        }
+        let public_key = PublicKey::try_from_bytes(signature_scheme, public_key_bytes).unwrap();
+        let sui_address = SuiAddress::from(&public_key);
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::UpdateSuiAddress {
+                user_id: claims.user_id,
+                sui_address: sui_address.to_string(),
+            })?;
+        Ok(())
     }
 }
 
