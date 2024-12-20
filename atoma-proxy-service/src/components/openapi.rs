@@ -8,10 +8,10 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     handlers::{
         auth::{
-            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, LoginOpenApi, RegisterOpenApi,
-            RevokeApiTokenOpenApi, UpdateSuiAddress, GENERATE_API_TOKEN_PATH,
-            GET_ALL_API_TOKENS_PATH, LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH,
-            UPDATE_SUI_ADDRESS_PATH,
+            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetSuiAddress, LoginOpenApi,
+            RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress, UsdcPayment,
+            GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_SUI_ADDRESS_PATH, LOGIN_PATH,
+            REGISTER_PATH, REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{GetCurrentStacksOpenApi, GET_STACKS_PATH},
         stats::{
@@ -37,6 +37,8 @@ pub fn openapi_router() -> Router {
             (path = LOGIN_PATH, api = LoginOpenApi, tags = ["Auth"]),
             (path = GET_ALL_API_TOKENS_PATH, api = GetAllApiTokensOpenApi, tags = ["Auth"]),
             (path = UPDATE_SUI_ADDRESS_PATH, api = UpdateSuiAddress, tags = ["Auth"]),
+            (path = USDC_PAYMENT_PATH, api = UsdcPayment, tags = ["Auth"]),
+            (path = GET_SUI_ADDRESS_PATH, api = GetSuiAddress, tags = ["Auth"]),
             (path = GET_STACKS_PATH, api = GetCurrentStacksOpenApi, tags = ["Stacks"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),

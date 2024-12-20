@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants::SIGNATURE;
 use atoma_utils::verify_signature;
@@ -39,7 +40,6 @@ use crate::server::{
     },
     Result,
 };
-use crate::sui::Sui;
 
 use super::components;
 use super::handlers::chat_completions::{
@@ -535,7 +535,7 @@ pub fn create_router(state: ProxyState) -> Router {
 pub async fn start_server(
     config: AtomaServiceConfig,
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
-    sui: Sui,
+    sui: Arc<RwLock<Sui>>,
     tokenizers: Vec<Arc<Tokenizer>>,
     mut shutdown_receiver: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
@@ -543,7 +543,7 @@ pub async fn start_server(
 
     let proxy_state = ProxyState {
         state_manager_sender,
-        sui: Arc::new(RwLock::new(sui)),
+        sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
     };

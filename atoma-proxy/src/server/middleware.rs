@@ -456,6 +456,8 @@ pub async fn confidential_compute_middleware(
 pub(crate) mod auth {
     use std::sync::Arc;
 
+    use atoma_auth::StackEntryResponse;
+    use atoma_auth::Sui;
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
     use flume::Sender;
@@ -797,6 +799,30 @@ pub(crate) mod auth {
                     });
                 }
             };
+            // This will fail if the balance is not enough.
+            let (result_sender, result_receiver) = oneshot::channel();
+            state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::WithdrawBalance {
+                    user_id,
+                    amount: (node.price_per_one_million_compute_units * node.max_num_compute_units)
+                        as i64,
+                    result_sender,
+                })
+                .map_err(|err| {
+                    error!("Failed to update balance: {:?}", err);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+            result_receiver
+                .await
+                .map_err(|err| {
+                    error!("Failed to receive WithdrawBalance result: {:?}", err);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?
+                .map_err(|err| {
+                    error!("Failed to get WithdrawBalance result {:?}", err);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
             let StackEntryResponse {
                 transaction_digest: tx_digest,
                 stack_created_event: event,
