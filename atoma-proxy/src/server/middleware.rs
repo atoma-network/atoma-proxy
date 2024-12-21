@@ -759,7 +759,7 @@ pub(crate) mod auth {
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
                     node.max_num_compute_units as u64,
-                    node.price_per_compute_unit as u64,
+                    node.price_per_one_million_compute_units as u64,
                 )
                 .await
                 .map_err(|err| {

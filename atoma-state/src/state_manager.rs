@@ -341,9 +341,9 @@ impl AtomaState {
             .collect()
     }
 
-    /// Gets the node with the cheapest price per compute unit for a given model.
+    /// Gets the node with the cheapest price per one million compute units for a given model.
     ///
-    /// This method queries the database to find the node subscription with the lowest price per compute unit
+    /// This method queries the database to find the node subscription with the lowest price per one million compute units
     /// that matches the specified model and confidentiality requirements. It joins the tasks, node_subscriptions,
     /// and (optionally) node_public_keys tables to find valid subscriptions.
     ///
@@ -361,7 +361,7 @@ impl AtomaState {
     ///
     /// The returned `CheapestNode` contains:
     /// - The task's small ID
-    /// - The price per compute unit
+    /// - The price per one million compute units
     /// - The maximum number of compute units supported
     ///
     /// # Security
@@ -402,7 +402,7 @@ impl AtomaState {
                 ORDER BY key_rotation_counter DESC 
                 LIMIT 1
             )
-            SELECT tasks.task_small_id, node_subscriptions.price_per_compute_unit, 
+            SELECT tasks.task_small_id, node_subscriptions.price_per_one_million_compute_units, 
                 node_subscriptions.max_num_compute_units, node_subscriptions.node_small_id
             FROM tasks
             INNER JOIN node_subscriptions ON tasks.task_small_id = node_subscriptions.task_small_id"#,
@@ -431,7 +431,7 @@ impl AtomaState {
 
         query.push_str(
             r#"
-            ORDER BY node_subscriptions.price_per_compute_unit 
+            ORDER BY node_subscriptions.price_per_one_million_compute_units 
             LIMIT 1"#,
         );
 
@@ -513,7 +513,7 @@ impl AtomaState {
                 AND tasks.security_level = 2
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND node_public_keys.is_valid = true
-                ORDER BY stacks.price ASC
+                ORDER BY stacks.price_per_one_million_compute_units ASC
                 LIMIT 1
             "#,
         )
@@ -1026,17 +1026,17 @@ impl AtomaState {
         Ok(count > 0)
     }
 
-    /// Subscribes a node to a task with a specified price per compute unit.
+    /// Subscribes a node to a task with a specified price per one million compute units.
     ///
     /// This method inserts a new entry into the `node_subscriptions` table to
     /// establish a subscription relationship between a node and a task, along
-    /// with the specified price per compute unit for the subscription.
+    /// with the specified price per one million compute units for the subscription.
     ///
     /// # Arguments
     ///
     /// * `node_small_id` - The unique identifier of the node to be subscribed.
     /// * `task_small_id` - The unique identifier of the task to which the node is subscribing.
-    /// * `price_per_compute_unit` - The price per compute unit for the subscription.
+    /// * `price_per_one_million_compute_units` - The price per compute unit for the subscription.
     ///
     /// # Returns
     ///
@@ -1053,8 +1053,8 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn subscribe_node_to_task(state_manager: &AtomaStateManager, node_small_id: i64, task_small_id: i64, price_per_compute_unit: i64) -> Result<(), AtomaStateManagerError> {
-    ///     state_manager.subscribe_node_to_task(node_small_id, task_small_id, price_per_compute_unit).await
+    /// async fn subscribe_node_to_task(state_manager: &AtomaStateManager, node_small_id: i64, task_small_id: i64, price_per_one_million_compute_units: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.subscribe_node_to_task(node_small_id, task_small_id, price_per_one_million_compute_units).await
     /// }
     /// ```
     #[instrument(
@@ -1063,7 +1063,7 @@ impl AtomaState {
         fields(
             %node_small_id,
             %task_small_id,
-            %price_per_compute_unit,
+            %price_per_one_million_compute_units,
             %max_num_compute_units
         )
     )]
@@ -1071,17 +1071,17 @@ impl AtomaState {
         &self,
         node_small_id: i64,
         task_small_id: i64,
-        price_per_compute_unit: i64,
+        price_per_one_million_compute_units: i64,
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_subscriptions 
-                (node_small_id, task_small_id, price_per_compute_unit, max_num_compute_units, valid) 
+                (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid) 
                 VALUES ($1, $2, $3, $4, TRUE)",
         )
             .bind(node_small_id)
             .bind(task_small_id)
-            .bind(price_per_compute_unit)
+            .bind(price_per_one_million_compute_units)
             .bind(max_num_compute_units)
             .execute(&self.db)
             .await?;
@@ -1138,14 +1138,14 @@ impl AtomaState {
     /// Updates an existing node subscription to a task with new price and compute unit values.
     ///
     /// This method updates an entry in the `node_subscriptions` table, modifying the
-    /// price per compute unit and the maximum number of compute units for an existing
+    /// price per one million compute units and the maximum number of compute units for an existing
     /// subscription between a node and a task.
     ///
     /// # Arguments
     ///
     /// * `node_small_id` - The unique identifier of the subscribed node.
     /// * `task_small_id` - The unique identifier of the task to which the node is subscribed.
-    /// * `price_per_compute_unit` - The new price per compute unit for the subscription.
+    /// * `price_per_one_million_compute_units` - The new price per compute unit for the subscription.
     /// * `max_num_compute_units` - The new maximum number of compute units for the subscription.
     ///
     /// # Returns
@@ -1173,7 +1173,7 @@ impl AtomaState {
         fields(
             %node_small_id,
             %task_small_id,
-            %price_per_compute_unit,
+            %price_per_one_million_compute_units,
             %max_num_compute_units
         )
     )]
@@ -1181,13 +1181,13 @@ impl AtomaState {
         &self,
         node_small_id: i64,
         task_small_id: i64,
-        price_per_compute_unit: i64,
+        price_per_one_million_compute_units: i64,
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE node_subscriptions SET price_per_compute_unit = $1, max_num_compute_units = $2 WHERE node_small_id = $3 AND task_small_id = $4",
+            "UPDATE node_subscriptions SET price_per_one_million_compute_units = $1, max_num_compute_units = $2 WHERE node_small_id = $3 AND task_small_id = $4",
         )
-            .bind(price_per_compute_unit)
+            .bind(price_per_one_million_compute_units)
             .bind(max_num_compute_units)
             .bind(node_small_id)
             .bind(task_small_id)
@@ -1622,7 +1622,7 @@ impl AtomaState {
             task_small_id = %stack.task_small_id,
             selected_node_id = %stack.selected_node_id,
             num_compute_units = %stack.num_compute_units,
-            price = %stack.price)
+            price = %stack.price_per_one_million_compute_units)
     )]
     pub async fn insert_new_stack(&self, stack: Stack, user_id: i64) -> Result<()> {
         sqlx::query(
@@ -1636,7 +1636,7 @@ impl AtomaState {
             .bind(stack.task_small_id)
             .bind(stack.selected_node_id)
             .bind(stack.num_compute_units)
-            .bind(stack.price)
+            .bind(stack.price_per_one_million_compute_units)
             .bind(stack.already_computed_units)
             .bind(stack.in_settle_period)
             .bind(stack.total_hash)
@@ -3810,7 +3810,7 @@ mod tests {
         max_units: i64,
     ) -> sqlx::Result<()> {
         sqlx::query(
-            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_compute_unit, max_num_compute_units, valid)
+            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid)
              VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(node_small_id)
@@ -3930,7 +3930,7 @@ mod tests {
         assert!(result.is_some());
         let node = result.unwrap();
         assert_eq!(node.task_small_id, 1);
-        assert_eq!(node.price_per_compute_unit, 100);
+        assert_eq!(node.price_per_one_million_compute_units, 100);
         assert_eq!(node.max_num_compute_units, 1000);
         assert_eq!(node.node_small_id, 1);
     }
@@ -3971,7 +3971,7 @@ mod tests {
             .unwrap();
         assert!(result.is_some());
         let node = result.unwrap();
-        assert_eq!(node.price_per_compute_unit, 50);
+        assert_eq!(node.price_per_one_million_compute_units, 50);
         assert_eq!(node.node_small_id, 2);
     }
 
@@ -4082,7 +4082,7 @@ mod tests {
 
         // Create invalid subscription (valid = false)
         sqlx::query(
-            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_compute_unit, max_num_compute_units, valid)
+            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid)
              VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(1i64)
@@ -4157,7 +4157,7 @@ mod tests {
             .unwrap();
         assert!(result.is_some());
         let node = result.unwrap();
-        assert_eq!(node.price_per_compute_unit, 50);
+        assert_eq!(node.price_per_one_million_compute_units, 50);
 
         // Test confidential query (should only return security level 2)
         let result = state

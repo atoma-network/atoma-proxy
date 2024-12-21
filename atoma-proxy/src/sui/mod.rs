@@ -92,7 +92,7 @@ impl Sui {
     ///
     /// * `task_small_id` - The task small ID for which to acquire a new stack entry.
     /// * `num_compute_units` - The number of compute units to acquire.
-    /// * `price` - The price per compute unit.
+    /// * `price_per_one_million_compute_units` - The price per one million compute units.
     ///
     /// # Returns
     ///
@@ -106,7 +106,7 @@ impl Sui {
         &mut self,
         task_small_id: u64,
         num_compute_units: u64,
-        price: u64,
+        price_per_one_million_compute_units: u64,
     ) -> Result<StackEntryResponse> {
         let client = self.wallet_ctx.get_client().await?;
         let address = self.wallet_ctx.active_address()?;
@@ -125,7 +125,7 @@ impl Sui {
                     SuiJsonValue::from_object_id(toma_wallet_id),
                     SuiJsonValue::new(task_small_id.to_string().into())?,
                     SuiJsonValue::new(num_compute_units.to_string().into())?,
-                    SuiJsonValue::new(price.to_string().into())?,
+                    SuiJsonValue::new(price_per_one_million_compute_units.to_string().into())?,
                     SuiJsonValue::from_object_id(SUI_RANDOMNESS_STATE_OBJECT_ID),
                 ],
                 None,

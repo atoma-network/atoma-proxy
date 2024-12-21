@@ -160,7 +160,7 @@ pub(crate) async fn select_node_public_key(
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
                     node.max_num_compute_units as u64,
-                    node.price_per_compute_unit as u64,
+                    node.price_per_one_million_compute_units as u64,
                 )
                 .await
                 .map_err(|e| {
@@ -168,7 +168,7 @@ pub(crate) async fn select_node_public_key(
                     StatusCode::INTERNAL_SERVER_ERROR
                 })?;
             // NOTE: The contract might select a different node than the one we used to extract
-            // the price per compute units. In this case, we need to update the value of the `node_small_id``
+            // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
             // to be the one selected by the contract, that we can query from the `StackCreatedEvent`.
             let node_small_id = stack_entry_resp.stack_created_event.selected_node_id.inner;
             // NOTE: We need to get the public key for the selected node for the acquired stack.

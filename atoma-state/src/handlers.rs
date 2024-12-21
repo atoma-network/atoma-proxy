@@ -222,7 +222,7 @@ pub(crate) async fn handle_task_deprecation_event(
 /// # Behavior
 ///
 /// The function performs the following steps:
-/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_compute_unit`, and `max_num_compute_units` from the event.
+/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `subscribe_node_to_task` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_node_task_subscription_event(
@@ -273,7 +273,7 @@ pub(crate) async fn handle_node_task_subscription_event(
 /// # Behavior
 ///
 /// The function performs the following steps:
-/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_compute_unit`, and `max_num_compute_units` from the event.
+/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `update_node_subscription` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_node_task_subscription_updated_event(

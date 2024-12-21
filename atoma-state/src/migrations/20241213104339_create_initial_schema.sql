@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE TABLE IF NOT EXISTS node_subscriptions (
     task_small_id BIGINT NOT NULL,
     node_small_id BIGINT NOT NULL,
-    price_per_compute_unit BIGINT NOT NULL,
+    price_per_one_million_compute_units BIGINT NOT NULL,
     max_num_compute_units BIGINT NOT NULL,
     valid BOOLEAN NOT NULL,
     PRIMARY KEY (task_small_id, node_small_id),
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS stacks (
     task_small_id BIGINT NOT NULL,
     selected_node_id BIGINT NOT NULL,
     num_compute_units BIGINT NOT NULL,
-    price BIGINT NOT NULL,
+    price_per_one_million_compute_units BIGINT NOT NULL,
     already_computed_units BIGINT NOT NULL,
     in_settle_period BOOLEAN NOT NULL,
     total_hash BYTEA NOT NULL,
