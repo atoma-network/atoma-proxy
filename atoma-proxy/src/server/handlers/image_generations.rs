@@ -141,6 +141,7 @@ impl RequestModel for RequestModelImageGenerations {
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateImageRequest,
     security(
         ("bearerAuth" = [])
     ),
@@ -160,7 +161,7 @@ pub async fn image_generations_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<CreateImageRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
     handle_image_generation_response(
         state,
@@ -210,6 +211,7 @@ pub(crate) struct ConfidentialImageGenerationsOpenApi;
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateImageRequest,
     security(
         ("bearerAuth" = [])
     ),
@@ -229,7 +231,7 @@ pub async fn confidential_image_generations_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<CreateImageRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
     handle_image_generation_response(
         state,
@@ -290,7 +292,7 @@ async fn handle_image_generation_response(
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
-    payload: CreateImageRequest,
+    payload: Value,
     total_tokens: i64,
     endpoint: String,
     salt: Option<[u8; constants::SALT_SIZE]>,

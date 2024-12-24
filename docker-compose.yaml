@@ -29,6 +29,7 @@ services:
       - .env
     ports:
       - "${ATOMA_SERVICE_PORT:-8080}:8080"  # Expose Atoma service port
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"  # Expose Atoma proxy service port
     depends_on:
       - db
     networks:

@@ -135,6 +135,7 @@ impl RequestModel for RequestModelEmbeddings {
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateEmbeddingRequest,
     security(
         ("bearerAuth" = [])
     ),
@@ -154,7 +155,7 @@ pub async fn embeddings_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<CreateEmbeddingRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
     let RequestMetadataExtension {
         node_address,
@@ -215,6 +216,7 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateEmbeddingRequest,
     security(
         ("bearerAuth" = [])
     ),
@@ -234,7 +236,7 @@ pub async fn confidential_embeddings_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<CreateEmbeddingRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
     let RequestMetadataExtension {
         node_address,
@@ -298,7 +300,7 @@ async fn handle_embeddings_response(
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
-    payload: CreateEmbeddingRequest,
+    payload: Value,
     num_input_compute_units: i64,
     endpoint: String,
     salt: Option<[u8; constants::SALT_SIZE]>,

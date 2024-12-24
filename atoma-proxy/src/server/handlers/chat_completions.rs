@@ -95,6 +95,7 @@ pub(crate) struct ChatCompletionsOpenApi;
     security(
         ("bearerAuth" = [])
     ),
+    request_body = CreateChatCompletionRequest,
     responses(
         (status = OK, description = "Chat completions", content(
             (ChatCompletionResponse = "application/json"),
@@ -115,12 +116,19 @@ pub async fn chat_completions_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<CreateChatCompletionRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
-    let is_streaming = payload.stream.ok_or_else(|| {
-        error!("Missing or invalid 'stream' field");
-        StatusCode::BAD_REQUEST
-    })?;
+    let is_streaming = payload
+        .get("stream")
+        .ok_or_else(|| {
+            error!("Missing or invalid 'stream' field");
+            StatusCode::BAD_REQUEST
+        })?
+        .as_bool()
+        .ok_or_else(|| {
+            error!("Invalid 'stream' field");
+            StatusCode::BAD_REQUEST
+        })?;
 
     if is_streaming {
         handle_streaming_response(
@@ -128,7 +136,7 @@ pub async fn chat_completions_create(
             metadata.node_address,
             metadata.node_id,
             headers,
-            payload.chat_completion_request,
+            payload,
             metadata.num_compute_units as i64,
             metadata.selected_stack_small_id,
             metadata.endpoint,
@@ -143,7 +151,7 @@ pub async fn chat_completions_create(
             metadata.node_address,
             metadata.node_id,
             headers,
-            payload.chat_completion_request,
+            payload,
             metadata.num_compute_units as i64,
             metadata.selected_stack_small_id,
             metadata.endpoint,
@@ -161,6 +169,7 @@ pub async fn chat_completions_create(
     security(
         ("bearerAuth" = [])
     ),
+    request_body = CreateChatCompletionStreamRequest,
     responses(
         (status = OK, description = "Chat completions", content(
             (ChatCompletionStreamResponse = "text/event-stream")
@@ -278,6 +287,7 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateChatCompletionRequest,
     security(
         ("bearerAuth" = [])
     ),
@@ -299,12 +309,19 @@ pub async fn confidential_chat_completions_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<ChatCompletionRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>, StatusCode> {
-    let is_streaming = payload.stream.ok_or_else(|| {
-        error!("Missing or invalid 'stream' field");
-        StatusCode::BAD_REQUEST
-    })?;
+    let is_streaming = payload
+        .get("stream")
+        .ok_or_else(|| {
+            error!("Missing or invalid 'stream' field");
+            StatusCode::BAD_REQUEST
+        })?
+        .as_bool()
+        .ok_or_else(|| {
+            error!("Invalid 'stream' field");
+            StatusCode::BAD_REQUEST
+        })?;
 
     if is_streaming {
         handle_streaming_response(
@@ -396,7 +413,7 @@ async fn handle_non_streaming_response(
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
-    payload: ChatCompletionRequest,
+    payload: Value,
     estimated_total_tokens: i64,
     selected_stack_small_id: i64,
     endpoint: String,
@@ -555,7 +572,7 @@ async fn handle_streaming_response(
     node_address: String,
     node_id: i64,
     headers: HeaderMap,
-    payload: ChatCompletionRequest,
+    payload: Value,
     estimated_total_tokens: i64,
     selected_stack_small_id: i64,
     endpoint: String,

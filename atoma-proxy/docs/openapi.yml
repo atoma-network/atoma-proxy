@@ -282,7 +282,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChatCompletionRequest'
+              $ref: '#/components/schemas/CreateChatCompletionRequest'
         required: true
       responses:
         '200':
