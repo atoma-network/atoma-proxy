@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Result;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants::SIGNATURE;
 use atoma_utils::verify_signature;
@@ -34,12 +33,13 @@ pub use components::openapi::openapi_routes;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::{
-    error::AtomaServiceError,
+    error::AtomaProxyError,
     handlers::{
         chat_completions::chat_completions_create, chat_completions::CHAT_COMPLETIONS_PATH,
         embeddings::embeddings_create, embeddings::EMBEDDINGS_PATH,
         image_generations::image_generations_create, image_generations::IMAGE_GENERATIONS_PATH,
     },
+    Result,
 };
 use crate::sui::Sui;
 
@@ -221,7 +221,9 @@ pub(crate) struct ModelsOpenApi;
         (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")
     )
 )]
-async fn models_handler(State(state): State<ProxyState>) -> Result<Json<Value>, StatusCode> {
+async fn models_handler(
+    State(state): State<ProxyState>,
+) -> std::result::Result<Json<Value>, StatusCode> {
     // TODO: Implement proper model handling
     Ok(Json(json!({
         "object": "list",
@@ -299,7 +301,7 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 ///
 /// # Errors
 ///
-/// Returns various `AtomaServiceError` variants:
+/// Returns various `AtomaProxyError` variants:
 /// * `MissingHeader` - If the signature header is missing
 /// * `InvalidHeader` - If the signature header is malformed
 /// * `InvalidBody` - If:
@@ -334,28 +336,28 @@ pub async fn node_public_address_registration(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     request: Request<Body>,
-) -> Result<Json<Value>, AtomaServiceError> {
+) -> Result<Json<Value>> {
     let base64_signature = headers
         .get(SIGNATURE)
-        .ok_or_else(|| AtomaServiceError::MissingHeader {
+        .ok_or_else(|| AtomaProxyError::MissingHeader {
             header: SIGNATURE.to_string(),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?
         .to_str()
-        .map_err(|e| AtomaServiceError::InvalidHeader {
+        .map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Failed to extract base64 signature encoding, with error: {e}"),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
 
     let body_bytes = axum::body::to_bytes(request.into_body(), MAX_BODY_SIZE)
         .await
-        .map_err(|_| AtomaServiceError::InvalidBody {
+        .map_err(|_| AtomaProxyError::InvalidBody {
             message: "Failed to convert body to bytes".to_string(),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
 
     let signature =
-        Signature::from_str(base64_signature).map_err(|e| AtomaServiceError::InvalidBody {
+        Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::InvalidBody {
             message: format!("Failed to parse signature, with error: {e}"),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
@@ -363,7 +365,7 @@ pub async fn node_public_address_registration(
     let public_key_bytes = signature.public_key_bytes();
     let public_key =
         SuiPublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
-            AtomaServiceError::InvalidBody {
+            AtomaProxyError::InvalidBody {
                 message: format!("Failed to extract public key from bytes, with error: {e}"),
                 endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
             }
@@ -376,12 +378,12 @@ pub async fn node_public_address_registration(
     let body_blake2b_hash_bytes: [u8; BODY_HASH_SIZE] = body_blake2b_hash
         .as_slice()
         .try_into()
-        .map_err(|e| AtomaServiceError::InvalidBody {
+        .map_err(|e| AtomaProxyError::InvalidBody {
             message: format!("Failed to convert blake2b hash to bytes, with error: {e}"),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
     verify_signature(base64_signature, &body_blake2b_hash_bytes).map_err(|e| {
-        AtomaServiceError::InvalidBody {
+        AtomaProxyError::InvalidBody {
             message: format!("Failed to verify signature, with error: {e}"),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         }
@@ -389,7 +391,7 @@ pub async fn node_public_address_registration(
 
     let payload =
         serde_json::from_slice::<NodePublicAddressAssignment>(&body_bytes).map_err(|e| {
-            AtomaServiceError::InvalidBody {
+            AtomaProxyError::InvalidBody {
                 message: format!("Failed to parse request body, with error: {e}"),
                 endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
             }
@@ -403,29 +405,29 @@ pub async fn node_public_address_registration(
             node_small_id: payload.node_small_id as i64,
             result_sender,
         })
-        .map_err(|err| AtomaServiceError::InternalError {
+        .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send GetNodeSuiAddress event: {:?}", err),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
 
     let node_sui_address = result_receiver
         .await
-        .map_err(|err| AtomaServiceError::InternalError {
+        .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to receive GetNodeSuiAddress result: {:?}", err),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?
-        .map_err(|err| AtomaServiceError::InternalError {
+        .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to get node Sui address: {:?}", err),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?
-        .ok_or_else(|| AtomaServiceError::NotFound {
+        .ok_or_else(|| AtomaProxyError::NotFound {
             message: "Node Sui address not found".to_string(),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
 
     // Check if the address associated with the small ID in the request matches the Sui address in the signature.
     if node_sui_address != sui_address.to_string() {
-        return Err(AtomaServiceError::InvalidBody {
+        return Err(AtomaProxyError::InvalidBody {
             message: "The sui address associated with the node small ID does not match the signature sui address".to_string(),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         });
@@ -438,7 +440,7 @@ pub async fn node_public_address_registration(
             public_address: payload.public_address.clone(),
             country: payload.country.clone(),
         })
-        .map_err(|err| AtomaServiceError::InternalError {
+        .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send UpsertNodePublicAddress event: {:?}", err),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
@@ -467,7 +469,7 @@ pub(crate) struct HealthOpenApi;
         (status = INTERNAL_SERVER_ERROR, description = "Service is unhealthy")
     )
 )]
-pub async fn health() -> Result<Json<Value>, StatusCode> {
+pub async fn health() -> Result<Json<Value>> {
     Ok(Json(json!({ "status": "ok" })))
 }
 
@@ -567,7 +569,7 @@ pub async fn start_server(
     sui: Sui,
     tokenizers: Vec<Arc<Tokenizer>>,
     mut shutdown_receiver: watch::Receiver<bool>,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let tcp_listener = TcpListener::bind(config.service_bind_address).await?;
 
     let secret_key = StaticSecret::random_from_rng(rand::thread_rng());

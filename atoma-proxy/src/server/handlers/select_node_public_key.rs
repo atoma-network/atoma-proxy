@@ -6,8 +6,9 @@ use tokio::sync::oneshot;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
-use crate::server::error::AtomaServiceError;
-use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
+use crate::server::{
+    error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension, Result,
+};
 
 /// The maximum number of tokens to be processed for confidential compute.
 /// Since requests are encrypted, the proxy is not able to determine the number of tokens
@@ -69,7 +70,7 @@ pub struct SelectNodePublicKeyResponse {
 ///   - The selected node's public key (base64 encoded)
 ///   - The node's small ID
 ///   - Optional stack entry digest (if a new stack entry was acquired)
-/// - `AtomaServiceError` error if:
+/// - `AtomaProxyError` error if:
 ///   - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
 ///   - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
 ///
@@ -102,7 +103,7 @@ pub(crate) async fn select_node_public_key(
     State(state): State<ProxyState>,
     Extension(metadata): Extension<RequestMetadataExtension>,
     Json(request): Json<SelectNodePublicKeyRequest>,
-) -> Result<Json<SelectNodePublicKeyResponse>, AtomaServiceError> {
+) -> Result<Json<SelectNodePublicKeyResponse>> {
     let (sender, receiver) = oneshot::channel();
     state
         .state_manager_sender
@@ -113,16 +114,14 @@ pub(crate) async fn select_node_public_key(
                 result_sender: sender,
             },
         )
-        .map_err(|_| AtomaServiceError::InternalError {
+        .map_err(|_| AtomaProxyError::InternalError {
             message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
             endpoint: metadata.endpoint.clone(),
         })?;
-    let node_public_key = receiver
-        .await
-        .map_err(|e| AtomaServiceError::InternalError {
-            message: format!("Failed to receive node public key: {}", e),
-            endpoint: metadata.endpoint.clone(),
-        })?;
+    let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to receive node public key: {}", e),
+        endpoint: metadata.endpoint.clone(),
+    })?;
 
     if let Some(node_public_key) = node_public_key {
         Ok(Json(SelectNodePublicKeyResponse {
@@ -139,17 +138,17 @@ pub(crate) async fn select_node_public_key(
                 is_confidential: true, // NOTE: This endpoint is only required for confidential compute
                 result_sender: sender,
             })
-            .map_err(|e| AtomaServiceError::InternalError {
+            .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetCheapestNodeForModel event: {:?}", e),
                 endpoint: metadata.endpoint.clone(),
             })?;
         let node = receiver
             .await
-            .map_err(|_| AtomaServiceError::InternalError {
+            .map_err(|_| AtomaProxyError::InternalError {
                 message: "Failed to receive GetCheapestNodeForModel result".to_string(),
                 endpoint: metadata.endpoint.clone(),
             })?
-            .map_err(|e| AtomaServiceError::InternalError {
+            .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetCheapestNodeForModel result: {:?}", e),
                 endpoint: metadata.endpoint.clone(),
             })?;
@@ -164,7 +163,7 @@ pub(crate) async fn select_node_public_key(
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
-                .map_err(|e| AtomaServiceError::InternalError {
+                .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {:?}", e),
                     endpoint: metadata.endpoint.clone(),
                 })?;
@@ -182,22 +181,20 @@ pub(crate) async fn select_node_public_key(
                         result_sender: sender,
                     },
                 )
-                .map_err(|e| AtomaServiceError::InternalError {
+                .map_err(|e| AtomaProxyError::InternalError {
                     message: format!(
                         "Failed to send GetNodePublicKeyForEncryption event: {:?}",
                         e
                     ),
                     endpoint: metadata.endpoint.clone(),
                 })?;
-            let node_public_key = receiver
-                .await
-                .map_err(|e| AtomaServiceError::InternalError {
-                    message: format!(
-                        "Failed to receive GetNodePublicKeyForEncryption result: {:?}",
-                        e
-                    ),
-                    endpoint: metadata.endpoint.clone(),
-                })?;
+            let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
+                message: format!(
+                    "Failed to receive GetNodePublicKeyForEncryption result: {:?}",
+                    e
+                ),
+                endpoint: metadata.endpoint.clone(),
+            })?;
             if let Some(node_public_key) = node_public_key {
                 Ok(Json(SelectNodePublicKeyResponse {
                     public_key: node_public_key.public_key,
@@ -205,13 +202,13 @@ pub(crate) async fn select_node_public_key(
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
                 }))
             } else {
-                Err(AtomaServiceError::InternalError {
+                Err(AtomaProxyError::InternalError {
                     message: format!("No node public key found for node {}", node.node_small_id),
                     endpoint: metadata.endpoint.clone(),
                 })
             }
         } else {
-            Err(AtomaServiceError::ServiceUnavailable {
+            Err(AtomaProxyError::ServiceUnavailable {
                 message: format!(
                     "No node found for model {} with confidential compute enabled",
                     request.model_name

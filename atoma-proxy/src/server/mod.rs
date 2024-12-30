@@ -8,3 +8,5 @@ pub mod streamer;
 
 pub use config::AtomaServiceConfig;
 pub use http_server::start_server;
+
+pub type Result<T> = std::result::Result<T, error::AtomaProxyError>;

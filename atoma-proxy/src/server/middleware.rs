@@ -14,8 +14,9 @@ use serde_json::Value;
 use tracing::instrument;
 use x25519_dalek::PublicKey;
 
+use super::Result;
 use super::{
-    error::AtomaServiceError,
+    error::AtomaProxyError,
     handlers::{
         chat_completions::{
             RequestModelChatCompletions, CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
@@ -212,16 +213,16 @@ pub async fn authenticate_middleware(
     state: State<ProxyState>,
     req: Request<Body>,
     next: Next,
-) -> Result<Response, AtomaServiceError> {
+) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
-        .map_err(|e| AtomaServiceError::InternalError {
+        .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to convert body to bytes: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let body_json: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaServiceError::InternalError {
+        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to parse body as JSON: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -237,18 +238,18 @@ pub async fn authenticate_middleware(
     } = utils::process_request(&state, &endpoint, &body_json, &mut req_parts).await?;
     let stack_small_id_header =
         HeaderValue::from_str(&stack_small_id.to_string()).map_err(|e| {
-            AtomaServiceError::InternalError {
+            AtomaProxyError::InternalError {
                 message: format!("Failed to convert stack small id to header value: {}", e),
                 endpoint: req_parts.uri.path().to_string(),
             }
         })?;
     let signature_header =
-        HeaderValue::from_str(&signature).map_err(|e| AtomaServiceError::InternalError {
+        HeaderValue::from_str(&signature).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to convert signature to header value: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
-        .map_err(|e| AtomaServiceError::InternalError {
+        .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to convert content length to header value: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -257,7 +258,7 @@ pub async fn authenticate_middleware(
     headers.insert(CONTENT_LENGTH, content_length_header);
     if let Some(tx_digest) = tx_digest {
         let tx_digest_header = HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
-            AtomaServiceError::InternalError {
+            AtomaProxyError::InternalError {
                 message: format!("Failed to convert tx digest to header value: {}", e),
                 endpoint: req_parts.uri.path().to_string(),
             }
@@ -268,7 +269,7 @@ pub async fn authenticate_middleware(
         body_json
             .get("model")
             .and_then(|m| m.as_str())
-            .ok_or(AtomaServiceError::InvalidBody {
+            .ok_or(AtomaProxyError::InvalidBody {
                 message: "Model not found".to_string(),
                 endpoint: req_parts.uri.path().to_string(),
             })?;
@@ -321,7 +322,7 @@ pub async fn authenticate_middleware(
 /// - `X-Node-X25519-PublicKey`: Server's base64-encoded X25519 public key
 ///
 /// # Errors
-/// Returns `AtomaServiceError::BadRequest` if:
+/// Returns `AtomaProxyError::BadRequest` if:
 /// - Required headers are missing or malformed
 /// - Request body exceeds maximum size
 /// - Any cryptographic operations fail
@@ -334,16 +335,16 @@ pub async fn confidential_compute_middleware(
     state: State<ProxyState>,
     req: Request<Body>,
     next: Next,
-) -> Result<Response, AtomaServiceError> {
+) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
-        .map_err(|e| AtomaServiceError::InternalError {
+        .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to convert body to bytes: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let body_json: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaServiceError::InternalError {
+        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to parse body as JSON: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -354,25 +355,25 @@ pub async fn confidential_compute_middleware(
     let x25519_public_key_header = req_parts
         .headers
         .get(constants::NODE_X25519_PUBLIC_KEY)
-        .ok_or_else(|| AtomaServiceError::InvalidHeader {
+        .ok_or_else(|| AtomaProxyError::InvalidHeader {
             message: "Missing x25519-public-key header".to_string(),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let x25519_public_key_str =
         x25519_public_key_header
             .to_str()
-            .map_err(|_| AtomaServiceError::InvalidHeader {
+            .map_err(|_| AtomaProxyError::InvalidHeader {
                 message: "Invalid x25519-public-key header".to_string(),
                 endpoint: req_parts.uri.path().to_string(),
             })?;
     let x25519_public_key_bytes: [u8; X25519_PUBLIC_KEY_SIZE] = STANDARD
         .decode(x25519_public_key_str)
-        .map_err(|e| AtomaServiceError::InvalidHeader {
+        .map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Invalid x25519-public-key header: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?
         .try_into()
-        .map_err(|_| AtomaServiceError::InvalidHeader {
+        .map_err(|_| AtomaProxyError::InvalidHeader {
             message: "Invalid x25519-public-key header".to_string(),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -381,19 +382,19 @@ pub async fn confidential_compute_middleware(
     let shared_secret = state.compute_shared_secret(&x25519_public_key);
 
     let (encrypted_plaintext, nonce) = encrypt_plaintext(&body_bytes, &shared_secret, &salt, None)
-        .map_err(|e| AtomaServiceError::InternalError {
+        .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to encrypt plaintext: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let nonce_str = STANDARD.encode(nonce);
     let salt_str = STANDARD.encode(salt);
     let nonce_header =
-        HeaderValue::from_str(&nonce_str).map_err(|e| AtomaServiceError::InvalidHeader {
+        HeaderValue::from_str(&nonce_str).map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Invalid nonce header: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
     let salt_header =
-        HeaderValue::from_str(&salt_str).map_err(|e| AtomaServiceError::InvalidHeader {
+        HeaderValue::from_str(&salt_str).map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Invalid salt header: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -401,7 +402,7 @@ pub async fn confidential_compute_middleware(
     req_parts.headers.insert(constants::SALT, salt_header);
     let proxy_x25519_public_key_header =
         HeaderValue::from_str(&STANDARD.encode(state.public_key().as_bytes())).map_err(|e| {
-            AtomaServiceError::InvalidHeader {
+            AtomaProxyError::InvalidHeader {
                 message: format!("Invalid proxy x25519-public-key header: {}", e),
                 endpoint: req_parts.uri.path().to_string(),
             }
@@ -415,7 +416,7 @@ pub async fn confidential_compute_middleware(
         "stream": is_streaming,
     });
     let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
-        .map_err(|e| AtomaServiceError::InvalidHeader {
+        .map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Failed to convert content length to header value: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -446,10 +447,10 @@ pub(crate) mod auth {
     use tokio::sync::{oneshot, RwLock};
     use tracing::instrument;
 
+    use crate::server::Result;
     use crate::{
         server::{
-            error::AtomaServiceError, handlers::request_model::RequestModel,
-            http_server::ProxyState,
+            error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
         },
         sui::{StackEntryResponse, Sui},
     };
@@ -497,7 +498,7 @@ pub(crate) mod auth {
     ///
     /// # Errors
     ///
-    /// Returns `AtomaServiceError` error in the following cases:
+    /// Returns `AtomaProxyError` error in the following cases:
     /// - `UNAUTHORIZED`: Invalid or missing authentication
     /// - `BAD_REQUEST`: Invalid payload format or unsupported model
     /// - `NOT_FOUND`: No available node address found
@@ -510,7 +511,7 @@ pub(crate) mod auth {
         payload: &Value,
         is_confidential: bool,
         endpoint: &str,
-    ) -> Result<ProcessedRequest, AtomaServiceError> {
+    ) -> Result<ProcessedRequest> {
         // Authenticate
         let user_id = check_auth(&state.state_manager_sender, &headers, endpoint).await?;
 
@@ -542,22 +543,22 @@ pub(crate) mod auth {
                 node_small_id: selected_node_id,
                 result_sender,
             })
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetNodePublicAddress event: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?;
 
         let node_address = result_receiver
             .await
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetNodePublicAddress result: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetNodePublicAddress result: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?
-            .ok_or_else(|| AtomaServiceError::NotFound {
+            .ok_or_else(|| AtomaProxyError::NotFound {
                 message: format!("No node address found for node {}", selected_node_id),
                 endpoint: endpoint.to_string(),
             })?;
@@ -568,7 +569,7 @@ pub(crate) mod auth {
             .write()
             .await
             .get_sui_signature(payload)
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get Sui signature: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?;
@@ -604,7 +605,7 @@ pub(crate) mod auth {
     ///
     /// # Errors
     ///
-    /// Returns a `AtomaServiceError` error if there is an internal server error.
+    /// Returns a `AtomaProxyError` error if there is an internal server error.
     ///
     /// # Example
     ///
@@ -620,7 +621,7 @@ pub(crate) mod auth {
         state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
         headers: &HeaderMap,
         endpoint: &str,
-    ) -> Result<i64, AtomaServiceError> {
+    ) -> Result<i64> {
         if let Some(auth) = headers.get("Authorization") {
             if let Ok(auth) = auth.to_str() {
                 if let Some(token) = auth.strip_prefix("Bearer ") {
@@ -630,24 +631,24 @@ pub(crate) mod auth {
                             api_token: token.to_string(),
                             result_sender: sender,
                         })
-                        .map_err(|err| AtomaServiceError::InternalError {
+                        .map_err(|err| AtomaProxyError::InternalError {
                             message: format!("Failed to send IsApiTokenValid event: {:?}", err),
                             endpoint: endpoint.to_string(),
                         })?;
                     return receiver
                         .await
-                        .map_err(|err| AtomaServiceError::InternalError {
+                        .map_err(|err| AtomaProxyError::InternalError {
                             message: format!("Failed to receive IsApiTokenValid result: {:?}", err),
                             endpoint: endpoint.to_string(),
                         })?
-                        .map_err(|err| AtomaServiceError::InternalError {
+                        .map_err(|err| AtomaProxyError::InternalError {
                             message: format!("Failed to get IsApiTokenValid result: {:?}", err),
                             endpoint: endpoint.to_string(),
                         });
                 }
             }
         }
-        Err(AtomaServiceError::AuthError {
+        Err(AtomaProxyError::AuthError {
             auth_error: "Invalid or missing api token for request".to_string(),
             endpoint: endpoint.to_string(),
         })
@@ -689,7 +690,7 @@ pub(crate) mod auth {
     ///
     /// # Errors
     ///
-    /// Returns a `AtomaServiceError` error in the following cases:
+    /// Returns a `AtomaProxyError` error in the following cases:
     /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager or Sui interface
     /// * `NOT_FOUND` - No tasks available for the requested model
     /// * `BAD_REQUEST` - Requested compute units exceed the maximum allowed limit
@@ -714,7 +715,7 @@ pub(crate) mod auth {
         user_id: i64,
         is_confidential: bool,
         endpoint: &str,
-    ) -> Result<SelectedNodeMetadata, AtomaServiceError> {
+    ) -> Result<SelectedNodeMetadata> {
         let (result_sender, result_receiver) = oneshot::channel();
 
         state_manager_sender
@@ -725,18 +726,18 @@ pub(crate) mod auth {
                 is_confidential,
                 result_sender,
             })
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetStacksForModel event: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?;
 
         let optional_stack = result_receiver
             .await
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetStacksForModel result: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?
-            .map_err(|err| AtomaServiceError::InternalError {
+            .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetStacksForModel result: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?;
@@ -755,24 +756,24 @@ pub(crate) mod auth {
                     is_confidential,
                     result_sender,
                 })
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send GetTasksForModel event: {:?}", err),
                     endpoint: endpoint.to_string(),
                 })?;
             let node = result_receiver
                 .await
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to receive GetTasksForModel result: {:?}", err),
                     endpoint: endpoint.to_string(),
                 })?
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to get GetTasksForModel result: {:?}", err),
                     endpoint: endpoint.to_string(),
                 })?;
             let node: atoma_state::types::CheapestNode = match node {
                 Some(node) => node,
                 None => {
-                    return Err(AtomaServiceError::NotFound {
+                    return Err(AtomaProxyError::NotFound {
                         message: format!("No tasks found for model {}", model),
                         endpoint: endpoint.to_string(),
                     });
@@ -791,7 +792,7 @@ pub(crate) mod auth {
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {:?}", err),
                     endpoint: endpoint.to_string(),
                 })?;
@@ -807,7 +808,7 @@ pub(crate) mod auth {
                     transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
                     user_id,
                 })
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send NewStackAcquired event: {:?}", err),
                     endpoint: endpoint.to_string(),
                 })?;
@@ -846,7 +847,7 @@ pub(crate) mod utils {
     ///
     /// Returns a `Result` containing:
     /// - `Ok(ProcessedRequest)`: Successfully processed request with node selection and authentication details
-    /// - `Err(AtomaServiceError)`: Appropriate HTTP error status if processing fails
+    /// - `Err(AtomaProxyError)`: Appropriate HTTP error status if processing fails
     ///
     /// # Errors
     ///
@@ -876,11 +877,11 @@ pub(crate) mod utils {
         endpoint: &str,
         body_json: &Value,
         req_parts: &mut Parts,
-    ) -> Result<ProcessedRequest, AtomaServiceError> {
+    ) -> Result<ProcessedRequest> {
         match endpoint {
             CHAT_COMPLETIONS_PATH | CONFIDENTIAL_CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
-                    AtomaServiceError::InvalidBody {
+                    AtomaProxyError::InvalidBody {
                         message: format!(
                             "Failed to parse body as chat completions request model: {}",
                             e
@@ -900,7 +901,7 @@ pub(crate) mod utils {
             }
             EMBEDDINGS_PATH | CONFIDENTIAL_EMBEDDINGS_PATH => {
                 let request_model = RequestModelEmbeddings::new(body_json).map_err(|e| {
-                    AtomaServiceError::InvalidBody {
+                    AtomaProxyError::InvalidBody {
                         message: format!("Failed to parse body as embeddings request model: {}", e),
                         endpoint: endpoint.to_string(),
                     }
@@ -917,7 +918,7 @@ pub(crate) mod utils {
             }
             IMAGE_GENERATIONS_PATH | CONFIDENTIAL_IMAGE_GENERATIONS_PATH => {
                 let request_model = RequestModelImageGenerations::new(body_json).map_err(|e| {
-                    AtomaServiceError::InvalidBody {
+                    AtomaProxyError::InvalidBody {
                         message: format!(
                             "Failed to parse body as image generations request model: {}",
                             e
@@ -935,7 +936,7 @@ pub(crate) mod utils {
                 )
                 .await
             }
-            _ => Err(AtomaServiceError::NotFound {
+            _ => Err(AtomaProxyError::NotFound {
                 message: format!("Invalid or unsupported endpoint: {}", endpoint),
                 endpoint: endpoint.to_string(),
             }),
@@ -958,7 +959,7 @@ pub(crate) mod utils {
     /// # Returns
     ///
     /// Returns `Ok(())` if the headers were successfully processed, or an appropriate
-    /// `AtomaServiceError` error if any step fails.
+    /// `AtomaProxyError` error if any step fails.
     ///
     /// # Headers Added
     ///
@@ -992,7 +993,7 @@ pub(crate) mod utils {
         headers: &mut HeaderMap,
         endpoint: &str,
         node_id: i64,
-    ) -> Result<(), AtomaServiceError> {
+    ) -> Result<()> {
         if [
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             CONFIDENTIAL_EMBEDDINGS_PATH,
@@ -1009,21 +1010,21 @@ pub(crate) mod utils {
                         result_sender: sender,
                     },
                 )
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to get server x25519 public key: {}", err),
                     endpoint: endpoint.to_string(),
                 })?;
             let x25519_dalek_public_key = receiver
                 .await
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to receive server x25519 public key: {}", err),
                     endpoint: endpoint.to_string(),
                 })?
-                .map_err(|err| AtomaServiceError::InternalError {
+                .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to get server x25519 public key: {}", err),
                     endpoint: endpoint.to_string(),
                 })?
-                .ok_or_else(|| AtomaServiceError::NotFound {
+                .ok_or_else(|| AtomaProxyError::NotFound {
                     message: format!("No x25519 public key found for node {}", node_id),
                     endpoint: endpoint.to_string(),
                 })?;
@@ -1031,7 +1032,7 @@ pub(crate) mod utils {
             headers.insert(
                 constants::NODE_X25519_PUBLIC_KEY,
                 HeaderValue::from_str(&x25519_dalek_public_key_str).map_err(|e| {
-                    AtomaServiceError::InvalidBody {
+                    AtomaProxyError::InvalidBody {
                         message: format!(
                             "Failed to convert x25519 public key to header value: {}",
                             e

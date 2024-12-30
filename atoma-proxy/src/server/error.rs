@@ -35,7 +35,7 @@ pub struct ErrorDetails {
 /// for various failure scenarios in the API. Each variant includes the number of
 /// tokens that were processed before the error occurred.
 #[derive(Debug, Error)]
-pub enum AtomaServiceError {
+pub enum AtomaProxyError {
     /// Error returned when a required HTTP header is missing from the request
     #[error("Missing required header: {header}")]
     MissingHeader {
@@ -109,10 +109,10 @@ pub enum AtomaServiceError {
     },
 }
 
-impl AtomaServiceError {
+impl AtomaProxyError {
     /// Returns the machine-readable error code for this error type
     ///
-    /// Each variant of [`AtomaServiceError`] maps to a specific error code string that can be used
+    /// Each variant of [`AtomaProxyError`] maps to a specific error code string that can be used
     /// by API clients to programmatically handle different error cases. These codes are consistent
     /// across API responses and are included in the [`ErrorDetails`] structure.
     ///
@@ -239,7 +239,7 @@ impl AtomaServiceError {
     }
 }
 
-impl IntoResponse for AtomaServiceError {
+impl IntoResponse for AtomaProxyError {
     fn into_response(self) -> Response {
         tracing::error!(
             target = "atoma-service",
