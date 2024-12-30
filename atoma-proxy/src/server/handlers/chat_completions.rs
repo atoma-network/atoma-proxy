@@ -291,8 +291,9 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
     security(
         ("bearerAuth" = [])
     ),
+    request_body = ConfidentialChatCompletionRequest,
     responses(
-        (status = OK, description = "Confidential chat completions", body = ChatCompletionResponse),
+        (status = OK, description = "Confidential chat completions", body = ConfidentialChatCompletionResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -979,4 +980,40 @@ pub struct ChatCompletionChunkDelta {
     /// The tool calls information, if present in this chunk.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<Value>>,
+}
+
+/// Request format for confidential chat completions
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfidentialChatCompletionRequest {
+    /// The encrypted CreateChatCompletionRequest
+    pub ciphertext: String,
+    /// Client's DH public key for key exchange
+    pub client_dh_public_key: String,
+    /// Nonce used for encryption
+    pub nonce: String,
+    /// Hash of the plaintext body for verification
+    pub plaintext_body_hash: String,
+    /// Salt used for encryption
+    pub salt: String,
+    /// The small ID of the stack
+    pub stack_small_id: i64,
+    /// Whether to stream back partial progress
+    pub stream: Option<bool>,
+    /// The maximum number of tokens to generate
+    pub max_tokens: Option<i32>,
+}
+
+/// Response format for confidential chat completions
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfidentialChatCompletionResponse {
+    /// The encrypted ChatCompletionResponse
+    pub ciphertext: String,
+    /// Node's DH public key for key exchange
+    pub node_dh_public_key: String,
+    /// Nonce used for encryption
+    pub nonce: String,
+    /// Hash of the plaintext body for verification
+    pub plaintext_body_hash: String,
+    /// Salt used for encryption
+    pub salt: String,
 }

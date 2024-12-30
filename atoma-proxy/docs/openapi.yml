@@ -207,8 +207,6 @@ paths:
           description: Chat completions
           content:
             text/event-stream:
-              # DO NOT DELETE:This is a custom extension required by Speakeasy to handle SSE
-              x-speakeasy-sse-sentinel: '[DONE]'
               schema:
                 $ref: '#/components/schemas/ChatCompletionStreamResponse'
         '400':
@@ -284,7 +282,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateChatCompletionRequest'
+              $ref: '#/components/schemas/ConfidentialChatCompletionRequest'
         required: true
       responses:
         '200':
@@ -292,7 +290,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatCompletionResponse'
+                $ref: '#/components/schemas/ConfidentialChatCompletionResponse'
         '400':
           description: Bad request
         '401':
@@ -819,6 +817,72 @@ components:
           type: integer
           format: int32
           description: Total number of tokens used (prompt + completion).
+    ConfidentialChatCompletionRequest:
+      type: object
+      description: Request format for confidential chat completions
+      required:
+      - ciphertext
+      - client_dh_public_key
+      - nonce
+      - plaintext_body_hash
+      - salt
+      - stack_small_id
+      properties:
+        ciphertext:
+          type: string
+          description: The encrypted CreateChatCompletionRequest
+        client_dh_public_key:
+          type: string
+          description: Client's DH public key for key exchange
+        max_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: The maximum number of tokens to generate
+        nonce:
+          type: string
+          description: Nonce used for encryption
+        plaintext_body_hash:
+          type: string
+          description: Hash of the plaintext body for verification
+        salt:
+          type: string
+          description: Salt used for encryption
+        stack_small_id:
+          type: integer
+          format: int64
+          description: The small ID of the stack
+        stream:
+          type:
+          - boolean
+          - 'null'
+          description: Whether to stream back partial progress
+    ConfidentialChatCompletionResponse:
+      type: object
+      description: Response format for confidential chat completions
+      required:
+      - ciphertext
+      - node_dh_public_key
+      - nonce
+      - plaintext_body_hash
+      - salt
+      properties:
+        ciphertext:
+          type: string
+          description: The encrypted ChatCompletionResponse
+        node_dh_public_key:
+          type: string
+          description: Node's DH public key for key exchange
+        nonce:
+          type: string
+          description: Nonce used for encryption
+        plaintext_body_hash:
+          type: string
+          description: Hash of the plaintext body for verification
+        salt:
+          type: string
+          description: Salt used for encryption
     CreateChatCompletionRequest:
       allOf:
       - $ref: '#/components/schemas/ChatCompletionRequest'
