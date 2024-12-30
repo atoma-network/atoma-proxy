@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::server::{
+    error::AtomaServiceError,
     handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
     http_server::ProxyState,
     middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
@@ -9,14 +10,13 @@ use crate::server::{
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
 use axum::body::Body;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 use x25519_dalek::PublicKey;
 
@@ -117,17 +117,17 @@ pub async fn chat_completions_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>, AtomaServiceError> {
     let is_streaming = payload
         .get("stream")
-        .ok_or_else(|| {
-            error!("Missing or invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaServiceError::InvalidBody {
+            message: "Missing or invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?
         .as_bool()
-        .ok_or_else(|| {
-            error!("Invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaServiceError::InvalidBody {
+            message: "Invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
     if is_streaming {
@@ -185,10 +185,13 @@ pub async fn chat_completions_create_stream(
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
     Json(_payload): Json<CreateChatCompletionStreamRequest>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>, AtomaServiceError> {
     // This endpoint exists only for OpenAPI documentation
     // Actual streaming is handled by chat_completions_create
-    Err(StatusCode::NOT_IMPLEMENTED)
+    Err(AtomaServiceError::NotImplemented {
+        message: "Streaming is not implemented".to_string(),
+        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+    })
 }
 
 /// OpenAPI documentation structure for confidential chat completions endpoint.
@@ -255,14 +258,14 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// Returns a `Result` containing either:
 /// * An HTTP response with the chat completion result
 /// * A streaming SSE connection for real-time completions
-/// * A `StatusCode` error if the request processing fails
+/// * An `AtomaServiceError` error if the request processing fails
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::BAD_REQUEST` if:
+/// Returns `AtomaServiceError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaServiceError::InternalError` if:
 /// * The inference service request fails
 /// * Response processing encounters errors
 /// * State manager updates fail
@@ -310,17 +313,17 @@ pub async fn confidential_chat_completions_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>, AtomaServiceError> {
     let is_streaming = payload
         .get("stream")
-        .ok_or_else(|| {
-            error!("Missing or invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaServiceError::InvalidBody {
+            message: "Missing or invalid 'stream' field".to_string(),
+            endpoint: CONFIDENTIAL_CHAT_COMPLETIONS_PATH.to_string(),
         })?
         .as_bool()
-        .ok_or_else(|| {
-            error!("Invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaServiceError::InvalidBody {
+            message: "Invalid 'stream' field".to_string(),
+            endpoint: CONFIDENTIAL_CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
     if is_streaming {
@@ -375,11 +378,11 @@ pub async fn confidential_chat_completions_create(
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing the HTTP response from the inference service, or a `StatusCode` error.
+/// Returns a `Result` containing the HTTP response from the inference service, or an `AtomaServiceError` error.
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaServiceError::InternalError` if:
 /// - The inference service request fails
 /// - Response parsing fails
 /// - State manager updates fail
@@ -420,7 +423,7 @@ async fn handle_non_streaming_response(
     salt: Option<[u8; constants::SALT_SIZE]>,
     node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>, AtomaServiceError> {
     let client = reqwest::Client::new();
     let time = Instant::now();
 
@@ -430,27 +433,15 @@ async fn handle_non_streaming_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!(
-                level = "error",
-                node_address = node_address,
-                endpoint = endpoint,
-                error = ?err,
-                "Failed to send OpenAI API request"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaServiceError::InternalError {
+            message: format!("Failed to send OpenAI API request: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!(
-                level = "error",
-                node_address = node_address,
-                endpoint = endpoint,
-                error = ?err,
-                "Failed to parse OpenAI API response"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaServiceError::InternalError {
+            message: format!("Failed to parse OpenAI API response: {:?}", err),
+            endpoint: endpoint.to_string(),
         })
         .map(Json)?;
 
@@ -497,8 +488,10 @@ async fn handle_non_streaming_response(
     )
     .await
     {
-        error!("Error updating state manager: {}", e);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err(AtomaServiceError::InternalError {
+            message: format!("Error updating state manager: {}", e),
+            endpoint: endpoint.to_string(),
+        });
     }
 
     state
@@ -513,9 +506,9 @@ async fn handle_non_streaming_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Error updating node throughput performance: {}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaServiceError::InternalError {
+            message: format!("Error updating node throughput performance: {}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
     Ok(Json(response).into_response())
@@ -539,11 +532,11 @@ async fn handle_non_streaming_response(
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an SSE stream response, or a `StatusCode` error.
+/// Returns a `Result` containing an SSE stream response, or a `AtomaServiceError` error.
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaServiceError::InternalError` if:
 /// - The inference service request fails
 /// - The inference service returns a non-success status code
 ///
@@ -579,7 +572,7 @@ async fn handle_streaming_response(
     salt: Option<[u8; constants::SALT_SIZE]>,
     node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>, AtomaServiceError> {
     // NOTE: If streaming is requested, add the include_usage option to the payload
     // so that the atoma node state manager can be updated with the total number of tokens
     // that were processed for this request.
@@ -592,14 +585,16 @@ async fn handle_streaming_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| {
-            error!("Error sending request to inference service: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|e| AtomaServiceError::InternalError {
+            message: format!("Error sending request to inference service: {}", e),
+            endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        error!("Inference service returned error: {}", response.status());
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err(AtomaServiceError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
     }
 
     let stream = response.bytes_stream();
@@ -644,26 +639,28 @@ pub struct RequestModelChatCompletions {
 }
 
 impl RequestModel for RequestModelChatCompletions {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
+    fn new(request: &Value) -> Result<Self, AtomaServiceError> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            error!("Missing or invalid 'model' field");
-            StatusCode::BAD_REQUEST
+            AtomaServiceError::InvalidBody {
+                message: "Missing or invalid 'model' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+            }
         })?;
 
         let messages = request
             .get(MESSAGES)
             .and_then(|m| m.as_array())
-            .ok_or_else(|| {
-                error!("Missing or invalid 'messages' field");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaServiceError::InvalidBody {
+                message: "Missing or invalid 'messages' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
         let max_tokens = request
             .get(MAX_TOKENS)
             .and_then(|m| m.as_u64())
-            .ok_or_else(|| {
-                error!("Missing or invalid 'max_tokens' field");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaServiceError::InvalidBody {
+                message: "Missing or invalid 'max_tokens' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
         Ok(Self {
@@ -673,18 +670,18 @@ impl RequestModel for RequestModelChatCompletions {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String, AtomaServiceError> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, AtomaServiceError> {
         let tokenizer_index = state
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| {
-                error!("Model not supported");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaServiceError::InvalidBody {
+                message: "Model not supported".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
         let tokenizer = &state.tokenizers[tokenizer_index];
 
@@ -694,16 +691,16 @@ impl RequestModel for RequestModelChatCompletions {
             let content = message
                 .get("content")
                 .and_then(|content| content.as_str())
-                .ok_or_else(|| {
-                    error!("Missing or invalid message content");
-                    StatusCode::BAD_REQUEST
+                .ok_or_else(|| AtomaServiceError::InvalidBody {
+                    message: "Missing or invalid message content".to_string(),
+                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
 
             let num_tokens = tokenizer
                 .encode(content, true)
-                .map_err(|err| {
-                    error!("Failed to encode message: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaServiceError::InternalError {
+                    message: format!("Failed to encode message: {:?}", err),
+                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?
                 .get_ids()
                 .len() as u64;
@@ -739,7 +736,7 @@ pub(crate) mod utils {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if both updates succeed, or a `StatusCode::INTERNAL_SERVER_ERROR` if either update fails.
+    /// Returns `Ok(())` if both updates succeed, or a `AtomaServiceError::InternalError` if either update fails.
     ///
     /// # Errors
     ///
@@ -751,7 +748,7 @@ pub(crate) mod utils {
         stack_small_id: i64,
         estimated_total_tokens: i64,
         total_tokens: i64,
-    ) -> Result<(), StatusCode> {
+    ) -> Result<(), AtomaServiceError> {
         // Update stack num tokens
         state
             .state_manager_sender
@@ -760,9 +757,9 @@ pub(crate) mod utils {
                 estimated_total_tokens,
                 total_tokens,
             })
-            .map_err(|e| {
-                error!("Error updating stack num tokens: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|e| AtomaServiceError::InternalError {
+                message: format!("Error updating stack num tokens: {}", e),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
         Ok(())
     }

@@ -418,7 +418,7 @@ pub async fn node_public_address_registration(
             message: format!("Failed to get node Sui address: {:?}", err),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?
-        .ok_or_else(|| AtomaServiceError::InternalError {
+        .ok_or_else(|| AtomaServiceError::NotFound {
             message: "Node Sui address not found".to_string(),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;

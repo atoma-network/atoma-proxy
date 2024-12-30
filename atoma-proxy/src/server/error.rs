@@ -63,15 +63,6 @@ pub enum AtomaServiceError {
         endpoint: String,
     },
 
-    /// Error returned when the underlying ML model encounters an error
-    #[error("Model error: {model_error}")]
-    ModelError {
-        /// Description of the model error
-        model_error: String,
-        /// The endpoint that the error occurred on
-        endpoint: String,
-    },
-
     /// Error returned when authentication fails
     #[error("Authentication error: {auth_error}")]
     AuthError {
@@ -94,6 +85,24 @@ pub enum AtomaServiceError {
     #[error("Resource not found: {message}")]
     NotFound {
         /// Description of the resource not found
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
+
+    /// Error returned when an endpoint is not implemented
+    #[error("Endpoint not implemented: {message}")]
+    NotImplemented {
+        /// Description of the endpoint not implemented
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
+
+    /// Error returned when a service is unavailable
+    #[error("Service unavailable: {message}")]
+    ServiceUnavailable {
+        /// Description of the service unavailable
         message: String,
         /// The endpoint that the error occurred on
         endpoint: String,
@@ -121,10 +130,11 @@ impl AtomaServiceError {
             Self::MissingHeader { .. } => "MISSING_HEADER",
             Self::InvalidHeader { .. } => "INVALID_HEADER",
             Self::InvalidBody { .. } => "INVALID_BODY",
-            Self::ModelError { .. } => "MODEL_ERROR",
             Self::AuthError { .. } => "AUTH_ERROR",
             Self::InternalError { .. } => "INTERNAL_ERROR",
             Self::NotFound { .. } => "NOT_FOUND",
+            Self::NotImplemented { .. } => "NOT_IMPLEMENTED",
+            Self::ServiceUnavailable { .. } => "SERVICE_UNAVAILABLE",
         }
     }
 
@@ -148,10 +158,11 @@ impl AtomaServiceError {
             Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
             Self::InvalidHeader { .. } => "Invalid header value provided".to_string(),
             Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
-            Self::ModelError { model_error, .. } => format!("Model error: {}", model_error),
             Self::AuthError { .. } => "Authentication failed".to_string(),
             Self::InternalError { .. } => "Internal server error occurred".to_string(),
             Self::NotFound { .. } => "Resource not found".to_string(),
+            Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
+            Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
         }
     }
 
@@ -167,13 +178,14 @@ impl AtomaServiceError {
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::MissingHeader { .. }
-            | Self::InvalidHeader { .. }
-            | Self::InvalidBody { .. }
-            | Self::ModelError { .. } => StatusCode::BAD_REQUEST,
+            Self::MissingHeader { .. } | Self::InvalidHeader { .. } | Self::InvalidBody { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
+            Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
+            Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -190,10 +202,11 @@ impl AtomaServiceError {
             Self::MissingHeader { endpoint, .. } => endpoint.clone(),
             Self::InvalidHeader { endpoint, .. } => endpoint.clone(),
             Self::InvalidBody { endpoint, .. } => endpoint.clone(),
-            Self::ModelError { endpoint, .. } => endpoint.clone(),
             Self::AuthError { endpoint, .. } => endpoint.clone(),
             Self::InternalError { endpoint, .. } => endpoint.clone(),
             Self::NotFound { endpoint, .. } => endpoint.clone(),
+            Self::NotImplemented { endpoint, .. } => endpoint.clone(),
+            Self::ServiceUnavailable { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -217,10 +230,11 @@ impl AtomaServiceError {
             Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
             Self::InvalidHeader { message, .. } => format!("Invalid header value: {}", message),
             Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
-            Self::ModelError { model_error, .. } => format!("Model error: {}", model_error),
             Self::AuthError { auth_error, .. } => format!("Authentication error: {}", auth_error),
             Self::InternalError { message, .. } => format!("Internal server error: {}", message),
             Self::NotFound { .. } => "Resource not found".to_string(),
+            Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
+            Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {}", message),
         }
     }
 }

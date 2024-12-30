@@ -14,7 +14,7 @@ pub trait RequestModel {
     ///
     /// # Returns
     /// * `Ok(Self)` - Successfully parsed request model
-    /// * `Err(StatusCode)` - If the request is invalid or malformed
+    /// * `Err(AtomaServiceError)` - If the request is invalid or malformed
     fn new(request: &Value) -> Result<Self, AtomaServiceError>
     where
         Self: Sized;
@@ -23,7 +23,7 @@ pub trait RequestModel {
     ///
     /// # Returns
     /// * `Ok(String)` - The name/identifier of the AI model to be used
-    /// * `Err(StatusCode)` - If the model information is missing or invalid
+    /// * `Err(AtomaServiceError)` - If the model information is missing or invalid
     fn get_model(&self) -> Result<String, AtomaServiceError>;
 
     /// Calculates the estimated computational resources required for this request.
@@ -33,6 +33,6 @@ pub trait RequestModel {
     ///
     /// # Returns
     /// * `Ok(u64)` - The estimated compute units needed
-    /// * `Err(StatusCode)` - If the estimation fails or parameters are invalid
+    /// * `Err(AtomaServiceError)` - If the estimation fails or parameters are invalid
     fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, AtomaServiceError>;
 }
