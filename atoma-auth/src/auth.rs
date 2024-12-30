@@ -557,7 +557,7 @@ impl Auth {
 // TODO: Add more comprehensive tests, for now test the happy path only
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
     use atoma_state::types::AtomaAtomaStateManagerEvent;
     use atoma_sui::AtomaSuiConfig;
@@ -569,18 +569,20 @@ mod test {
     use super::Auth;
     use std::env;
 
-    fn print_current_path() {
-        match env::current_dir() {
-            Ok(path) => println!("Current path: {}", path.display()),
-            Err(e) => println!("Error getting current path: {}", e),
-        }
+    fn get_config_path() -> PathBuf {
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
+        let workspace_cargo_toml_path = PathBuf::from(manifest_dir)
+            .parent()
+            .unwrap()
+            .join("config.example.toml");
+        workspace_cargo_toml_path
     }
+
     async fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
         let config = AtomaAuthConfig::new("secret".to_string(), 1, 1);
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
-        print_current_path();
-        let sui_config = AtomaSuiConfig::from_file_path("../config.toml");
+        let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
         let sui = crate::Sui::new(&sui_config).await.unwrap();
         let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)));
         (auth, state_manager_receiver)
