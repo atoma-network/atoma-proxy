@@ -1,10 +1,9 @@
 use atoma_utils::encryption::decrypt_ciphertext;
-use reqwest::StatusCode;
 use serde_json::Value;
-use tracing::{error, info, instrument};
+use tracing::{ info, instrument};
 use x25519_dalek::SharedSecret;
 
-use super::middleware::NodeEncryptionMetadata;
+use super::{error::AtomaServiceError, http_server::NODE_PUBLIC_ADDRESS_REGISTRATION_PATH, middleware::NodeEncryptionMetadata};
 
 pub mod chat_completions;
 pub mod embeddings;
@@ -26,7 +25,7 @@ pub mod select_node_public_key;
 /// # Returns
 ///
 /// * `Ok(NodeEncryptionMetadata)` - A struct containing the extracted ciphertext and nonce as byte vectors
-/// * `Err(StatusCode)` - Returns INTERNAL_SERVER_ERROR (500) if:
+/// * `Err(AtomaServiceError)` - Returns INTERNAL_SERVER_ERROR (500) if:
 ///   * The ciphertext or nonce fields are missing from the response
 ///   * The fields are not arrays
 ///   * Array values cannot be converted to bytes
@@ -47,20 +46,24 @@ pub mod select_node_public_key;
 )]
 pub(crate) fn extract_node_encryption_metadata(
     response: Value,
-) -> Result<NodeEncryptionMetadata, StatusCode> {
+) -> Result<NodeEncryptionMetadata, AtomaServiceError> {
     let ciphertext = response
         .get("ciphertext")
         .and_then(|ciphertext| ciphertext.as_array())
         .ok_or_else(|| {
-            error!("Failed to extract ciphertext from response: {:?}", response);
-            StatusCode::INTERNAL_SERVER_ERROR
+            AtomaServiceError::InternalError {
+                message: "Failed to extract ciphertext from response".to_string(),
+                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            }
         })?;
     let ciphertext = ciphertext
         .iter()
         .map(|value| {
             value.as_u64().map(|value| value as u8).ok_or_else(|| {
-                error!("Failed to extract ciphertext from response: {:?}", response);
-                StatusCode::INTERNAL_SERVER_ERROR
+                AtomaServiceError::InternalError {
+                    message: format!("Failed to extract ciphertext from response: {:?}", response),
+                    endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+                }
             })
         })
         .collect::<Result<Vec<u8>, _>>()?;
@@ -68,21 +71,27 @@ pub(crate) fn extract_node_encryption_metadata(
         .get("nonce")
         .and_then(|nonce| nonce.as_array())
         .ok_or_else(|| {
-            error!("Failed to extract nonce from response: {:?}", response);
-            StatusCode::INTERNAL_SERVER_ERROR
+            AtomaServiceError::InternalError {
+                message: "Failed to extract nonce from response".to_string(),
+                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            }
         })?;
     let nonce = nonce
         .iter()
         .map(|value| {
             value.as_u64().map(|value| value as u8).ok_or_else(|| {
-                error!("Failed to extract nonce from response: {:?}", response);
-                StatusCode::INTERNAL_SERVER_ERROR
+                AtomaServiceError::InternalError {
+                    message: format!("Failed to extract nonce from response: {:?}", response),
+                    endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+                }
             })
         })
         .collect::<Result<Vec<u8>, _>>()?;
     let nonce = nonce.try_into().map_err(|e| {
-        error!("Failed to convert nonce to array, with error: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
+        AtomaServiceError::InternalError {
+            message: format!("Failed to convert nonce to array, with error: {:?}", e),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+        }
     })?;
     Ok(NodeEncryptionMetadata { ciphertext, nonce })
 }
@@ -102,7 +111,7 @@ pub(crate) fn extract_node_encryption_metadata(
 /// # Returns
 ///
 /// * `Ok(Value)` - The decrypted and parsed JSON response
-/// * `Err(StatusCode)` - Returns INTERNAL_SERVER_ERROR (500) if:
+/// * `Err(AtomaServiceError)` - Returns INTERNAL_SERVER_ERROR (500) if:
 ///   * Decryption fails
 ///   * The decrypted data cannot be parsed as valid JSON
 ///
@@ -134,7 +143,7 @@ pub(crate) fn handle_confidential_compute_decryption_response(
     ciphertext: &[u8],
     salt: &[u8],
     nonce: &[u8],
-) -> Result<Value, StatusCode> {
+) -> Result<Value, AtomaServiceError> {
     info!(
         target: "atoma-proxy-service",
         event = "confidential-compute-decryption-response",
@@ -142,12 +151,16 @@ pub(crate) fn handle_confidential_compute_decryption_response(
     );
     let plaintext_response_body_bytes = decrypt_ciphertext(&shared_secret, ciphertext, salt, nonce)
         .map_err(|e| {
-            error!("Failed to decrypt response: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            AtomaServiceError::InternalError {
+                message: format!("Failed to decrypt response: {:?}", e),
+                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            }
         })?;
     let response_body = serde_json::from_slice(&plaintext_response_body_bytes).map_err(|_| {
-        error!("Failed to parse response body as JSON");
-        StatusCode::INTERNAL_SERVER_ERROR
+        AtomaServiceError::InternalError {
+            message: "Failed to parse response body as JSON".to_string(),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+        }
     })?;
     Ok(response_body)
 }
@@ -167,7 +180,7 @@ pub(crate) fn handle_confidential_compute_decryption_response(
 /// # Returns
 ///
 /// * `Ok(Value)` - The decrypted and parsed JSON chunk
-/// * `Err(StatusCode)` - Returns INTERNAL_SERVER_ERROR (500) if:
+/// * `Err(AtomaServiceError)` - Returns INTERNAL_SERVER_ERROR (500) if:
 ///   * Decryption fails
 ///   * The decrypted data cannot be parsed as valid JSON
 ///
@@ -194,7 +207,7 @@ pub(crate) fn handle_confidential_compute_decryption_streaming_chunk(
     ciphertext: &[u8],
     salt: &[u8],
     nonce: &[u8],
-) -> Result<Value, StatusCode> {
+) -> Result<Value, AtomaServiceError> {
     info!(
         target: "atoma-proxy-service",
         event = "confidential-compute-decryption-response",
@@ -202,12 +215,16 @@ pub(crate) fn handle_confidential_compute_decryption_streaming_chunk(
     );
     let plaintext_response_body_bytes = decrypt_ciphertext(shared_secret, ciphertext, salt, nonce)
         .map_err(|e| {
-            error!("Failed to decrypt response: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            AtomaServiceError::InternalError {
+                message: format!("Failed to decrypt response: {:?}", e),
+                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            }
         })?;
     let chunk = serde_json::from_slice::<Value>(&plaintext_response_body_bytes).map_err(|e| {
-        error!("Failed to parse response body as JSON: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
+        AtomaServiceError::InternalError {
+            message: format!("Failed to parse response body as JSON: {:?}", e),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+        }
     })?;
     Ok(chunk)
 }
