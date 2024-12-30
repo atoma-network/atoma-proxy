@@ -31,4 +31,18 @@ entryPoints:
           to: websecure
           scheme: https
   websecure:
-    address: ":443" 
+    address: ":443"
+
+# Provider configuration
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+
+# Certificate resolvers
+certificatesResolvers:
+  myresolver:
+    acme:
+      email: ${ACME_EMAIL}
+      storage: /acme.json
+      tlsChallenge: true 
