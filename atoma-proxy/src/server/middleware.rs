@@ -297,7 +297,7 @@ pub async fn authenticate_middleware(
         endpoint: endpoint.clone(),
         model_name: request_model.to_string(),
     });
-    utils::handle_confidential_compute_content(state, &mut headers, &endpoint, node_id).await?;
+
     // update headers
     req_parts.headers = headers;
     let req = Request::from_parts(req_parts, Body::from(body_bytes));
@@ -959,113 +959,6 @@ pub(crate) mod utils {
                 endpoint: endpoint.to_string(),
             }),
         }
-    }
-
-    /// Handles the setup of confidential computing headers for secure endpoints.
-    ///
-    /// This function checks if the request is targeting a confidential endpoint and, if so,
-    /// retrieves and adds the node's X25519 public key to the request headers. This key
-    /// is used for establishing secure end-to-end encrypted communication.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Server state containing access to the state manager
-    /// * `headers` - Mutable reference to request headers where the public key will be added
-    /// * `endpoint` - The API endpoint path being accessed
-    /// * `node_id` - The ID of the selected inference node
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the headers were successfully processed, or an appropriate
-    /// `AtomaProxyError` error if any step fails.
-    ///
-    /// # Headers Added
-    ///
-    /// For confidential endpoints, adds:
-    /// * `X-Node-X25519-PublicKey`: Base64-encoded X25519 public key of the node
-    ///
-    /// # Errors
-    ///
-    /// Returns various status codes for different failure scenarios:
-    /// * `INTERNAL_SERVER_ERROR` (500):
-    ///   - Failed to communicate with state manager
-    ///   - Failed to receive public key response
-    /// * `NOT_FOUND` (404):
-    ///   - No X25519 public key found for the specified node
-    /// * `BAD_REQUEST` (400):
-    ///   - Failed to convert public key to header value
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let mut headers = HeaderMap::new();
-    /// handle_confidential_compute_content(
-    ///     state,
-    ///     &mut headers,
-    ///     CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-    ///     node_id
-    /// ).await?;
-    /// ```
-    #[instrument(
-        level = "info",
-        skip_all,
-        fields(%endpoint, %node_id)
-    )]
-    pub(crate) async fn handle_confidential_compute_content(
-        state: State<ProxyState>,
-        headers: &mut HeaderMap,
-        endpoint: &str,
-        node_id: i64,
-    ) -> Result<()> {
-        if [
-            CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-            CONFIDENTIAL_EMBEDDINGS_PATH,
-            CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-        ]
-        .contains(&endpoint)
-        {
-            let (sender, receiver) = tokio::sync::oneshot::channel();
-            state
-                .state_manager_sender
-                .send(
-                    AtomaAtomaStateManagerEvent::GetSelectedNodeX25519PublicKey {
-                        selected_node_id: node_id,
-                        result_sender: sender,
-                    },
-                )
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to get server x25519 public key: {}", err),
-                    endpoint: endpoint.to_string(),
-                })?;
-            let x25519_dalek_public_key = receiver
-                .await
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to receive server x25519 public key: {}", err),
-                    endpoint: endpoint.to_string(),
-                })?
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to get server x25519 public key: {}", err),
-                    endpoint: endpoint.to_string(),
-                })?
-                .ok_or_else(|| AtomaProxyError::NotFound {
-                    message: format!("No x25519 public key found for node {}", node_id),
-                    endpoint: endpoint.to_string(),
-                })?;
-            let x25519_dalek_public_key_str = STANDARD.encode(x25519_dalek_public_key);
-            headers.insert(
-                constants::NODE_X25519_PUBLIC_KEY,
-                HeaderValue::from_str(&x25519_dalek_public_key_str).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
-                        message: format!(
-                            "Failed to convert x25519 public key to header value: {}",
-                            e
-                        ),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?,
-            );
-        }
-        Ok(())
     }
 
     /// Verifies if a stack is valid for confidential compute operations.
