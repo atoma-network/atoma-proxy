@@ -257,7 +257,12 @@ impl Stream for Streamer {
                 let chunk_str = match std::str::from_utf8(&chunk) {
                     Ok(v) => v,
                     Err(e) => {
-                        error!("Invalid UTF-8 sequence: {}", e);
+                        error!(
+                            target = "atoma-service",
+                            level = "error",
+                            "Invalid UTF-8 sequence: {}",
+                            e
+                        );
                         return Poll::Ready(Some(Err(Error::new(format!(
                             "Invalid UTF-8 sequence: {}",
                             e
@@ -273,8 +278,13 @@ impl Stream for Streamer {
                     return Poll::Ready(None);
                 }
 
-                let chunk = serde_json::from_slice::<Value>(chunk_str.as_bytes()).map_err(|e| {
-                    error!("Error parsing chunk: {}", e);
+                let chunk = serde_json::from_str::<Value>(chunk_str).map_err(|e| {
+                    error!(
+                        target = "atoma-service",
+                        level = "error",
+                        "Error parsing chunk {chunk_str}: {}",
+                        e
+                    );
                     Error::new(format!("Error parsing chunk: {}", e))
                 })?;
 
