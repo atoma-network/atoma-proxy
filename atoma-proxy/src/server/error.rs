@@ -89,6 +89,15 @@ pub enum AtomaServiceError {
         /// The endpoint that the error occurred on
         endpoint: String,
     },
+
+    /// Error returned when a resource is not found
+    #[error("Resource not found: {message}")]
+    NotFound {
+        /// Description of the resource not found
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
 }
 
 impl AtomaServiceError {
@@ -115,6 +124,7 @@ impl AtomaServiceError {
             Self::ModelError { .. } => "MODEL_ERROR",
             Self::AuthError { .. } => "AUTH_ERROR",
             Self::InternalError { .. } => "INTERNAL_ERROR",
+            Self::NotFound { .. } => "NOT_FOUND",
         }
     }
 
@@ -141,6 +151,7 @@ impl AtomaServiceError {
             Self::ModelError { model_error, .. } => format!("Model error: {}", model_error),
             Self::AuthError { .. } => "Authentication failed".to_string(),
             Self::InternalError { .. } => "Internal server error occurred".to_string(),
+            Self::NotFound { .. } => "Resource not found".to_string(),
         }
     }
 
@@ -162,6 +173,7 @@ impl AtomaServiceError {
             | Self::ModelError { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NotFound { .. } => StatusCode::NOT_FOUND,
         }
     }
 
@@ -181,6 +193,7 @@ impl AtomaServiceError {
             Self::ModelError { endpoint, .. } => endpoint.clone(),
             Self::AuthError { endpoint, .. } => endpoint.clone(),
             Self::InternalError { endpoint, .. } => endpoint.clone(),
+            Self::NotFound { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -207,6 +220,7 @@ impl AtomaServiceError {
             Self::ModelError { model_error, .. } => format!("Model error: {}", model_error),
             Self::AuthError { auth_error, .. } => format!("Authentication error: {}", auth_error),
             Self::InternalError { message, .. } => format!("Internal server error: {}", message),
+            Self::NotFound { .. } => "Resource not found".to_string(),
         }
     }
 }

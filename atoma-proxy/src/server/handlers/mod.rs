@@ -1,9 +1,12 @@
 use atoma_utils::encryption::decrypt_ciphertext;
 use serde_json::Value;
-use tracing::{ info, instrument};
+use tracing::{info, instrument};
 use x25519_dalek::SharedSecret;
 
-use super::{error::AtomaServiceError, http_server::NODE_PUBLIC_ADDRESS_REGISTRATION_PATH, middleware::NodeEncryptionMetadata};
+use super::{
+    error::AtomaServiceError, http_server::NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
+    middleware::NodeEncryptionMetadata,
+};
 
 pub mod chat_completions;
 pub mod embeddings;
@@ -50,11 +53,9 @@ pub(crate) fn extract_node_encryption_metadata(
     let ciphertext = response
         .get("ciphertext")
         .and_then(|ciphertext| ciphertext.as_array())
-        .ok_or_else(|| {
-            AtomaServiceError::InternalError {
-                message: "Failed to extract ciphertext from response".to_string(),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
-            }
+        .ok_or_else(|| AtomaServiceError::InternalError {
+            message: "Failed to extract ciphertext from response".to_string(),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
     let ciphertext = ciphertext
         .iter()
@@ -70,11 +71,9 @@ pub(crate) fn extract_node_encryption_metadata(
     let nonce = response
         .get("nonce")
         .and_then(|nonce| nonce.as_array())
-        .ok_or_else(|| {
-            AtomaServiceError::InternalError {
-                message: "Failed to extract nonce from response".to_string(),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
-            }
+        .ok_or_else(|| AtomaServiceError::InternalError {
+            message: "Failed to extract nonce from response".to_string(),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
     let nonce = nonce
         .iter()
@@ -87,12 +86,12 @@ pub(crate) fn extract_node_encryption_metadata(
             })
         })
         .collect::<Result<Vec<u8>, _>>()?;
-    let nonce = nonce.try_into().map_err(|e| {
-        AtomaServiceError::InternalError {
+    let nonce = nonce
+        .try_into()
+        .map_err(|e| AtomaServiceError::InternalError {
             message: format!("Failed to convert nonce to array, with error: {:?}", e),
             endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
-        }
-    })?;
+        })?;
     Ok(NodeEncryptionMetadata { ciphertext, nonce })
 }
 
@@ -150,11 +149,9 @@ pub(crate) fn handle_confidential_compute_decryption_response(
         "Decrypting new response",
     );
     let plaintext_response_body_bytes = decrypt_ciphertext(&shared_secret, ciphertext, salt, nonce)
-        .map_err(|e| {
-            AtomaServiceError::InternalError {
-                message: format!("Failed to decrypt response: {:?}", e),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
-            }
+        .map_err(|e| AtomaServiceError::InternalError {
+            message: format!("Failed to decrypt response: {:?}", e),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
     let response_body = serde_json::from_slice(&plaintext_response_body_bytes).map_err(|_| {
         AtomaServiceError::InternalError {
@@ -214,11 +211,9 @@ pub(crate) fn handle_confidential_compute_decryption_streaming_chunk(
         "Decrypting new response",
     );
     let plaintext_response_body_bytes = decrypt_ciphertext(shared_secret, ciphertext, salt, nonce)
-        .map_err(|e| {
-            AtomaServiceError::InternalError {
-                message: format!("Failed to decrypt response: {:?}", e),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
-            }
+        .map_err(|e| AtomaServiceError::InternalError {
+            message: format!("Failed to decrypt response: {:?}", e),
+            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
         })?;
     let chunk = serde_json::from_slice::<Value>(&plaintext_response_body_bytes).map_err(|e| {
         AtomaServiceError::InternalError {

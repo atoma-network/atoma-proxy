@@ -429,7 +429,10 @@ pub(crate) mod auth {
     use tracing::{error, instrument};
 
     use crate::{
-        server::{handlers::request_model::RequestModel, http_server::ProxyState},
+        server::{
+            error::AtomaServiceError, handlers::request_model::RequestModel,
+            http_server::ProxyState,
+        },
         sui::{StackEntryResponse, Sui},
     };
 
@@ -687,7 +690,8 @@ pub(crate) mod auth {
         total_tokens: u64,
         user_id: i64,
         is_confidential: bool,
-    ) -> Result<SelectedNodeMetadata, StatusCode> {
+        endpoint: &str,
+    ) -> Result<SelectedNodeMetadata, AtomaServiceError> {
         let (result_sender, result_receiver) = oneshot::channel();
 
         state_manager_sender
@@ -698,20 +702,20 @@ pub(crate) mod auth {
                 is_confidential,
                 result_sender,
             })
-            .map_err(|err| {
-                error!("Failed to send GetStacksForModel event: {:?}", err);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|err| AtomaServiceError::InternalError {
+                message: format!("Failed to send GetStacksForModel event: {:?}", err),
+                endpoint: endpoint.to_string(),
             })?;
 
         let optional_stack = result_receiver
             .await
-            .map_err(|err| {
-                error!("Failed to receive GetStacksForModel result: {:?}", err);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|err| AtomaServiceError::InternalError {
+                message: format!("Failed to receive GetStacksForModel result: {:?}", err),
+                endpoint: endpoint.to_string(),
             })?
-            .map_err(|err| {
-                error!("Failed to get GetStacksForModel result: {:?}", err);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|err| AtomaServiceError::InternalError {
+                message: format!("Failed to get GetStacksForModel result: {:?}", err),
+                endpoint: endpoint.to_string(),
             })?;
 
         if let Some(stack) = optional_stack {
@@ -728,25 +732,28 @@ pub(crate) mod auth {
                     is_confidential,
                     result_sender,
                 })
-                .map_err(|err| {
-                    error!("Failed to send GetTasksForModel event: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaServiceError::InternalError {
+                    message: format!("Failed to send GetTasksForModel event: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?;
             let node = result_receiver
                 .await
-                .map_err(|err| {
-                    error!("Failed to receive GetTasksForModel result: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaServiceError::InternalError {
+                    message: format!("Failed to receive GetTasksForModel result: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?
-                .map_err(|err| {
-                    error!("Failed to get GetTasksForModel result: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaServiceError::InternalError {
+                    message: format!("Failed to get GetTasksForModel result: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?;
             let node: atoma_state::types::CheapestNode = match node {
                 Some(node) => node,
                 None => {
                     error!("No tasks found for model {}", model);
-                    return Err(StatusCode::NOT_FOUND);
+                    return Err(AtomaServiceError::NotFound {
+                        message: format!("No tasks found for model {}", model),
+                        endpoint: endpoint.to_string(),
+                    });
                 }
             };
             let StackEntryResponse {
@@ -762,9 +769,9 @@ pub(crate) mod auth {
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
-                .map_err(|err| {
-                    error!("Failed to acquire new stack entry: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaServiceError::InternalError {
+                    message: format!("Failed to acquire new stack entry: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?;
 
             let stack_small_id = event.stack_small_id.inner as i64;
