@@ -4,8 +4,7 @@ services:
     restart: always
     ports:
       - "80:80"
-      - "443:443" 
-      - "8080:8080" # Traefik 
+      - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/acme.json:/acme.json
@@ -16,16 +15,14 @@ services:
       # Enable Docker provider
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      # Enable dashboard
-      - "--api.insecure=true"
-      - "--api.dashboard=true"
       # Configure entrypoints
+      - "--entryPoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
       - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # Enable Let's Encrypt
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/acme.json"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
 
   db:
     image: postgres:13
@@ -42,12 +39,11 @@ services:
       - atoma-network
 
   atoma-proxy:
-    image: ghcr.io/atoma-network/atoma-proxy:latest
     build:
       context: .
       dockerfile: Dockerfile
       args:
-       TRACE_LEVEL: ${TRACE_LEVEL:-info}
+        TRACE_LEVEL: ${TRACE_LEVEL:-info}
     volumes:
       - ${CONFIG_PATH:-./config.toml}:/app/config.toml
       - ./logs:/app/logs
@@ -56,28 +52,18 @@ services:
     env_file:
       - .env
     ports:
-      - "${ATOMA_SERVICE_PORT:-8080}:8080"  # Expose Atoma service port
-      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"  # Expose Atoma proxy service port
+      - "${ATOMA_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
     depends_on:
       - db
     networks:
       - atoma-network
     labels:
       - "traefik.enable=true"
-      # HTTP
       - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN}`)"
-      - "traefik.http.routers.atoma-proxy.entrypoints=web"
-      - "traefik.http.routers.atoma-proxy.middlewares=redirect-to-https"
-      # HTTPS
-      - "traefik.http.routers.atoma-proxy-secure.rule=Host(`${PROXY_DOMAIN}`)"
-      - "traefik.http.routers.atoma-proxy-secure.entrypoints=websecure"
-      - "traefik.http.routers.atoma-proxy-secure.tls=true"
-      - "traefik.http.routers.atoma-proxy-secure.tls.certresolver=letsencrypt"
-      # Service
+      - "traefik.http.routers.atoma-proxy.entrypoints=websecure"
+      - "traefik.http.routers.atoma-proxy.tls.certresolver=myresolver"
       - "traefik.http.services.atoma-proxy.loadbalancer.server.port=8080"
-      # Middleware for HTTPS redirect
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
 volumes:
   postgres-data:

@@ -193,3 +193,16 @@ sudo ufw allow 8080/tcp
 
 - Ensure Sui configuration files have appropriate permissions
 - Keep keystore file secure and never commit to version control
+
+### Traefik Configuration
+
+The deployment includes Traefik as a reverse proxy to handle HTTPS traffic.
+
+#### SSL/TLS Certificates
+
+Traefik automatically handles SSL/TLS certificates through Let's Encrypt. To configure:
+
+1. Set your domain in .env:
+
+PROXY_DOMAIN=api.atomacloud.com
+ACME_EMAIL=email@example.com
