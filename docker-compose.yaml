@@ -1,4 +1,32 @@
 services:
+  traefik:
+    image: traefik:v3.2
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443" 
+      - "8080:8080" # Traefik 
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/config:/etc/traefik
+    networks:
+      - atoma-network
+    command:
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # Enable dashboard
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      # Configure entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Enable Let's Encrypt
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+
   db:
     image: postgres:13
     restart: always
@@ -34,6 +62,22 @@ services:
       - db
     networks:
       - atoma-network
+    labels:
+      - "traefik.enable=true"
+      # HTTP
+      - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN}`)"
+      - "traefik.http.routers.atoma-proxy.entrypoints=web"
+      - "traefik.http.routers.atoma-proxy.middlewares=redirect-to-https"
+      # HTTPS
+      - "traefik.http.routers.atoma-proxy-secure.rule=Host(`${PROXY_DOMAIN}`)"
+      - "traefik.http.routers.atoma-proxy-secure.entrypoints=websecure"
+      - "traefik.http.routers.atoma-proxy-secure.tls=true"
+      - "traefik.http.routers.atoma-proxy-secure.tls.certresolver=letsencrypt"
+      # Service
+      - "traefik.http.services.atoma-proxy.loadbalancer.server.port=8080"
+      # Middleware for HTTPS redirect
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
 volumes:
   postgres-data:
