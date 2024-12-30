@@ -15,7 +15,7 @@ use crate::server::{
 /// in the request. We set a default value here to be used for node selection, as a upper
 /// bound for the number of tokens for each request.
 /// TODO: In the future, this number can be dynamically adjusted based on the model.
-const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
+pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
 
 /// The endpoint for selecting a node's public key for encryption
 pub const ENCRYPTION_PUBLIC_KEY_ENDPOINT: &str = "/v1/encryption/public-key";
@@ -44,10 +44,15 @@ pub struct SelectNodePublicKeyRequest {
 pub struct SelectNodePublicKeyResponse {
     /// The public key for the selected node, base64 encoded
     public_key: Vec<u8>,
+
     /// The node small id for the selected node
     node_small_id: u64,
+
     /// Transaction digest for the transaction that acquires the stack entry, if any
     stack_entry_digest: Option<String>,
+
+    /// The stack small id to which an available stack entry was acquired, for the selected node
+    stack_small_id: u64,
 }
 
 /// Handles requests to select a node's public key for confidential compute operations.
@@ -128,6 +133,7 @@ pub(crate) async fn select_node_public_key(
             public_key: node_public_key.public_key,
             node_small_id: node_public_key.node_small_id as u64,
             stack_entry_digest: None,
+            stack_small_id: node_public_key.stack_small_id as u64,
         }))
     } else {
         let (sender, receiver) = oneshot::channel();
@@ -200,6 +206,7 @@ pub(crate) async fn select_node_public_key(
                     public_key: node_public_key.public_key,
                     node_small_id: node_public_key.node_small_id as u64,
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
+                    stack_small_id: node_public_key.stack_small_id as u64,
                 }))
             } else {
                 Err(AtomaProxyError::InternalError {

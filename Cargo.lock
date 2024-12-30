@@ -621,8 +621,6 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "utoipa-swagger-ui",
- "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]

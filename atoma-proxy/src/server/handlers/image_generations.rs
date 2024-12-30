@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::constants;
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
@@ -11,16 +10,13 @@ use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
-use x25519_dalek::PublicKey;
 
 use crate::server::error::AtomaProxyError;
-use crate::server::{
-    handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
-    http_server::ProxyState,
-    middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
-};
+use crate::server::types::ConfidentialComputeRequest;
+use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
 use super::request_model::RequestModel;
+use super::update_state_manager;
 use crate::server::Result;
 
 /// Path for the confidential image generations endpoint.
@@ -177,60 +173,49 @@ pub async fn image_generations_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    handle_image_generation_response(
-        state,
+    match handle_image_generation_response(
+        &state,
         metadata.node_address,
         metadata.node_id,
         headers,
         payload,
         metadata.num_compute_units as i64,
-        metadata.endpoint,
-        metadata.salt,
-        metadata.node_x25519_public_key,
+        metadata.endpoint.clone(),
         metadata.model_name,
     )
     .await
+    {
+        Ok(response) => Ok(response.into_response()),
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
 }
 
 /// OpenAPI documentation for the image generations endpoint.
 #[derive(OpenApi)]
 #[openapi(
     paths(confidential_image_generations_create),
-    components(schemas(CreateImageRequest, CreateImageResponse, ImageData))
+    components(schemas(ConfidentialComputeRequest))
 )]
 pub(crate) struct ConfidentialImageGenerationsOpenApi;
 
-/// Create confidential image generations
-///
-/// This endpoint follows the OpenAI API format for generating images,
-/// but with confidential processing (through AEAD encryption and TEE hardware).
-/// The handler receives pre-processed metadata from middleware and forwards the request to
-/// the selected node.
-///
-/// Note: Authentication, node selection, initial request validation and encryption
-/// are handled by middleware before this handler is called.
-///
-/// # Arguments
-/// * `metadata` - Pre-processed request metadata containing node information and compute units
-/// * `state` - The shared proxy state containing configuration and runtime information
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - The JSON request body containing the model and input text
-///
-/// # Returns
-/// * `Ok(Response)` - The image generations response from the processing node
-/// * `Err(AtomaProxyError)` - An error status code if any step fails
-///
-/// # Errors
-/// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
     path = "",
-    request_body = CreateImageRequest,
+    request_body = ConfidentialComputeRequest,
     security(
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Image generations", body = CreateImageResponse),
+        (status = OK, description = "Image generations", body = ConfidentialComputeRequest),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -245,21 +230,38 @@ pub async fn confidential_image_generations_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<Value>,
+    Json(payload): Json<ConfidentialComputeRequest>,
 ) -> Result<Response<Body>> {
-    handle_image_generation_response(
-        state,
+    let payload = serde_json::to_value(payload).map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to serialize payload: {}", e),
+        endpoint: metadata.endpoint.clone(),
+    })?;
+    match handle_image_generation_response(
+        &state,
         metadata.node_address,
         metadata.node_id,
         headers,
         payload,
         metadata.num_compute_units as i64,
-        metadata.endpoint,
-        metadata.salt,
-        metadata.node_x25519_public_key,
+        metadata.endpoint.clone(),
         metadata.model_name,
     )
     .await
+    {
+        Ok(response) => Ok(response.into_response()),
+        Err(e) => {
+            // NOTE: At this point, we do not need to update the stack num tokens,
+            // because the image generation response was correctly generated.
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
 }
 
 /// Handles the response processing for image generation requests.
@@ -302,15 +304,13 @@ pub async fn confidential_image_generations_create(
 )]
 #[allow(clippy::too_many_arguments)]
 async fn handle_image_generation_response(
-    state: ProxyState,
+    state: &ProxyState,
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     total_tokens: i64,
     endpoint: String,
-    salt: Option<[u8; constants::SALT_SIZE]>,
-    node_x25519_public_key: Option<PublicKey>,
     model_name: String,
 ) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
@@ -334,17 +334,6 @@ async fn handle_image_generation_response(
         })
         .map(Json)?;
 
-    let response = if let (Some(node_x25519_public_key), Some(salt)) =
-        (node_x25519_public_key, salt)
-    {
-        let shared_secret = state.compute_shared_secret(&node_x25519_public_key);
-        let NodeEncryptionMetadata { ciphertext, nonce } =
-            extract_node_encryption_metadata(response.0)?;
-        handle_confidential_compute_decryption_response(shared_secret, &ciphertext, &salt, &nonce)?
-    } else {
-        response.0
-    };
-
     // Update the node throughput performance
     state
         .state_manager_sender
@@ -363,7 +352,7 @@ async fn handle_image_generation_response(
             endpoint: endpoint.to_string(),
         })?;
 
-    Ok(Json(response).into_response())
+    Ok(response.into_response())
 }
 
 /// Request body for image generation

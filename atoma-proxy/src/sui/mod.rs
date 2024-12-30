@@ -214,6 +214,31 @@ impl Sui {
         Ok(signature.encode_base64())
     }
 
+    /// Sign a hash using the wallet's private key
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - The byte array to be signed
+    ///
+    /// # Returns
+    ///
+    /// Returns the base64-encoded signature string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * It fails to get the active address
+    /// * The signing operation fails
+    #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
+    pub fn sign_hash(&mut self, hash: &[u8]) -> Result<String> {
+        let active_address = self.wallet_ctx.active_address()?;
+        let signature = match &self.wallet_ctx.config.keystore {
+            Keystore::File(keystore) => keystore.sign_hashed(&active_address, hash)?,
+            Keystore::InMem(keystore) => keystore.sign_hashed(&active_address, hash)?,
+        };
+        Ok(signature.encode_base64())
+    }
+
     /// Find the USDC token wallet for the given address
     ///
     /// # Returns
