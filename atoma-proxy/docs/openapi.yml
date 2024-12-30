@@ -114,21 +114,30 @@ paths:
 
         # Returns
 
-        Returns `Ok(Json(Value::Null))` on successful registration, or an error status code
-        if the registration fails.
+        Returns `Ok(Json(Value::Null))` on successful registration, or an error if the registration fails.
 
         # Errors
 
-        Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
-        * The state manager channel is closed
-        * The registration event cannot be sent
+        Returns various `AtomaProxyError` variants:
+        * `MissingHeader` - If the signature header is missing
+        * `InvalidHeader` - If the signature header is malformed
+        * `InvalidBody` - If:
+          - The request body cannot be read
+          - The signature is invalid
+          - The body cannot be parsed
+          - The sui address doesn't match the signature
+        * `InternalError` - If:
+          - The state manager channel is closed
+          - The registration event cannot be sent
+          - Node Sui address lookup fails
 
         # Example Request Payload
 
         ```json
         {
             "node_small_id": 123,
-            "public_address": "http://node-123.example.com:8080"
+            "public_address": "http://node-123.example.com:8080",
+            "country": "US"
         }
         ```
       operationId: node_public_address_registration
@@ -250,14 +259,14 @@ paths:
         Returns a `Result` containing either:
         * An HTTP response with the chat completion result
         * A streaming SSE connection for real-time completions
-        * A `StatusCode` error if the request processing fails
+        * An `AtomaProxyError` error if the request processing fails
 
         # Errors
 
-        Returns `StatusCode::BAD_REQUEST` if:
+        Returns `AtomaProxyError::InvalidBody` if:
         * The 'stream' field is missing or invalid in the payload
 
-        Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+        Returns `AtomaProxyError::InternalError` if:
         * The inference service request fails
         * Response processing encounters errors
         * State manager updates fail
@@ -322,7 +331,7 @@ paths:
 
         # Returns
         * `Ok(Response)` - The embeddings response from the processing node
-        * `Err(StatusCode)` - An error status code if any step fails
+        * `Err(AtomaProxyError)` - An error status code if any step fails
 
         # Errors
         * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -370,7 +379,7 @@ paths:
 
         # Returns
         * `Ok(Response)` - The embeddings response from the processing node
-        * `Err(StatusCode)` - An error status code if any step fails
+        * `Err(AtomaProxyError)` - An error status code if any step fails
 
         # Errors
         * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -413,7 +422,7 @@ paths:
         * `payload` - JSON payload containing image generation parameters
 
         # Returns
-        * `Result<Response<Body>, StatusCode>` - The processed response from the AI node or an error status
+        * `Result<Response<Body>>` - The processed response from the AI node or an error status
 
         # Errors
         * Returns various status codes based on the underlying `handle_image_generation_response`:
@@ -471,7 +480,7 @@ paths:
 
         # Returns
         * `Ok(Response)` - The image generations response from the processing node
-        * `Err(StatusCode)` - An error status code if any step fails
+        * `Err(AtomaProxyError)` - An error status code if any step fails
 
         # Errors
         * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -521,7 +530,7 @@ paths:
           - The selected node's public key (base64 encoded)
           - The node's small ID
           - Optional stack entry digest (if a new stack entry was acquired)
-        - `StatusCode` error if:
+        - `AtomaProxyError` error if:
           - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
           - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
 
