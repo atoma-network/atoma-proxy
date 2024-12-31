@@ -5,3 +5,6 @@ logs/
 cursor.toml
 
 .env
+
+# Traefik
+traefik/acme.json

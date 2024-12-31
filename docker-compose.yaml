@@ -7,11 +7,15 @@ services:
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/acme.json:/acme.json
-      - ./traefik/config:/etc/traefik
-    networks:
-      - atoma-network
+      - type: bind
+        source: ./traefik/acme.json
+        target: /acme.json
+      - type: bind
+        source: ./traefik/entrypoint.sh
+        target: /usr/local/bin/traefik-entrypoint.sh
+    entrypoint: ["/usr/local/bin/traefik-entrypoint.sh"]
     command:
+      - "traefik"
       # Enable Docker provider
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -61,8 +65,10 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN}`)"
       - "traefik.http.routers.atoma-proxy.entrypoints=websecure"
+      - "traefik.http.routers.atoma-proxy.tls=true"
       - "traefik.http.routers.atoma-proxy.tls.certresolver=myresolver"
-      - "traefik.http.services.atoma-proxy.loadbalancer.server.port=8080"
+      - "traefik.http.services.atoma-proxy-service.loadbalancer.server.port=8080"
+      - "traefik.http.routers.atoma-proxy.service=atoma-proxy-service"
 
 volumes:
   postgres-data:
