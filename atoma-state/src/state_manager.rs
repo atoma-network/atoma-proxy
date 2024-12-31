@@ -4732,6 +4732,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_verify_stack_for_confidential_compute_request() -> Result<()> {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
@@ -4820,6 +4821,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() -> Result<()> {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
