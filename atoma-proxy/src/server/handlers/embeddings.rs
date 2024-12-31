@@ -273,18 +273,10 @@ pub async fn confidential_embeddings_create(
             // with a "total_tokens" field, which correctly specifies the number of total tokens
             // processed by the node, as the latter is running within a TEE.
             let total_tokens = response
-                .get("total_tokens")
-                .map(|u| {
-                    u.as_u64().ok_or_else(|| AtomaProxyError::InternalError {
-                        message: "Failed to get total tokens".to_string(),
-                        endpoint: metadata.endpoint.clone(),
-                    })
-                })
-                .transpose()
-                .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to get total tokens: {}", e),
-                    endpoint: metadata.endpoint.clone(),
-                })?
+                .get("usage")
+                .and_then(|usage| usage.get("total_tokens"))
+                .and_then(|total_tokens| total_tokens.as_u64())
+                .map(|n| n as i64)
                 .unwrap_or(0);
             update_state_manager(
                 &state.state_manager_sender,
