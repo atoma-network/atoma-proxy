@@ -1,35 +1,26 @@
 services:
   traefik:
-    image: traefik:v3.2
+    image: traefik:v3.3.0-rc2
     restart: always
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - type: bind
-        source: ./traefik/acme.json
-        target: /acme.json
-      - type: bind
-        source: ./traefik/entrypoint.sh
-        target: /usr/local/bin/traefik-entrypoint.sh
-    entrypoint: ["/usr/local/bin/traefik-entrypoint.sh"]
+      - letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock
     command:
-      - "traefik"
-      # Enable Docker provider
-      - "--providers.docker=true"
+      - "--providers.docker"
       - "--providers.docker.exposedbydefault=false"
-      # Configure entrypoints
       - "--entryPoints.websecure.address=:443"
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
 
   db:
-    image: postgres:13
+    image: postgres:13-alpine
     restart: always
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
@@ -73,6 +64,7 @@ services:
 volumes:
   postgres-data:
   sui-config-volume:
+  letsencrypt:
 
 networks:
   atoma-network:
