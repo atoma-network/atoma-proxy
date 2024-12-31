@@ -575,8 +575,9 @@ mod test {
         let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
         let workspace_path = PathBuf::from(manifest_dir);
         let workspace_path = workspace_path.parent().unwrap();
-        let workspace_path_str = workspace_path.to_str().unwrap().replace("\\", "\\\\");
         let workspace_cargo_toml_path = workspace_path.join("config.test.toml");
+        let sui_config_path = workspace_path.join("client.yaml");
+        let sui_keystore_path = workspace_path.join("sui.keystore");
         let config_content = format!(
             r#"
 [atoma_sui]
@@ -587,8 +588,8 @@ usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd71
 request_timeout = {{ secs = 300, nanos = 0 }}
 max_concurrent_requests = 10
 limit = 100
-sui_config_path = "{workspace_path_str}\\client.yaml"
-sui_keystore_path = "{workspace_path_str}\\sui.keystore"
+sui_config_path = "{}"
+sui_keystore_path = "{}"
 cursor_path = "./cursor.toml"
 
 [atoma_state]
@@ -611,13 +612,13 @@ service_bind_address = "0.0.0.0:8081"
 secret_key = "secret_key"
 access_token_lifetime = 1
 refresh_token_lifetime = 1
-        "#
+        "#,
+            sui_config_path.to_str().unwrap().replace("\\", "\\\\"),
+            sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
         );
 
         let mut file = File::create(&workspace_cargo_toml_path).unwrap();
         file.write_all(config_content.as_bytes()).unwrap();
-        let sui_config_path = workspace_path.join("client.yaml");
-        let sui_keystore_path = workspace_path.join("sui.keystore");
 
         let mut sui_config_file = File::create(&sui_config_path).unwrap();
         sui_config_file
@@ -625,7 +626,7 @@ refresh_token_lifetime = 1
                 format!(
                     r#"---
 keystore:
-  File: "{workspace_path_str}\\sui.keystore"
+  File: "{}"
 envs:
   - alias: testnet
     rpc: "https://fullnode.testnet.sui.io:443"
@@ -633,7 +634,8 @@ envs:
     basic_auth: ~
 active_env: testnet
 active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e7160381b"
-"#
+"#,
+                    sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
                 )
                 .as_bytes(),
             )
