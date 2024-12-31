@@ -11,18 +11,6 @@ services:
       - ./traefik/config:/etc/traefik
     networks:
       - atoma-network
-    command:
-      # Enable Docker provider
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      # Configure entrypoints
-      - "--entryPoints.websecure.address=:443"
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
 
   db:
     image: postgres:13
@@ -59,10 +47,23 @@ services:
       - atoma-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN}`)"
+      - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN:-api.atomacloud.com}`)"
       - "traefik.http.routers.atoma-proxy.entrypoints=websecure"
       - "traefik.http.routers.atoma-proxy.tls.certresolver=myresolver"
+      - "traefik.http.routers.atoma-proxy.middlewares=secure-headers"
       - "traefik.http.services.atoma-proxy.loadbalancer.server.port=8080"
+
+  atoma-dashboard:
+    image: ${DASHBOARD_IMAGE:-atomacloud/dashboard:latest}
+    networks:
+      - atoma-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.atoma-dashboard.rule=Host(`${DASHBOARD_DOMAIN:-atomacloud.com}`)"
+      - "traefik.http.routers.atoma-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.atoma-dashboard.tls.certresolver=myresolver"
+      - "traefik.http.routers.atoma-dashboard.middlewares=secure-headers"
+    restart: always
 
 volumes:
   postgres-data:
