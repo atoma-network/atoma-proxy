@@ -4739,10 +4739,10 @@ mod tests {
         // Set up test data
         sqlx::query(
             r#"
-            INSERT INTO tasks (task_small_id, task_id, model_name, security_level)
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role)
             VALUES 
-                (1, 'task1', 'gpt-4', 1),  -- Confidential task
-                (2, 'task2', 'gpt-4', 0)   -- Non-confidential task
+                (1, 'task1', 'gpt-4', 1, 0),  -- Confidential task
+                (2, 'task2', 'gpt-4', 0, 0)   -- Non-confidential task
             "#,
         )
         .execute(&state.db)
@@ -4827,8 +4827,8 @@ mod tests {
         // Set up initial test data
         sqlx::query(
             r#"
-            INSERT INTO tasks (task_small_id, task_id, model_name, security_level)
-            VALUES (1, 'task1', 'gpt-4', 1)
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role)
+            VALUES (1, 'task1', 'gpt-4', 1, 0)
             "#,
         )
         .execute(&state.db)
