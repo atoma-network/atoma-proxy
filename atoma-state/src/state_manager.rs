@@ -4897,7 +4897,8 @@ mod tests {
         // Update node's key for new rotation
         sqlx::query(
             r#"
-            UPDATE node_public_keys SET public_key = 'key1_new', tee_remote_attestation_bytes = 'attestation1_new', key_rotation_counter = 2 WHERE node_small_id = 1 AND epoch = 2
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES (1, 2, 2, 'key1_new', 'attestation1_new', true)
             "#,
         )
         .execute(&state.db)
