@@ -4852,7 +4852,6 @@ mod tests {
         .execute(&state.db)
         .await?;
 
-
         sqlx::query(
             r#"
             INSERT INTO stacks (
