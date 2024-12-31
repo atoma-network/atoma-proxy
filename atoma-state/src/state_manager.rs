@@ -4739,10 +4739,10 @@ mod tests {
         // Set up test data
         sqlx::query(
             r#"
-            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role)
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
             VALUES 
-                (1, 'task1', 'gpt-4', 1, 0),  -- Confidential task
-                (2, 'task2', 'gpt-4', 0, 0)   -- Non-confidential task
+                (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0),  -- Confidential task
+                (2, 'task2', 'gpt-4', 0, 0, false, null, null, 0)   -- Non-confidential task
             "#,
         )
         .execute(&state.db)
@@ -4750,8 +4750,8 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO key_rotations (key_rotation_counter)
-            VALUES (1)
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
             "#,
         )
         .execute(&state.db)
@@ -4759,11 +4759,11 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO node_public_keys (node_small_id, public_key, is_valid, key_rotation_counter)
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
             VALUES 
-                (1, 'key1', true, 1),   -- Valid key
-                (2, 'key2', false, 1),  -- Invalid key
-                (3, 'key3', true, 1)    -- Valid key
+                (1, 1, 1, 'key1', 'attestation1', true),   -- Valid key
+                (2, 1, 1, 'key2', 'attestation2', false),  -- Invalid key
+                (3, 1, 1, 'key3', 'attestation3', true)    -- Valid key
             "#,
         )
         .execute(&state.db)
@@ -4772,16 +4772,16 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO stacks (
-                stack_small_id, stack_id, task_small_id, selected_node_id, 
-                num_compute_units, already_computed_units, in_settle_period
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, 
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
             )
             VALUES 
-                (1, 'stack1', 1, 1, 1000, 0, false),      -- Valid stack, confidential task
-                (2, 'stack2', 1, 2, 1000, 0, false),      -- Invalid node key
-                (3, 'stack3', 2, 1, 1000, 0, false),      -- Non-confidential task
-                (4, 'stack4', 1, 1, 1000, 900, false),    -- Not enough compute units
-                (5, 'stack5', 1, 1, 1000, 0, true),       -- In settle period
-                (6, 'stack6', 1, 3, 1000, 500, false)     -- Valid stack with partial usage
+                (1, '0x1', 'stack1', 1, 1, 1000, 0, false, 'hash1', 1, 1),      -- Valid stack, confidential task
+                (2, '0x2', 'stack2', 1, 2, 1000, 0, false, 'hash2', 1, 1),      -- Invalid node key
+                (3, '0x3', 'stack3', 2, 1, 1000, 0, false, 'hash3', 1, 1),      -- Non-confidential task
+                (4, '0x4', 'stack4', 1, 1, 1000, 900, false, 'hash4', 1, 1),    -- Not enough compute units
+                (5, '0x5', 'stack5', 1, 1, 1000, 0, true, 'hash5', 1, 1),       -- In settle period
+                (6, '0x6', 'stack6', 1, 3, 1000, 500, false, 'hash6', 1, 1)     -- Valid stack with partial usage
             "#,
         )
         .execute(&state.db)
@@ -4827,8 +4827,8 @@ mod tests {
         // Set up initial test data
         sqlx::query(
             r#"
-            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role)
-            VALUES (1, 'task1', 'gpt-4', 1, 0)
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
+            VALUES (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0)
             "#,
         )
         .execute(&state.db)
@@ -4836,8 +4836,8 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO key_rotations (key_rotation_counter)
-            VALUES (1)
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
             "#,
         )
         .execute(&state.db)
@@ -4845,20 +4845,21 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO node_public_keys (node_small_id, public_key, is_valid, key_rotation_counter)
-            VALUES (1, 'key1', true, 1)
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES (1, 1, 1, 'key1', 'attestation1', true)
             "#,
         )
         .execute(&state.db)
         .await?;
+
 
         sqlx::query(
             r#"
             INSERT INTO stacks (
-                stack_small_id, stack_id, task_small_id, selected_node_id, 
-                num_compute_units, already_computed_units, in_settle_period
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, 
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
             )
-            VALUES (1, 'stack1', 1, 1, 1000, 0, false)
+            VALUES (1, '0x1', 'stack1', 1, 1, 1000, 0, false, 'hash1', 1, 1)
             "#,
         )
         .execute(&state.db)
@@ -4873,8 +4874,8 @@ mod tests {
         // Simulate key rotation
         sqlx::query(
             r#"
-            INSERT INTO key_rotations (key_rotation_counter)
-            VALUES (2)
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (2, 2)
             "#,
         )
         .execute(&state.db)
@@ -4889,8 +4890,8 @@ mod tests {
         // Update node's key for new rotation
         sqlx::query(
             r#"
-            INSERT INTO node_public_keys (node_small_id, public_key, is_valid, key_rotation_counter)
-            VALUES (1, 'key1_new', true, 2)
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES (1, 2, 2, 'key1_new', 'attestation1_new', true)
             "#,
         )
         .execute(&state.db)
