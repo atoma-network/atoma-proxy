@@ -4772,16 +4772,16 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO stacks (
-                stack_small_id, owner, stack_id, task_small_id, selected_node_id, 
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
                 num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
             )
             VALUES 
-                (1, '0x1', 'stack1', 1, 1, 1000, 0, false, 'hash1', 1, 1),      -- Valid stack, confidential task
-                (2, '0x2', 'stack2', 1, 2, 1000, 0, false, 'hash2', 1, 1),      -- Invalid node key
-                (3, '0x3', 'stack3', 2, 1, 1000, 0, false, 'hash3', 1, 1),      -- Non-confidential task
-                (4, '0x4', 'stack4', 1, 1, 1000, 900, false, 'hash4', 1, 1),    -- Not enough compute units
-                (5, '0x5', 'stack5', 1, 1, 1000, 0, true, 'hash5', 1, 1),       -- In settle period
-                (6, '0x6', 'stack6', 1, 3, 1000, 500, false, 'hash6', 1, 1)     -- Valid stack with partial usage
+                (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1),      -- Valid stack, confidential task
+                (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1),      -- Invalid node key
+                (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1),      -- Non-confidential task
+                (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1),    -- Not enough compute units
+                (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1),       -- In settle period
+                (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1)     -- Valid stack with partial usage
             "#,
         )
         .execute(&state.db)
@@ -4855,10 +4855,10 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO stacks (
-                stack_small_id, owner, stack_id, task_small_id, selected_node_id, 
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
                 num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
             )
-            VALUES (1, '0x1', 'stack1', 1, 1, 1000, 0, false, 'hash1', 1, 1)
+            VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1)
             "#,
         )
         .execute(&state.db)
