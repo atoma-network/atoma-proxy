@@ -1659,6 +1659,7 @@ impl AtomaState {
     /// This function will return an error if:
     /// - The database query fails to execute.
     /// - The specified stack is not found (`AtomaStateManagerError::StackNotFound`).
+    /// - The specified stack does not have enough compute units to lock.
     ///
     /// # Example
     ///
@@ -1680,16 +1681,21 @@ impl AtomaState {
             %available_compute_units
         )
     )]
-    pub async fn lock_compute_units_for_stack(
+    pub async fn lock_compute_units(
         &self,
         stack_small_id: i64,
         available_compute_units: i64,
     ) -> Result<()> {
-        let result = sqlx::query("UPDATE stacks SET already_computed_units = already_computed_units + $1 WHERE stack_small_id = $2")
-            .bind(available_compute_units)
-            .bind(stack_small_id)
-            .execute(&self.db)
-            .await?;
+        let result = sqlx::query(
+            "UPDATE stacks 
+            SET already_computed_units = already_computed_units + $1 
+            WHERE stack_small_id = $2 
+            AND already_computed_units + $1 <= num_compute_units",
+        )
+        .bind(available_compute_units)
+        .bind(stack_small_id)
+        .execute(&self.db)
+        .await?;
         if result.rows_affected() == 0 {
             return Err(AtomaStateManagerError::StackNotFound);
         }

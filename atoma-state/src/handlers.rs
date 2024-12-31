@@ -844,7 +844,7 @@ pub(crate) async fn handle_state_manager_event(
         } => {
             let is_locked = state_manager
                 .state
-                .lock_compute_units_for_stack(stack_small_id, available_compute_units)
+                .lock_compute_units(stack_small_id, available_compute_units)
                 .await;
             result_sender
                 .send(is_locked)
