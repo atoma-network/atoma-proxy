@@ -4379,7 +4379,7 @@ mod tests {
             create_test_node(&state.db, node_id).await?;
             create_test_node_subscription(&state.db, node_id, 1, price, 1000).await?;
             create_test_node_public_key(&state.db, node_id, true).await?;
-            create_test_stack(&state.db, 1, 1, node_id, price, 1000, node_id)
+            create_test_stack(&state.db, 1, node_id, node_id, price, 1000, node_id)
                 .await
                 .unwrap();
         }

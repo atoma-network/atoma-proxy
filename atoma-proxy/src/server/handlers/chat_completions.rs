@@ -203,7 +203,7 @@ async fn handle_chat_completions_request(
     if is_streaming {
         handle_streaming_response(
             state,
-            metadata.node_address.clone(),
+            &metadata.node_address,
             metadata.node_id,
             headers,
             &payload,
@@ -216,7 +216,7 @@ async fn handle_chat_completions_request(
     } else {
         handle_non_streaming_response(
             state,
-            metadata.node_address.clone(),
+            &metadata.node_address,
             metadata.node_id,
             headers,
             &payload,
@@ -371,10 +371,16 @@ pub async fn confidential_chat_completions_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    let confidential_compute_request: ConfidentialComputeRequest =
-        serde_json::from_value(payload.clone()).map_err(|e| AtomaProxyError::InvalidBody {
-            message: format!("Error parsing confidential compute request: {}", e),
-            endpoint: CONFIDENTIAL_CHAT_COMPLETIONS_PATH.to_string(),
+    let is_streaming = payload
+        .get("stream")
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Missing or invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+        })?
+        .as_bool()
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
     match handle_chat_completions_request(
@@ -382,7 +388,7 @@ pub async fn confidential_chat_completions_create(
         &metadata,
         headers,
         payload,
-        confidential_compute_request.stream.unwrap_or(false),
+        is_streaming,
     )
     .await
     {
@@ -454,7 +460,7 @@ pub async fn confidential_chat_completions_create(
 #[allow(clippy::too_many_arguments)]
 async fn handle_non_streaming_response(
     state: &ProxyState,
-    node_address: String,
+    node_address: &String,
     selected_node_id: i64,
     headers: HeaderMap,
     payload: &Value,
@@ -589,7 +595,7 @@ async fn handle_non_streaming_response(
 #[allow(clippy::too_many_arguments)]
 async fn handle_streaming_response(
     state: &ProxyState,
-    node_address: String,
+    node_address: &String,
     node_id: i64,
     headers: HeaderMap,
     payload: &Value,
