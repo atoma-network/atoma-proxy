@@ -4,7 +4,7 @@ use auth::{authenticate_and_process, ProcessedRequest};
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{request::Parts, HeaderMap, HeaderValue},
+    http::{request::Parts, HeaderValue},
     middleware::Next,
     response::Response,
 };

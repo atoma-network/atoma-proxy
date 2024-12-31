@@ -4081,7 +4081,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -4110,7 +4110,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with multiple nodes at different prices
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 0, "gpt-4", 1).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -4150,7 +4150,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data for confidential computing
-        create_test_task(&state.db, 1, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
         create_key_rotation(&state.db, 1, 1).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
@@ -4180,7 +4180,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with invalid public key
-        create_test_task(&state.db, 1, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -4245,7 +4245,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with invalid subscription
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
 
         // Create invalid subscription (valid = false)
@@ -4295,8 +4295,8 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create tasks with different security levels
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
-        create_test_task(&state.db, 2, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_task(&state.db, 2, "gpt-4", 1).await.unwrap();
         create_key_rotation(&state.db, 1, 1).await.unwrap();
 
         create_test_node(&state.db, 1).await.unwrap();
@@ -4342,7 +4342,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create base task with security level 2 (confidential)
-        create_test_task(&state.db, 1, "gpt-4", 2).await?;
+        create_test_task(&state.db, 1, "gpt-4", 1).await?;
 
         Ok(state)
     }
@@ -4477,8 +4477,8 @@ mod tests {
     async fn test_security_level_requirement() -> Result<()> {
         let state = setup_test_environment().await?;
 
-        // Create task with security level 1 (non-confidential)
-        create_test_task(&state.db, 2, "gpt-4", 1).await?;
+        // Create task with security level 0 (non-confidential)
+        create_test_task(&state.db, 2, "gpt-4", 0).await?;
 
         // Setup valid node subscribed to non-confidential task
         create_test_node(&state.db, 1).await?;
@@ -4741,8 +4741,8 @@ mod tests {
             r#"
             INSERT INTO tasks (task_small_id, task_id, model_name, security_level)
             VALUES 
-                (1, 'task1', 'gpt-4', 2),  -- Confidential task
-                (2, 'task2', 'gpt-4', 1)   -- Non-confidential task
+                (1, 'task1', 'gpt-4', 1),  -- Confidential task
+                (2, 'task2', 'gpt-4', 0)   -- Non-confidential task
             "#,
         )
         .execute(&state.db)
@@ -4828,7 +4828,7 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tasks (task_small_id, task_id, model_name, security_level)
-            VALUES (1, 'task1', 'gpt-4', 2)
+            VALUES (1, 'task1', 'gpt-4', 1)
             "#,
         )
         .execute(&state.db)
