@@ -248,10 +248,12 @@ pub async fn confidential_image_generations_create(
     )
     .await
     {
-        Ok(response) => Ok(response.into_response()),
-        Err(e) => {
+        Ok(response) => {
             // NOTE: At this point, we do not need to update the stack num tokens,
             // because the image generation response was correctly generated.
+            Ok(response.into_response())
+        }
+        Err(e) => {
             update_state_manager(
                 &state.state_manager_sender,
                 metadata.selected_stack_small_id,

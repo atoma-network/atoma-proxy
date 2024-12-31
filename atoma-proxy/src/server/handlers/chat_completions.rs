@@ -383,15 +383,7 @@ pub async fn confidential_chat_completions_create(
             endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
-    match handle_chat_completions_request(
-        &state,
-        &metadata,
-        headers,
-        payload,
-        is_streaming,
-    )
-    .await
-    {
+    match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
         Err(e) => {
             update_state_manager(
