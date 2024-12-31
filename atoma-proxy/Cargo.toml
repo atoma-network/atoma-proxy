@@ -28,6 +28,7 @@ serde_yaml = { workspace = true }
 sqlx.workspace = true
 sui-keys.workspace = true
 sui-sdk.workspace = true
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing-appender.workspace = true
 tracing-subscriber = { workspace = true, features = [

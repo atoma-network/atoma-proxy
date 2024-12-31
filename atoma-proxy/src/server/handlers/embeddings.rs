@@ -5,24 +5,26 @@ use atoma_utils::constants;
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
     Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 use x25519_dalek::PublicKey;
 
 use crate::server::{
+    error::AtomaProxyError,
     handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
     http_server::ProxyState,
     middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
 };
 
 use super::request_model::RequestModel;
+use crate::server::Result;
 
 /// Path for the confidential embeddings endpoint.
 ///
@@ -67,15 +69,23 @@ pub struct RequestModelEmbeddings {
 pub(crate) struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
-        let model = request
-            .get(MODEL)
-            .and_then(|m| m.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
-        let input = request
-            .get(INPUT)
-            .and_then(|i| i.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+    fn new(request: &Value) -> Result<Self> {
+        let model =
+            request
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Model field is required".to_string(),
+                    endpoint: EMBEDDINGS_PATH.to_string(),
+                })?;
+        let input =
+            request
+                .get(INPUT)
+                .and_then(|i| i.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Input field is required".to_string(),
+                    endpoint: EMBEDDINGS_PATH.to_string(),
+                })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -83,26 +93,26 @@ impl RequestModel for RequestModelEmbeddings {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
         let tokenizer_index = state
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| {
-                error!("Model not supported");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaProxyError::InvalidBody {
+                message: "Model not supported".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
             })?;
         let tokenizer = &state.tokenizers[tokenizer_index];
 
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
-            .map_err(|err| {
-                error!("Failed to encode input: {:?}", err);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to encode input: {:?}", err),
+                endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
             .len() as u64;
@@ -128,7 +138,7 @@ impl RequestModel for RequestModelEmbeddings {
 ///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -156,7 +166,7 @@ pub async fn embeddings_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let RequestMetadataExtension {
         node_address,
         node_id,
@@ -209,7 +219,7 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
 ///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -237,7 +247,7 @@ pub async fn confidential_embeddings_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let RequestMetadataExtension {
         node_address,
         node_id,
@@ -278,7 +288,7 @@ pub async fn confidential_embeddings_create(
 ///
 /// # Returns
 /// * `Ok(Response<Body>)` - The processed embeddings response from the AI node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * Returns `INTERNAL_SERVER_ERROR` if:
@@ -306,7 +316,7 @@ async fn handle_embeddings_response(
     salt: Option<[u8; constants::SALT_SIZE]>,
     node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
@@ -316,15 +326,15 @@ async fn handle_embeddings_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!("Failed to send embeddings request: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to send embeddings request: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!("Failed to parse embeddings response: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse embeddings response: {:?}", err),
+            endpoint: endpoint.to_string(),
         })
         .map(Json)?;
 
@@ -352,9 +362,9 @@ async fn handle_embeddings_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Failed to update node throughput performance: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to update node throughput performance: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
     Ok(Json(response).into_response())

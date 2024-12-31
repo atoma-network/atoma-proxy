@@ -3,17 +3,17 @@ use std::time::Instant;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
 use axum::body::Body;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 use x25519_dalek::PublicKey;
 
+use crate::server::error::AtomaProxyError;
 use crate::server::{
     handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
     http_server::ProxyState,
@@ -21,6 +21,7 @@ use crate::server::{
 };
 
 use super::request_model::RequestModel;
+use crate::server::Result;
 
 /// Path for the confidential image generations endpoint.
 ///
@@ -65,19 +66,30 @@ pub struct RequestModelImageGenerations {
 pub(crate) struct ImageGenerationsOpenApi;
 
 impl RequestModel for RequestModelImageGenerations {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
-        let model = request
-            .get(MODEL)
-            .and_then(|m| m.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+    fn new(request: &Value) -> Result<Self> {
+        let model =
+            request
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Model field   is required".to_string(),
+                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+                })?;
         let n = request
             .get(N)
             .and_then(|n| n.as_u64())
-            .ok_or(StatusCode::BAD_REQUEST)?;
-        let size = request
-            .get(SIZE)
-            .and_then(|s| s.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+            .ok_or(AtomaProxyError::InvalidBody {
+                message: "N field is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            })?;
+        let size =
+            request
+                .get(SIZE)
+                .and_then(|s| s.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Size field is required".to_string(),
+                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+                })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -86,11 +98,11 @@ impl RequestModel for RequestModelImageGenerations {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, _state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, _state: &ProxyState) -> Result<u64> {
         // Parse dimensions from size string (e.g., "1024x1024")
         let dimensions: Vec<u64> = self
             .size
@@ -99,8 +111,10 @@ impl RequestModel for RequestModelImageGenerations {
             .collect();
 
         if dimensions.len() != 2 {
-            error!("Invalid size format: {}", self.size);
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(AtomaProxyError::InvalidBody {
+                message: format!("Invalid size format: {}", self.size),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            });
         }
 
         let width = dimensions[0];
@@ -124,7 +138,7 @@ impl RequestModel for RequestModelImageGenerations {
 /// * `payload` - JSON payload containing image generation parameters
 ///
 /// # Returns
-/// * `Result<Response<Body>, StatusCode>` - The processed response from the AI node or an error status
+/// * `Result<Response<Body>>` - The processed response from the AI node or an error status
 ///
 /// # Errors
 /// * Returns various status codes based on the underlying `handle_image_generation_response`:
@@ -162,7 +176,7 @@ pub async fn image_generations_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     handle_image_generation_response(
         state,
         metadata.node_address,
@@ -204,7 +218,7 @@ pub(crate) struct ConfidentialImageGenerationsOpenApi;
 ///
 /// # Returns
 /// * `Ok(Response)` - The image generations response from the processing node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -232,7 +246,7 @@ pub async fn confidential_image_generations_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     handle_image_generation_response(
         state,
         metadata.node_address,
@@ -267,7 +281,7 @@ pub async fn confidential_image_generations_create(
 /// * `_estimated_total_tokens` - Estimated computational cost (currently unused)
 ///
 /// # Returns
-/// * `Result<Response<Body>, StatusCode>` - The processed response from the AI node or an error status
+/// * `Result<Response<Body>, AtomaProxyError>` - The processed response from the AI node or an error status
 ///
 /// # Errors
 /// * Returns `INTERNAL_SERVER_ERROR` (500) if:
@@ -298,7 +312,7 @@ async fn handle_image_generation_response(
     salt: Option<[u8; constants::SALT_SIZE]>,
     node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
@@ -308,15 +322,15 @@ async fn handle_image_generation_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!("Failed to send image generation request: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to send image generation request: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!("Failed to parse image generation response: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse image generation response: {:?}", err),
+            endpoint: endpoint.to_string(),
         })
         .map(Json)?;
 
@@ -344,9 +358,9 @@ async fn handle_image_generation_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Failed to update node throughput performance: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to update node throughput performance: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
     Ok(Json(response).into_response())
