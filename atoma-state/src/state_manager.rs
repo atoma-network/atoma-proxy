@@ -4357,7 +4357,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_basic_selection() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         // Setup single valid node
         create_test_node(&state.db, 1).await?;
@@ -4380,7 +4379,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_price_based_selection() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         // Setup nodes with different prices
         for (node_id, price) in [(1, 200), (2, 100), (3, 300)] {
@@ -4410,7 +4408,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_compute_capacity_requirements() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         // Setup nodes with different compute capacities
         create_test_node(&state.db, 1).await?;
@@ -4452,7 +4449,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_invalid_configurations() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         // Setup node with invalid public key
         create_test_node(&state.db, 1).await?;
@@ -4486,7 +4482,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_security_level_requirement() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         // Create task with security level 0 (non-confidential)
         create_test_task(&state.db, 2, "gpt-4", 0).await?;
@@ -4513,7 +4508,7 @@ mod tests {
     #[serial_test::serial]
     async fn test_edge_cases() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
+
         create_test_node(&state.db, 1).await?;
         create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
         create_test_node_public_key(&state.db, 1, true).await?;
@@ -4549,7 +4544,6 @@ mod tests {
     #[serial_test::serial]
     async fn test_concurrent_access() -> Result<()> {
         let state = setup_test_environment().await?;
-        truncate_tables(&state.db).await;
 
         create_test_node(&state.db, 1).await?;
         create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
