@@ -802,7 +802,7 @@ pub(crate) mod auth {
             // This will fail if the balance is not enough.
             let (result_sender, result_receiver) = oneshot::channel();
             state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::WithdrawBalance {
+                .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
                     amount: (node.price_per_one_million_compute_units * node.max_num_compute_units)
                         as i64,

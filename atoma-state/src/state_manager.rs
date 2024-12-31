@@ -3996,7 +3996,7 @@ impl AtomaState {
         Ok(())
     }
 
-    /// Withdraw balance for the user.
+    /// Deduct from the usdc balance for the user.
     ///
     /// This method withdraws the balance from the user in the `users` table.
     ///
@@ -4014,7 +4014,7 @@ impl AtomaState {
     /// This function will return an error if:
     ///
     /// - The database query fails to execute (that could mean the balance is not available)
-    pub async fn withdraw_balance(&self, user_id: i64, balance: i64) -> Result<()> {
+    pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1")
             .bind(user_id)
             .bind(balance)

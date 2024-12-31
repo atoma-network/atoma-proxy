@@ -503,8 +503,8 @@ impl Auth {
         }
         let sender = sender.unwrap();
         let receiver = receiver.unwrap();
-        let address = self.sui.write().await.get_wallet_address()?;
-        if receiver == address {
+        let own_address = self.sui.write().await.get_wallet_address()?;
+        if receiver == own_address {
             let (result_sender, result_receiver) = oneshot::channel();
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::GetUserId {

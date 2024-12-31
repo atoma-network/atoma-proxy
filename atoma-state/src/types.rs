@@ -621,7 +621,7 @@ pub enum AtomaAtomaStateManagerEvent {
         timestamp: i64,
     },
     /// Withdraws the balance of a user
-    WithdrawBalance {
+    DeductFromUsdc {
         user_id: i64,
         amount: i64,
         result_sender: oneshot::Sender<Result<()>>,
