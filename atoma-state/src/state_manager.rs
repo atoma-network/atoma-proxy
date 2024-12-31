@@ -449,7 +449,7 @@ impl AtomaState {
     /// This method queries the database to find the cheapest valid node that:
     /// 1. Has a valid public key for encryption
     /// 2. Has an associated stack with sufficient remaining compute capacity
-    /// 3. Supports the specified model with security level 2 (confidential computing)
+    /// 3. Supports the specified model with security level 1 (confidential computing)
     ///
     /// The nodes are ordered by each stac's price per one million compute units, so the most cost-effective stack meeting
     /// all requirements will be selected.
@@ -475,7 +475,7 @@ impl AtomaState {
     ///
     /// The results are filtered to ensure:
     /// - The stack supports the requested model
-    /// - The task requires security level 2 (confidential computing)
+    /// - The task requires security level 1 (confidential computing)
     /// - The stack has sufficient remaining compute units
     /// - The node's public key is valid
     ///
