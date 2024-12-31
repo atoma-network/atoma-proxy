@@ -1,5 +1,6 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use flume::Sender;
+use tracing::instrument;
 
 use super::error::AtomaProxyError;
 use crate::server::Result;
@@ -34,6 +35,11 @@ pub mod select_node_public_key;
 /// This function will return an error if:
 /// - The state manager channel is closed
 /// - Either update operation fails to complete
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(stack_small_id, estimated_total_tokens, total_tokens, endpoint)
+)]
 pub fn update_state_manager(
     state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
     stack_small_id: i64,
