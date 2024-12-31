@@ -319,7 +319,7 @@ pub struct NodePublicKey {
     /// Public key of the node
     pub public_key: Vec<u8>,
     /// The stack small id that is associated with the selected node
-    pub stack_small_id: i64,
+    pub stack_small_id: Option<i64>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {

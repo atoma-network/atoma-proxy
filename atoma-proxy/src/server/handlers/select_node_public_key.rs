@@ -129,11 +129,18 @@ pub(crate) async fn select_node_public_key(
     })?;
 
     if let Some(node_public_key) = node_public_key {
+        let stack_small_id =
+            node_public_key
+                .stack_small_id
+                .ok_or_else(|| AtomaProxyError::InternalError {
+                    message: "Stack small id not found for node public key".to_string(),
+                    endpoint: metadata.endpoint.clone(),
+                })?;
         Ok(Json(SelectNodePublicKeyResponse {
             public_key: node_public_key.public_key,
             node_small_id: node_public_key.node_small_id as u64,
             stack_entry_digest: None,
-            stack_small_id: node_public_key.stack_small_id as u64,
+            stack_small_id: stack_small_id as u64,
         }))
     } else {
         let (sender, receiver) = oneshot::channel();
@@ -177,6 +184,7 @@ pub(crate) async fn select_node_public_key(
             // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
             // to be the one selected by the contract, that we can query from the `StackCreatedEvent`.
             let node_small_id = stack_entry_resp.stack_created_event.selected_node_id.inner;
+            let stack_small_id = stack_entry_resp.stack_created_event.stack_small_id.inner;
             // NOTE: We need to get the public key for the selected node for the acquired stack.
             let (sender, receiver) = oneshot::channel();
             state
@@ -206,7 +214,7 @@ pub(crate) async fn select_node_public_key(
                     public_key: node_public_key.public_key,
                     node_small_id: node_public_key.node_small_id as u64,
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
-                    stack_small_id: node_public_key.stack_small_id as u64,
+                    stack_small_id,
                 }))
             } else {
                 Err(AtomaProxyError::InternalError {
