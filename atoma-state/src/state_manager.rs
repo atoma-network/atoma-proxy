@@ -4110,7 +4110,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with multiple nodes at different prices
-        create_test_task(&state.db, 0, "gpt-4", 0).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
