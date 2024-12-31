@@ -568,13 +568,89 @@ mod test {
 
     use super::Auth;
     use std::env;
+    use std::fs::File;
+    use std::io::Write;
 
     fn get_config_path() -> PathBuf {
         let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
-        let workspace_cargo_toml_path = PathBuf::from(manifest_dir)
-            .parent()
-            .unwrap()
-            .join("config.example.toml");
+        let workspace_path = PathBuf::from(manifest_dir);
+        let workspace_path = workspace_path.parent().unwrap();
+        let workspace_path_str = workspace_path.to_str().unwrap();
+        let workspace_cargo_toml_path = workspace_path.join("config.test.toml");
+        let config_content = format!(
+            r#"
+[atoma_sui]
+http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"
+atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"
+atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0"
+usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"
+request_timeout = {{ secs = 300, nanos = 0 }}
+max_concurrent_requests = 10
+limit = 100
+sui_config_path = "{workspace_path_str}/client.yaml"
+sui_keystore_path = "{workspace_path_str}/sui.keystore"
+cursor_path = "./cursor.toml"
+
+[atoma_state]
+database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
+
+[atoma_service]
+service_bind_address = "0.0.0.0:8080"
+password = "password"
+models = [
+    "meta-llama/Llama-3.2-3B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
+]
+revisions = ["main", "main"]
+hf_token = "<API_KEY>"
+
+[atoma_proxy_service]
+service_bind_address = "0.0.0.0:8081"
+
+[atoma_auth]
+secret_key = "secret_key"
+access_token_lifetime = 1
+refresh_token_lifetime = 1
+        "#
+        );
+
+        let mut file = File::create(&workspace_cargo_toml_path).unwrap();
+        file.write_all(config_content.as_bytes()).unwrap();
+        let sui_config_path = workspace_path.join("client.yaml");
+        let sui_keystore_path = workspace_path.join("sui.keystore");
+
+        let mut sui_config_file = File::create(&sui_config_path).unwrap();
+        sui_config_file
+            .write_all(
+                format!(
+                    r#"---
+keystore:
+File: "{workspace_path_str}/test.sui.keystore"
+envs:
+- alias: testnet
+    rpc: "https://fullnode.testnet.sui.io:443"
+    ws: ~
+    basic_auth: ~
+active_env: testnet
+active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e7160381b"
+        "#
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+
+        let mut sui_keystore_file = File::create(&sui_keystore_path).unwrap();
+        sui_keystore_file
+            .write_all(
+                br#"
+        {{
+            "keys": [
+            "AEz/bWMHAhWXHSc2jaDxYAIWmlvKAosthvaAEe/JzrWd"
+            ]
+        }}
+        "#,
+            )
+            .unwrap();
         workspace_cargo_toml_path
     }
 
@@ -588,119 +664,118 @@ mod test {
         (auth, state_manager_receiver)
     }
 
-    // TODO: these tests require SUI, so they are disabled for now. Because on the CI/CD we don't have access to the SUI wallets.
-    // #[tokio::test]
-    // async fn test_access_token_regenerate() {
-    //     let (auth, receiver) = setup_test().await;
-    //     let user_id = 123;
-    //     let refresh_token = auth.generate_refresh_token(user_id).await.unwrap();
-    //     let refresh_token_hash = auth.hash_string(&refresh_token);
-    //     let mock_handle = tokio::task::spawn(async move {
-    //         let event = receiver.recv_async().await.unwrap();
-    //         match event {
-    //             AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
-    //             _ => panic!("Unexpected event"),
-    //         }
-    //         let event = receiver.recv_async().await.unwrap();
-    //         match event {
-    //             AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
-    //                 user_id: event_user_id,
-    //                 refresh_token_hash: event_refresh_token,
-    //                 result_sender,
-    //             } => {
-    //                 assert_eq!(event_user_id, user_id);
-    //                 assert_eq!(refresh_token_hash, event_refresh_token);
-    //                 result_sender.send(Ok(true)).unwrap();
-    //             }
-    //             _ => panic!("Unexpected event"),
-    //         }
-    //     });
-    //     let access_token = auth.generate_access_token(&refresh_token).await.unwrap();
-    //     let claims = auth.validate_token(&access_token, false).unwrap();
-    //     assert_eq!(claims.user_id, user_id);
-    //     assert!(claims.refresh_token_hash.is_some());
-    //     if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
-    //         .await
-    //         .is_err()
-    //     {
-    //         panic!("mock_handle did not finish within 1 second");
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_access_token_regenerate() {
+        let (auth, receiver) = setup_test().await;
+        let user_id = 123;
+        let refresh_token = auth.generate_refresh_token(user_id).await.unwrap();
+        let refresh_token_hash = auth.hash_string(&refresh_token);
+        let mock_handle = tokio::task::spawn(async move {
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+                    user_id: event_user_id,
+                    refresh_token_hash: event_refresh_token,
+                    result_sender,
+                } => {
+                    assert_eq!(event_user_id, user_id);
+                    assert_eq!(refresh_token_hash, event_refresh_token);
+                    result_sender.send(Ok(true)).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+        });
+        let access_token = auth.generate_access_token(&refresh_token).await.unwrap();
+        let claims = auth.validate_token(&access_token, false).unwrap();
+        assert_eq!(claims.user_id, user_id);
+        assert!(claims.refresh_token_hash.is_some());
+        if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
+            .await
+            .is_err()
+        {
+            panic!("mock_handle did not finish within 1 second");
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_token_flow() {
-    //     let user_id = 123;
-    //     let username = "user";
-    //     let password = "top_secret";
-    //     let (auth, receiver) = setup_test().await;
-    //     let hash_password = auth.hash_string(password);
-    //     let mock_handle = tokio::task::spawn(async move {
-    //         // First event is for the user to log in to get the tokens
-    //         let event = receiver.recv_async().await.unwrap();
-    //         match event {
-    //             AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-    //                 username: event_username,
-    //                 password: event_password,
-    //                 result_sender,
-    //             } => {
-    //                 assert_eq!(username, event_username);
-    //                 assert_eq!(hash_password, event_password);
-    //                 result_sender.send(Ok(Some(user_id))).unwrap();
-    //             }
-    //             _ => panic!("Unexpected event"),
-    //         }
-    //         let event = receiver.recv_async().await.unwrap();
-    //         match event {
-    //             AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
-    //             _ => panic!("Unexpected event"),
-    //         }
-    //         for _ in 0..2 {
-    //             // During the token generation, the refresh token is checked for validity
-    //             // 1) when the user logs in
-    //             // 2) when the api token is generated
-    //             let event = receiver.recv_async().await.unwrap();
-    //             match event {
-    //                 AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
-    //                     user_id: event_user_id,
-    //                     refresh_token_hash: _refresh_token,
-    //                     result_sender,
-    //                 } => {
-    //                     assert_eq!(event_user_id, user_id);
-    //                     result_sender.send(Ok(true)).unwrap();
-    //                 }
-    //                 _ => panic!("Unexpected event"),
-    //             }
-    //         }
-    //         // Last event is for storing the new api token
-    //         let event = receiver.recv_async().await.unwrap();
-    //         match event {
-    //             AtomaAtomaStateManagerEvent::StoreNewApiToken {
-    //                 user_id: event_user_id,
-    //                 api_token: _api_token,
-    //             } => {
-    //                 assert_eq!(event_user_id, user_id);
-    //                 // assert_eq!(event_api_token, api_token);
-    //             }
-    //             _ => panic!("Unexpected event"),
-    //         }
-    //     });
-    //     let (refresh_token, access_token) =
-    //         auth.check_user_password(username, password).await.unwrap();
-    //     // Refresh token should not have refresh token hash
-    //     let claims = auth.validate_token(&refresh_token, true).unwrap();
-    //     assert_eq!(claims.user_id, user_id);
-    //     assert_eq!(claims.refresh_token_hash, None);
-    //     // Access token should have refresh token hash
-    //     let claims = auth.validate_token(&access_token, false).unwrap();
-    //     assert_eq!(claims.user_id, user_id);
-    //     assert!(claims.refresh_token_hash.is_some());
-    //     // Generate api token
-    //     let _api_token = auth.generate_api_token(&access_token).await.unwrap();
-    //     if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
-    //         .await
-    //         .is_err()
-    //     {
-    //         panic!("mock_handle did not finish within 1 second");
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_token_flow() {
+        let user_id = 123;
+        let username = "user";
+        let password = "top_secret";
+        let (auth, receiver) = setup_test().await;
+        let hash_password = auth.hash_string(password);
+        let mock_handle = tokio::task::spawn(async move {
+            // First event is for the user to log in to get the tokens
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
+                    username: event_username,
+                    password: event_password,
+                    result_sender,
+                } => {
+                    assert_eq!(username, event_username);
+                    assert_eq!(hash_password, event_password);
+                    result_sender.send(Ok(Some(user_id))).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
+                _ => panic!("Unexpected event"),
+            }
+            for _ in 0..2 {
+                // During the token generation, the refresh token is checked for validity
+                // 1) when the user logs in
+                // 2) when the api token is generated
+                let event = receiver.recv_async().await.unwrap();
+                match event {
+                    AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+                        user_id: event_user_id,
+                        refresh_token_hash: _refresh_token,
+                        result_sender,
+                    } => {
+                        assert_eq!(event_user_id, user_id);
+                        result_sender.send(Ok(true)).unwrap();
+                    }
+                    _ => panic!("Unexpected event"),
+                }
+            }
+            // Last event is for storing the new api token
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreNewApiToken {
+                    user_id: event_user_id,
+                    api_token: _api_token,
+                } => {
+                    assert_eq!(event_user_id, user_id);
+                    // assert_eq!(event_api_token, api_token);
+                }
+                _ => panic!("Unexpected event"),
+            }
+        });
+        let (refresh_token, access_token) =
+            auth.check_user_password(username, password).await.unwrap();
+        // Refresh token should not have refresh token hash
+        let claims = auth.validate_token(&refresh_token, true).unwrap();
+        assert_eq!(claims.user_id, user_id);
+        assert_eq!(claims.refresh_token_hash, None);
+        // Access token should have refresh token hash
+        let claims = auth.validate_token(&access_token, false).unwrap();
+        assert_eq!(claims.user_id, user_id);
+        assert!(claims.refresh_token_hash.is_some());
+        // Generate api token
+        let _api_token = auth.generate_api_token(&access_token).await.unwrap();
+        if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
+            .await
+            .is_err()
+        {
+            panic!("mock_handle did not finish within 1 second");
+        }
+    }
 }
