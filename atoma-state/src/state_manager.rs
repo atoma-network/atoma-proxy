@@ -505,7 +505,7 @@ impl AtomaState {
     ) -> Result<Option<NodePublicKey>> {
         let node = sqlx::query(
             r#"
-            SELECT node_public_keys.public_key, node_public_keys.node_small_id, stacks.stack_small_id
+            SELECT node_public_keys.public_key as public_key, node_public_keys.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
                 FROM node_public_keys
                 INNER JOIN stacks ON stacks.selected_node_id = node_public_keys.node_small_id
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
