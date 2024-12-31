@@ -281,18 +281,7 @@ impl Auth {
     /// * `Result<String>` - The generated API token
     #[instrument(level = "info", skip(self))]
     pub async fn generate_api_token(&self, jwt: &str) -> Result<String> {
-        let claims = self.validate_token(jwt, false)?;
-        if !self
-            .check_refresh_token_validity(
-                claims.user_id,
-                &claims
-                    .refresh_token_hash
-                    .expect("Access token should have refresh token hash"),
-            )
-            .await?
-        {
-            return Err(anyhow::anyhow!("Access token was revoked"));
-        }
+        let claims = self.get_claims_from_token(jwt).await?;
         let api_token: String = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
             .take(API_TOKEN_LENGTH)
@@ -320,18 +309,7 @@ impl Auth {
     /// * `Result<()>` - If the API token was revoked
     #[instrument(level = "info", skip(self))]
     pub async fn revoke_api_token(&self, jwt: &str, api_token: &str) -> Result<()> {
-        let claims = self.validate_token(jwt, false)?;
-        if !self
-            .check_refresh_token_validity(
-                claims.user_id,
-                &claims
-                    .refresh_token_hash
-                    .expect("Access token should have refresh token hash"),
-            )
-            .await?
-        {
-            return Err(anyhow::anyhow!("Access token was revoked"));
-        }
+        let claims = self.get_claims_from_token(jwt).await?;
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RevokeApiToken {
                 user_id: claims.user_id,
@@ -353,19 +331,7 @@ impl Auth {
     /// * `Result<Vec<String>>` - The list of API tokens
     #[instrument(level = "info", skip(self))]
     pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<String>> {
-        let claims = self.validate_token(jwt, false)?;
-        if !self
-            .check_refresh_token_validity(
-                claims.user_id,
-                &claims
-                    .refresh_token_hash
-                    .expect("Access token should have refresh token hash"),
-            )
-            .await?
-        {
-            error!("Access token was revoked");
-            return Err(anyhow::anyhow!("Access token was revoked"));
-        }
+        let claims = self.get_claims_from_token(jwt).await?;
 
         let (result_sender, result_receiver) = oneshot::channel();
         self.state_manager_sender
@@ -374,6 +340,50 @@ impl Auth {
                 result_sender,
             })?;
         Ok(result_receiver.await??)
+    }
+
+    /// Get the claims from the token
+    /// This method will get the claims from the token and check if the refresh token is valid
+    /// The method will return the claims if the token is valid
+    ///
+    /// # Arguments
+    ///
+    /// * `jwt` - The access token to be used to get the claims
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Claims>` - The claims from the token
+    async fn get_claims_from_token(&self, jwt: &str) -> Result<Claims> {
+        let claims = self.validate_token(jwt, false)?;
+        if !self
+            .check_refresh_token_validity(
+                claims.user_id,
+                &claims
+                    .refresh_token_hash
+                    .clone()
+                    .expect("access token should have refresh token hash"),
+            )
+            .await?
+        {
+            return Err(anyhow::anyhow!("Access token was revoked"));
+        }
+        Ok(claims)
+    }
+
+    /// Get the user id from the token
+    /// This method will get the user id from the token
+    /// The method will check if the token is valid
+    ///
+    /// # Arguments
+    ///
+    /// * `jwt` - The access token to be used to get the user id
+    ///
+    /// # Returns
+    ///
+    /// * `Result<i64>` - The user id from the token
+    pub async fn get_user_id_from_token(&self, jwt: &str) -> Result<i64> {
+        let claims = self.get_claims_from_token(jwt).await?;
+        Ok(claims.user_id)
     }
 
     /// Stores the wallet address for the user. The user needs to send a signed message to prove ownership of the wallet.

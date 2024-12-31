@@ -1483,6 +1483,51 @@ impl AtomaState {
             .collect()
     }
 
+    /// Retrieves all stacks associated with a specific user ID.
+    ///
+    /// This method fetches all stack records from the `stacks` table that are associated
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user whose stacks should be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<Stack>>`: A result containing either:
+    ///  - `Ok(Vec<Stack>)`: A vector of `Stack` objects associated with the given user ID.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database rows into `Stack` objects.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, Stack};
+    ///
+    /// async fn get_user_stacks(state_manager: &AtomaStateManager, user_id: i64) -> Result<Vec<Stack>, AtomaStateManagerError> {
+    ///    state_manager.get_stacks_by_user_id(user_id).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%user_id)
+    )]
+    pub async fn get_stacks_by_user_id(&self, user_id: i64) -> Result<Vec<Stack>> {
+        let stacks = sqlx::query("SELECT * FROM stacks WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&self.db)
+            .await?;
+        stacks
+            .into_iter()
+            .map(|stack| Stack::from_row(&stack).map_err(AtomaStateManagerError::from))
+            .collect()
+    }
+
     /// Retrieves stacks that are almost filled beyond a specified fraction threshold.
     ///
     /// This method fetches all stacks from the database where:
@@ -1738,12 +1783,17 @@ impl AtomaState {
             selected_node_id = %stack.selected_node_id,
             num_compute_units = %stack.num_compute_units,
             price = %stack.price_per_one_million_compute_units)
-    )]
-    pub async fn insert_new_stack(&self, stack: Stack, user_id: i64) -> Result<()> {
+        )]
+    pub async fn insert_new_stack(
+        &self,
+        stack: Stack,
+        user_id: i64,
+        acquired_timestamp: DateTime<Utc>,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks 
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
@@ -1757,6 +1807,7 @@ impl AtomaState {
             .bind(stack.total_hash)
             .bind(stack.num_total_messages)
             .bind(user_id)
+            .bind(acquired_timestamp)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -3620,6 +3671,15 @@ impl AtomaState {
                     .map_err(AtomaStateManagerError::from)
             })
             .collect()
+    }
+
+    pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
+        let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+
+        Ok(balance.get::<i64, _>("usdc_balance"))
     }
 
     /// Get latency performance for the last `last_hours` hours.
