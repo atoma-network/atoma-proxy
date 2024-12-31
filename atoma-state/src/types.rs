@@ -46,6 +46,14 @@ pub struct ProofRequest {
     pub signature: String,
 }
 
+/// Request payload for acknowledging a usdc payment.
+///
+/// Contains the transaction digest of the payment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct UsdcPaymentRequest {
+    pub transaction_digest: String,
+}
+
 /// Represents a computed units processed response
 /// This struct is used to represent the response for the get_compute_units_processed endpoint.
 /// The timestamp of the computed units processed measurement. We measure the computed units processed on hourly basis. We do these measurements for each model.
@@ -595,5 +603,27 @@ pub enum AtomaAtomaStateManagerEvent {
         user_id: i64,
         /// Proven Sui address
         sui_address: String,
+    },
+    /// Retrieves the sui_address for a user
+    GetSuiAddress {
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
+    },
+    /// Retrieves the user ID by Sui address
+    GetUserId {
+        sui_address: String,
+        result_sender: oneshot::Sender<Result<Option<i64>>>,
+    },
+    /// Updates the balance of a user
+    TopUpBalance {
+        user_id: i64,
+        amount: i64,
+        timestamp: i64,
+    },
+    /// Withdraws the balance of a user
+    DeductFromUsdc {
+        user_id: i64,
+        amount: i64,
+        result_sender: oneshot::Sender<Result<()>>,
     },
 }

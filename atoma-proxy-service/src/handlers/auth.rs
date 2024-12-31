@@ -1,4 +1,6 @@
-use atoma_state::types::{AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest};
+use atoma_state::types::{
+    AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest,
+};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -29,6 +31,12 @@ pub(crate) const GET_ALL_API_TOKENS_PATH: &str = "/api_tokens";
 /// The path for the update_sui_address endpoint.
 pub(crate) const UPDATE_SUI_ADDRESS_PATH: &str = "/update_sui_address";
 
+/// The path for the usdc payment endpoint.
+pub(crate) const USDC_PAYMENT_PATH: &str = "/usdc_payment";
+
+/// The path for the get_sui_address endpoint.
+pub(crate) const GET_SUI_ADDRESS_PATH: &str = "/get_sui_address";
+
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// OpenAPI documentation for the get_all_api_tokens endpoint.
@@ -52,6 +60,8 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(REGISTER_PATH, post(register))
         .route(LOGIN_PATH, post(login))
         .route(UPDATE_SUI_ADDRESS_PATH, post(update_sui_address))
+        .route(USDC_PAYMENT_PATH, post(usdc_payment))
+        .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
 }
 
 /// Retrieves all API tokens for the user.
@@ -364,4 +374,119 @@ pub(crate) async fn update_sui_address(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok(Json(()))
+}
+
+/// OpenAPI documentation for the usdc_payment endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the usdc_payment
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(usdc_payment))]
+pub(crate) struct UsdcPayment;
+
+/// OpenAPI documentation for the usdc_payment endpoint.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+/// * `body` - The request body containing the transaction digest
+///
+/// # Returns
+///
+/// * `Result<Json<()>>` - A JSON response indicating the success of the operation
+#[utoipa::path(
+    post,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "USDC payment request"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to usdc payment request")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub(crate) async fn usdc_payment(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+    body: Json<UsdcPaymentRequest>,
+) -> Result<Json<()>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    proxy_service_state
+        .auth
+        .usdc_payment(jwt, &body.transaction_digest)
+        .await
+        .map_err(|e| {
+            error!("Failed to usdc payment request: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(()))
+}
+
+/// OpenAPI documentation for the get_sui_address endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_sui_address
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_sui_address))]
+pub(crate) struct GetSuiAddress;
+
+/// Retrieves the sui address for the user.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+///
+/// # Returns
+///
+/// * `Result<Json<Option<String>>>` - A JSON response containing the sui address
+#[utoipa::path(
+    get,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Retrieves the sui address for the user"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get sui address")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub(crate) async fn get_sui_address(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<Option<String>>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let sui_address = proxy_service_state
+        .auth
+        .get_sui_address(jwt)
+        .await
+        .map_err(|e| {
+            error!("Failed to get sui address: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(sui_address))
 }

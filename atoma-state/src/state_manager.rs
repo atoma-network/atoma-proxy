@@ -3858,10 +3858,166 @@ impl AtomaState {
     ///    state_manager.store_sui_address(user_id, sui_address).await
     /// }
     /// ```
+    #[instrument(level = "trace", skip(self))]
     pub async fn update_sui_address(&self, user_id: i64, sui_address: String) -> Result<()> {
         sqlx::query("UPDATE users SET sui_address = $1 WHERE id = $2")
             .bind(sui_address)
             .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieves the SUI address for the user.
+    ///
+    /// This method retrieves the SUI address for the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///  - `Ok(Some(String))`: The SUI address of the user.
+    /// - `Ok(None)`: If the user is not found.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_sui_address(state_manager: &AtomaStateManager, user_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_sui_address(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_sui_address(&self, user_id: i64) -> Result<Option<String>> {
+        let sui_address =
+            sqlx::query_scalar::<_, Option<String>>("SELECT sui_address FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.db)
+                .await?;
+
+        Ok(sui_address.flatten())
+    }
+
+    /// Retrieves the user id for the user.
+    ///
+    /// This method retrieves the user id the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `sui_address` - The sui_address of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<i64>>`: A result containing either:
+    ///  - `Ok(Some(i64))`: The user id of the user.
+    /// - `Ok(None)`: If the user is not found.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_sui_address(state_manager: &AtomaStateManager, sui_address: String) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.get_sui_address(sui_address).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_user_id(&self, sui_address: String) -> Result<Option<i64>> {
+        let user = sqlx::query("SELECT id FROM users WHERE sui_address = $1")
+            .bind(sui_address)
+            .fetch_optional(&self.db)
+            .await?;
+
+        Ok(user.map(|user| user.get("id")))
+    }
+
+    /// Update the balance for the user.
+    ///
+    /// This method updates the `balance` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The new balance to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_balance(state_manager: &AtomaStateManager, user_id: i64, balance: i64) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_balance(user_id, balance).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn top_up_balance(&self, user_id: i64, balance: i64, timestamp: i64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO balance (user_id, usdc_balance, usdc_last_timestamp) 
+                         VALUES ($1, $2, $3) 
+                         ON CONFLICT (user_id) 
+                         DO UPDATE SET 
+                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance, 
+                            usdc_last_timestamp = EXCLUDED.usdc_last_timestamp 
+                         WHERE balance.usdc_last_timestamp < EXCLUDED.usdc_last_timestamp",
+        )
+        .bind(user_id)
+        .bind(balance)
+        .bind(timestamp)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Deduct from the usdc balance for the user.
+    ///
+    /// This method withdraws the balance from the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The balance to withdraw from the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute (that could mean the balance is not available)
+    pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
+        sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1")
+            .bind(user_id)
+            .bind(balance)
             .execute(&self.db)
             .await?;
         Ok(())

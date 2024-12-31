@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use atoma_auth::{AtomaAuthConfig, Auth};
+use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::AtomaSuiConfig;
@@ -10,9 +10,12 @@ use clap::Parser;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use server::{start_server, AtomaServiceConfig};
-use sui::Sui;
 use tokenizers::Tokenizer;
-use tokio::{net::TcpListener, sync::watch, try_join};
+use tokio::{
+    net::TcpListener,
+    sync::{watch, RwLock},
+    try_join,
+};
 use tracing::{error, instrument};
 use tracing_appender::{
     non_blocking,
@@ -26,7 +29,6 @@ use tracing_subscriber::{
 };
 
 mod server;
-mod sui;
 
 /// The directory where the logs are stored.
 const LOGS: &str = "./logs";
@@ -131,7 +133,9 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
-    let auth = Auth::new(config.auth, state_manager_sender.clone());
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
+
+    let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui));
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
@@ -142,14 +146,12 @@ async fn main() -> Result<()> {
         shutdown_receiver.clone(),
     );
 
-    let mut sui = Sui::new(&config.sui).await?;
-
     // Initialize your StateManager here
     let state_manager = AtomaStateManager::new_from_url(
         &config.state.database_url,
         event_subscriber_receiver,
         state_manager_receiver,
-        sui.get_wallet_address()?.to_string(),
+        sui.write().await.get_wallet_address()?.to_string(),
     )
     .await?;
 

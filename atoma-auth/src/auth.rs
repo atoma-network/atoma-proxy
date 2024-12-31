@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use anyhow::Result;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
@@ -22,11 +22,13 @@ use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
 use sui_sdk::types::{
     base_types::SuiAddress,
     crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
+    object::Owner,
+    TypeTag,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
 
-use crate::AtomaAuthConfig;
+use crate::{AtomaAuthConfig, Sui};
 
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
@@ -53,6 +55,8 @@ pub struct Auth {
     refresh_token_lifetime: usize,
     /// The sender for the state manager
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+    /// The sui client
+    sui: Arc<RwLock<Sui>>,
 }
 
 impl Auth {
@@ -60,12 +64,14 @@ impl Auth {
     pub fn new(
         config: AtomaAuthConfig,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        sui: Arc<RwLock<Sui>>,
     ) -> Self {
         Self {
             secret_key: config.secret_key,
             access_token_lifetime: config.access_token_lifetime,
             refresh_token_lifetime: config.refresh_token_lifetime,
             state_manager_sender,
+            sui,
         }
     }
 
@@ -435,28 +441,231 @@ impl Auth {
             })?;
         Ok(())
     }
+
+    /// Updates the balance of the user
+    ///
+    /// # Arguments
+    ///
+    /// * `jwt` - The access token to be used to update the balance
+    /// * `transaction_digest` - The transaction digest to be used to update the balance
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - If the balance was updated
+    ///
+    /// # Errors
+    ///
+    /// * If the balance changes are not found
+    /// * If the sender or receiver is not found
+    /// * If the payment is not for this user
+    /// * If the user is not found
+    /// * If the user balance is not updated
+    #[instrument(level = "info", skip(self))]
+    pub async fn usdc_payment(&self, jwt: &str, transaction_digest: &str) -> Result<()> {
+        let claims = self.validate_token(jwt, false)?;
+
+        let (timestamp, balance_changes) = self
+            .sui
+            .read()
+            .await
+            .get_balance_changes(transaction_digest)
+            .await?;
+        let balance_changes =
+            balance_changes.ok_or_else(|| anyhow::anyhow!("No balance changes found"))?;
+        let timestamp = timestamp.ok_or_else(|| anyhow::anyhow!("No timestamp found"))?;
+        let mut sender = None;
+        let mut receiver = None;
+        let mut money_in = None;
+        for balance_change in balance_changes {
+            if let TypeTag::Struct(tag) = balance_change.coin_type {
+                if tag.address.to_hex() == self.sui.read().await.usdc_package_id.to_hex() {
+                    if balance_change.amount < 0 {
+                        if sender.is_some() {
+                            return Err(anyhow::anyhow!("Multiple senders"));
+                        }
+                        if let Owner::AddressOwner(owner) = &balance_change.owner {
+                            sender = Some(*owner);
+                        }
+                    } else {
+                        if receiver.is_some() {
+                            return Err(anyhow::anyhow!("Multiple receivers"));
+                        }
+                        money_in = Some(balance_change.amount);
+                        if let Owner::AddressOwner(owner) = &balance_change.owner {
+                            receiver = Some(*owner);
+                        }
+                    }
+                }
+            }
+        }
+        if sender.is_none() || receiver.is_none() {
+            return Err(anyhow::anyhow!("No sender or receiver found"));
+        }
+        let sender = sender.unwrap();
+        let receiver = receiver.unwrap();
+        let own_address = self.sui.write().await.get_wallet_address()?;
+        if receiver == own_address {
+            let (result_sender, result_receiver) = oneshot::channel();
+            self.state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::GetUserId {
+                    sui_address: sender.to_string(),
+                    result_sender,
+                })?;
+            let user_id = result_receiver
+                .await??
+                .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+            if claims.user_id != user_id {
+                return Err(anyhow::anyhow!("The payment is not for this user"));
+            }
+            // We are the receiver and we know the sender
+            self.state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::TopUpBalance {
+                    user_id,
+                    amount: money_in.unwrap() as i64,
+                    timestamp: timestamp as i64,
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Get the Sui address for the user
+    ///
+    /// # Arguments
+    ///
+    /// * `jwt` - The access token to be used to get the Sui address
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Option<String>>` - The Sui address
+    ///
+    /// # Errors
+    ///
+    /// * If the verification fails
+    pub async fn get_sui_address(&self, jwt: &str) -> Result<Option<String>> {
+        let claims = self.validate_token(jwt, false)?;
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetSuiAddress {
+                user_id: claims.user_id,
+                result_sender,
+            })?;
+        let sui_address = result_receiver.await;
+        Ok(sui_address??)
+    }
 }
 
 // TODO: Add more comprehensive tests, for now test the happy path only
 #[cfg(test)]
 mod test {
+    use std::{path::PathBuf, sync::Arc};
+
     use atoma_state::types::AtomaAtomaStateManagerEvent;
+    use atoma_sui::AtomaSuiConfig;
     use flume::Receiver;
+    use tokio::sync::RwLock;
 
     use crate::AtomaAuthConfig;
 
     use super::Auth;
+    use std::env;
+    use std::fs::File;
+    use std::io::Write;
 
-    fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
+    fn get_config_path() -> PathBuf {
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
+        let workspace_path = PathBuf::from(manifest_dir);
+        let workspace_path = workspace_path.parent().unwrap();
+        let workspace_cargo_toml_path = workspace_path.join("config.test.toml");
+        let sui_config_path = workspace_path.join("client.yaml");
+        let sui_keystore_path = workspace_path.join("sui.keystore");
+        let config_content = format!(
+            r#"
+[atoma_sui]
+http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"
+atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"
+atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0"
+usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"
+request_timeout = {{ secs = 300, nanos = 0 }}
+max_concurrent_requests = 10
+limit = 100
+sui_config_path = "{}"
+sui_keystore_path = "{}"
+cursor_path = "./cursor.toml"
+
+[atoma_state]
+database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
+
+[atoma_service]
+service_bind_address = "0.0.0.0:8080"
+password = "password"
+models = [
+    "meta-llama/Llama-3.2-3B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
+]
+revisions = ["main", "main"]
+hf_token = "<API_KEY>"
+
+[atoma_proxy_service]
+service_bind_address = "0.0.0.0:8081"
+
+[atoma_auth]
+secret_key = "secret_key"
+access_token_lifetime = 1
+refresh_token_lifetime = 1
+        "#,
+            sui_config_path.to_str().unwrap().replace("\\", "\\\\"),
+            sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
+        );
+
+        let mut file = File::create(&workspace_cargo_toml_path).unwrap();
+        file.write_all(config_content.as_bytes()).unwrap();
+
+        let mut sui_config_file = File::create(&sui_config_path).unwrap();
+        sui_config_file
+            .write_all(
+                format!(
+                    r#"---
+keystore:
+  File: "{}"
+envs:
+  - alias: testnet
+    rpc: "https://fullnode.testnet.sui.io:443"
+    ws: ~
+    basic_auth: ~
+active_env: testnet
+active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e7160381b"
+"#,
+                    sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+
+        let mut sui_keystore_file = File::create(&sui_keystore_path).unwrap();
+        sui_keystore_file
+            .write_all(
+                br#"[
+    "AEz/bWMHAhWXHSc2jaDxYAIWmlvKAosthvaAEe/JzrWd"
+]
+        "#,
+            )
+            .unwrap();
+        workspace_cargo_toml_path
+    }
+
+    async fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
         let config = AtomaAuthConfig::new("secret".to_string(), 1, 1);
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
-        let auth = Auth::new(config, state_manager_sender);
+
+        let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
+        let sui = crate::Sui::new(&sui_config).await.unwrap();
+        let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)));
         (auth, state_manager_receiver)
     }
 
     #[tokio::test]
     async fn test_access_token_regenerate() {
-        let (auth, receiver) = setup_test();
+        let (auth, receiver) = setup_test().await;
         let user_id = 123;
         let refresh_token = auth.generate_refresh_token(user_id).await.unwrap();
         let refresh_token_hash = auth.hash_string(&refresh_token);
@@ -497,7 +706,7 @@ mod test {
         let user_id = 123;
         let username = "user";
         let password = "top_secret";
-        let (auth, receiver) = setup_test();
+        let (auth, receiver) = setup_test().await;
         let hash_password = auth.hash_string(password);
         let mock_handle = tokio::task::spawn(async move {
             // First event is for the user to log in to get the tokens
