@@ -575,7 +575,7 @@ mod test {
         let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
         let workspace_path = PathBuf::from(manifest_dir);
         let workspace_path = workspace_path.parent().unwrap();
-        let workspace_path_str = workspace_path.to_str().unwrap();
+        let workspace_path_str = workspace_path.to_str().unwrap().replace("\\", "\\\\");
         let workspace_cargo_toml_path = workspace_path.join("config.test.toml");
         let config_content = format!(
             r#"
@@ -587,8 +587,8 @@ usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd71
 request_timeout = {{ secs = 300, nanos = 0 }}
 max_concurrent_requests = 10
 limit = 100
-sui_config_path = "{workspace_path_str}/client.yaml"
-sui_keystore_path = "{workspace_path_str}/sui.keystore"
+sui_config_path = "{workspace_path_str}\\client.yaml"
+sui_keystore_path = "{workspace_path_str}\\sui.keystore"
 cursor_path = "./cursor.toml"
 
 [atoma_state]
@@ -625,15 +625,15 @@ refresh_token_lifetime = 1
                 format!(
                     r#"---
 keystore:
-File: "{workspace_path_str}/test.sui.keystore"
+  File: "{workspace_path_str}\\sui.keystore"
 envs:
-- alias: testnet
+  - alias: testnet
     rpc: "https://fullnode.testnet.sui.io:443"
     ws: ~
     basic_auth: ~
 active_env: testnet
 active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e7160381b"
-        "#
+"#
                 )
                 .as_bytes(),
             )
@@ -642,12 +642,9 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         let mut sui_keystore_file = File::create(&sui_keystore_path).unwrap();
         sui_keystore_file
             .write_all(
-                br#"
-        {{
-            "keys": [
-            "AEz/bWMHAhWXHSc2jaDxYAIWmlvKAosthvaAEe/JzrWd"
-            ]
-        }}
+                br#"[
+    "AEz/bWMHAhWXHSc2jaDxYAIWmlvKAosthvaAEe/JzrWd"
+]
         "#,
             )
             .unwrap();
