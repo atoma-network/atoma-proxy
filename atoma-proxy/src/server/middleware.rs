@@ -468,11 +468,8 @@ pub(crate) mod auth {
     use tracing::instrument;
 
     use crate::server::Result;
-    use crate::{
-        server::{
-            error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
-        },
-        sui::{StackEntryResponse, Sui},
+    use crate::server::{
+        error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
     };
 
     /// Represents the processed and validated request data after authentication and initial processing.
@@ -804,24 +801,23 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
-                    amount: (node.price_per_one_million_compute_units * node.max_num_compute_units)
-                        as i64,
+                    amount: node.price_per_one_million_compute_units * node.max_num_compute_units,
                     result_sender,
                 })
-                .map_err(|err| {
-                    error!("Failed to update balance: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to send DeductFromUsdc event: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?;
 
             result_receiver
                 .await
-                .map_err(|err| {
-                    error!("Failed to receive WithdrawBalance result: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to receive DeductFromUsdc result: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?
-                .map_err(|err| {
-                    error!("Failed to get WithdrawBalance result {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to get DeductFromUsdc result: {:?}", err),
+                    endpoint: endpoint.to_string(),
                 })?;
             let StackEntryResponse {
                 transaction_digest: tx_digest,
