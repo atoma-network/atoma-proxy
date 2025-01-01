@@ -11,6 +11,7 @@ services:
     command:
       - "--providers.docker"
       - "--providers.docker.exposedbydefault=false"
+      - "--log.level=DEBUG"
       - "--entryPoints.websecure.address=:443"
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
@@ -34,11 +35,7 @@ services:
       - atoma-network
 
   atoma-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        TRACE_LEVEL: ${TRACE_LEVEL:-info}
+    image: ghcr.io/atoma-network/atoma-proxy:latest
     volumes:
       - ${CONFIG_PATH:-./config.toml}:/app/config.toml
       - ./logs:/app/logs
@@ -47,7 +44,8 @@ services:
     env_file:
       - .env
     ports:
-      - "${ATOMA_PROXY_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
     depends_on:
       - db
     networks:
