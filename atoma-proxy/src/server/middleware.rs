@@ -420,7 +420,7 @@ pub async fn confidential_compute_middleware(
 
     let num_compute_units = if endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH {
         confidential_compute_request
-            .max_tokens
+            .num_compute_units
             .unwrap_or(DEFAULT_IMAGE_RESOLUTION) as i64
     } else {
         MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE

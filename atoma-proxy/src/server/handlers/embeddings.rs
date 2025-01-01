@@ -19,7 +19,10 @@ use crate::server::{
     types::ConfidentialComputeRequest,
 };
 
-use super::{request_model::RequestModel, update_state_manager};
+use super::{
+    request_model::RequestModel, update_state_manager, verify_and_sign_response,
+    PROXY_SIGNATURE_KEY,
+};
 use crate::server::Result;
 
 /// Path for the confidential embeddings endpoint.
@@ -273,18 +276,10 @@ pub async fn confidential_embeddings_create(
             // with a "total_tokens" field, which correctly specifies the number of total tokens
             // processed by the node, as the latter is running within a TEE.
             let total_tokens = response
-                .get("total_tokens")
-                .map(|u| {
-                    u.as_u64().ok_or_else(|| AtomaProxyError::InternalError {
-                        message: "Failed to get total tokens".to_string(),
-                        endpoint: metadata.endpoint.clone(),
-                    })
-                })
-                .transpose()
-                .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to get total tokens: {}", e),
-                    endpoint: metadata.endpoint.clone(),
-                })?
+                .get("usage")
+                .and_then(|usage| usage.get("total_tokens"))
+                .and_then(|total_tokens| total_tokens.as_u64())
+                .map(|n| n as i64)
                 .unwrap_or(0);
             update_state_manager(
                 &state.state_manager_sender,
@@ -357,7 +352,7 @@ async fn handle_embeddings_response(
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
-    let response = client
+    let mut response = client
         .post(format!("{}{}", node_address, endpoint))
         .headers(headers)
         .json(&payload)
@@ -373,6 +368,12 @@ async fn handle_embeddings_response(
             message: format!("Failed to parse embeddings response: {:?}", err),
             endpoint: endpoint.to_string(),
         })?;
+
+    let guard = state.sui.read().await;
+    let keystore = guard.get_keystore();
+    let proxy_signature = verify_and_sign_response(&response, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response

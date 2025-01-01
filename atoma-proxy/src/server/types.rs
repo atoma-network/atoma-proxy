@@ -19,6 +19,9 @@ pub struct ConfidentialComputeRequest {
     /// Client's public key for Diffie-Hellman key exchange (base64 encoded)
     pub client_dh_public_key: String,
 
+    /// Node's public key for Diffie-Hellman key exchange (base64 encoded)
+    pub node_dh_public_key: String,
+
     /// Hash of the original plaintext body for integrity verification (base64 encoded)
     pub plaintext_body_hash: String,
 
@@ -30,5 +33,5 @@ pub struct ConfidentialComputeRequest {
 
     /// Number of compute units to be used for the request, for image generations,
     /// as this value is known in advance (the number of pixels to generate)
-    pub max_tokens: Option<u64>,
+    pub num_compute_units: Option<u64>,
 }
