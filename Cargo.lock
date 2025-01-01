@@ -604,6 +604,7 @@ dependencies = [
  "blake2",
  "clap",
  "config",
+ "fastcrypto 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "flume",
  "futures",
  "hf-hub",

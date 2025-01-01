@@ -19,7 +19,10 @@ use crate::server::{
     types::ConfidentialComputeRequest,
 };
 
-use super::{request_model::RequestModel, update_state_manager};
+use super::{
+    request_model::RequestModel, update_state_manager, verify_and_sign_response,
+    PROXY_SIGNATURE_KEY,
+};
 use crate::server::Result;
 
 /// Path for the confidential embeddings endpoint.
@@ -349,7 +352,7 @@ async fn handle_embeddings_response(
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
-    let response = client
+    let mut response = client
         .post(format!("{}{}", node_address, endpoint))
         .headers(headers)
         .json(&payload)
@@ -365,6 +368,12 @@ async fn handle_embeddings_response(
             message: format!("Failed to parse embeddings response: {:?}", err),
             endpoint: endpoint.to_string(),
         })?;
+
+    let guard = state.sui.read().await;
+    let keystore = guard.get_keystore();
+    let proxy_signature = verify_and_sign_response(&response, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response

@@ -16,7 +16,7 @@ use crate::server::types::ConfidentialComputeRequest;
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
 use super::request_model::RequestModel;
-use super::update_state_manager;
+use super::{update_state_manager, verify_and_sign_response, PROXY_SIGNATURE_KEY};
 use crate::server::Result;
 
 /// Path for the confidential image generations endpoint.
@@ -318,7 +318,7 @@ async fn handle_image_generation_response(
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
-    let response = client
+    let mut response = client
         .post(format!("{}{}", node_address, endpoint))
         .headers(headers)
         .json(&payload)
@@ -335,6 +335,12 @@ async fn handle_image_generation_response(
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
+
+    let guard = state.sui.read().await;
+    let keystore = guard.get_keystore();
+    let proxy_signature = verify_and_sign_response(&response.0, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     // Update the node throughput performance
     state
