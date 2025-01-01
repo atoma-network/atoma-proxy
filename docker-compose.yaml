@@ -9,16 +9,18 @@ services:
       - letsencrypt:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock
     command:
-      - "--providers.docker"
+      - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--log.level=DEBUG"
-      - "--entryPoints.websecure.address=:443"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
       - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+    networks:
+      - atoma-network
 
   db:
     image: postgres:13-alpine
@@ -52,12 +54,10 @@ services:
       - atoma-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.atoma-proxy.rule=Host(`${PROXY_DOMAIN}`)"
+      - "traefik.http.routers.atoma-proxy.rule=Host(`api.atomacloud.com`)"
       - "traefik.http.routers.atoma-proxy.entrypoints=websecure"
-      - "traefik.http.routers.atoma-proxy.tls=true"
       - "traefik.http.routers.atoma-proxy.tls.certresolver=myresolver"
       - "traefik.http.services.atoma-proxy-service.loadbalancer.server.port=8080"
-      - "traefik.http.routers.atoma-proxy.service=atoma-proxy-service"
 
 volumes:
   postgres-data:
