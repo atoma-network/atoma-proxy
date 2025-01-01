@@ -1,4 +1,39 @@
 services:
+  traefik:
+    image: traefik:v2.9
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--log.level=INFO"
+      # EntryPoints
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      
+      # Let's Encrypt (ACME) configuration
+      - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
+      - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
+      - "--certificatesResolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesResolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - atoma-network
+    labels:
+      # (Optional) Set up a dashboard, etc. not strictly needed
+      - "traefik.http.routers.traefik.rule=Host(`traefik.atomacloud.com`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8090"
+
   db:
     image: postgres:13
     restart: always
@@ -35,9 +70,27 @@ services:
     networks:
       - atoma-network
 
+    labels:
+      # Traefik must be enabled explicitly
+      - "traefik.enable=true"
+
+      # Serving the Atoma api service on api.atomacloud.com
+      - "traefik.http.routers.api.rule=Host(`api.atomacloud.com`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      
+      # Serving the Atoma proxy service on credentials.atomacloud.com
+      - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
+      - "traefik.http.routers.credentials.entrypoints=websecure"
+      - "traefik.http.routers.credentials.tls.certresolver=myresolver"
+      - "traefik.http.services.credentials.loadbalancer.server.port=8081"
+
+
 volumes:
   postgres-data:
   sui-config-volume:
+  letsencrypt:
 
 networks:
   atoma-network:
