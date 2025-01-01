@@ -62,9 +62,6 @@ services:
       - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
     env_file:
       - .env
-    ports:
-      - "${ATOMA_SERVICE_PORT:-8080}:8080"  # Expose Atoma service port
-      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"  # Expose Atoma proxy service port
     depends_on:
       - db
     networks:
@@ -78,14 +75,15 @@ services:
       - "traefik.http.routers.api.rule=Host(`api.atomacloud.com`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
-      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      - "traefik.http.routers.api.service=api_service"
+      - "traefik.http.services.api_service.loadbalancer.server.port=8080"
       
-      # Serving the Atoma proxy service on credentials.atomacloud.com
+      # Serving the Atoma proxy authentication service on credentials.atomacloud.com
       - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
       - "traefik.http.routers.credentials.entrypoints=websecure"
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
-      - "traefik.http.services.credentials.loadbalancer.server.port=8081"
-
+      - "traefik.http.routers.credentials.service=credentials_service"
+      - "traefik.http.services.credentials_service.loadbalancer.server.port=8081"
 
 volumes:
   postgres-data:
