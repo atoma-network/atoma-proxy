@@ -12,7 +12,7 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
-use crate::server::types::ConfidentialComputeRequest;
+use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
 use super::request_model::RequestModel;
@@ -215,7 +215,7 @@ pub(crate) struct ConfidentialImageGenerationsOpenApi;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Image generations", body = ConfidentialComputeRequest),
+        (status = OK, description = "Image generations", body = ConfidentialComputeResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")

@@ -301,7 +301,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfidentialComputeRequest'
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
         '400':
           description: Bad request
         '401':
@@ -396,7 +396,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfidentialComputeRequest'
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
         '400':
           description: Bad request
         '401':
@@ -475,7 +475,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfidentialComputeRequest'
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
         '400':
           description: Bad request
         '401':
@@ -815,6 +815,7 @@ components:
       - nonce
       - salt
       - client_dh_public_key
+      - node_dh_public_key
       - plaintext_body_hash
       - model_name
       properties:
@@ -824,7 +825,16 @@ components:
         client_dh_public_key:
           type: string
           description: Client's public key for Diffie-Hellman key exchange (base64 encoded)
-        max_tokens:
+        model_name:
+          type: string
+          description: Model name
+        node_dh_public_key:
+          type: string
+          description: Node's public key for Diffie-Hellman key exchange (base64 encoded)
+        nonce:
+          type: string
+          description: Cryptographic nonce used for encryption (base64 encoded)
+        num_compute_units:
           type:
           - integer
           - 'null'
@@ -833,12 +843,6 @@ components:
             Number of compute units to be used for the request, for image generations,
             as this value is known in advance (the number of pixels to generate)
           minimum: 0
-        model_name:
-          type: string
-          description: Model name
-        nonce:
-          type: string
-          description: Cryptographic nonce used for encryption (base64 encoded)
         plaintext_body_hash:
           type: string
           description: Hash of the original plaintext body for integrity verification (base64 encoded)
@@ -855,6 +859,34 @@ components:
           - boolean
           - 'null'
           description: Indicates whether this is a streaming request
+    ConfidentialComputeResponse:
+      type: object
+      description: Represents a response from a confidential compute request
+      required:
+      - ciphertext
+      - nonce
+      properties:
+        ciphertext:
+          type: string
+          description: Encrypted response body (base64 encoded)
+        nonce:
+          type: string
+          description: Nonce used for encryption (base64 encoded)
+        response_hash:
+          type:
+          - string
+          - 'null'
+          description: Hash of the response body (base64 encoded)
+        signature:
+          type:
+          - string
+          - 'null'
+          description: Signature of the response body (base64 encoded)
+        usage:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Usage'
+            description: Usage statistics for the request
     CreateChatCompletionRequest:
       allOf:
       - $ref: '#/components/schemas/ChatCompletionRequest'
@@ -1063,6 +1095,31 @@ components:
         model_name:
           type: string
           description: The request model name
+    Usage:
+      type: object
+      description: Represents usage statistics for a confidential compute request
+      required:
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
+      properties:
+        completion_tokens:
+          type: integer
+          format: int64
+          description: Number of compute units used
+          minimum: 0
+        completion_tokens_details:
+          description: Details about the completion tokens
+        prompt_tokens:
+          type: integer
+          format: int64
+          description: Number of compute units used
+          minimum: 0
+        total_tokens:
+          type: integer
+          format: int64
+          description: Number of compute units used
+          minimum: 0
   securitySchemes:
     bearerAuth:
       type: http

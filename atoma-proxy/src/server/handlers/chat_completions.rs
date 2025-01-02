@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::server::types::ConfidentialComputeResponse;
 use crate::server::{
     error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
     streamer::Streamer, types::ConfidentialComputeRequest,
@@ -352,7 +353,7 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeRequest),
+        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
