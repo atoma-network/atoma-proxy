@@ -282,7 +282,7 @@ pub async fn confidential_embeddings_create(
                 &state.state_manager_sender,
                 metadata.selected_stack_small_id,
                 num_input_compute_units as i64,
-                total_tokens as i64,
+                total_tokens,
                 &metadata.endpoint,
             )?;
             Ok(Json(response).into_response())
