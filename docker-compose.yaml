@@ -57,7 +57,7 @@ services:
       - atoma-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`dashboard.atomacloud.com`)"
+      - "traefik.http.routers.dashboard.rule=Host(`atomacloud.com`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
       - "traefik.http.routers.dashboard.service=dashboard_service"
