@@ -1,26 +1,23 @@
 use std::time::{Duration, Instant};
 
 use crate::server::{
-    handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
-    http_server::ProxyState,
-    middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
-    streamer::Streamer,
+    error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
+    streamer::Streamer, types::ConfidentialComputeRequest,
 };
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::constants;
 use axum::body::Body;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
-use x25519_dalek::PublicKey;
 
 use super::request_model::RequestModel;
+use super::update_state_manager;
+use crate::server::Result;
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -117,47 +114,116 @@ pub async fn chat_completions_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let is_streaming = payload
         .get("stream")
-        .ok_or_else(|| {
-            error!("Missing or invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Missing or invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?
         .as_bool()
-        .ok_or_else(|| {
-            error!("Invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
+    match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
+}
+
+/// Routes chat completion requests to either streaming or non-streaming handlers based on the request type.
+///
+/// This function serves as a router that directs incoming chat completion requests to the appropriate
+/// handler based on whether streaming is requested. It handles both regular and confidential chat
+/// completion requests.
+///
+/// # Arguments
+///
+/// * `state` - Reference to the application's shared state containing service configuration
+/// * `metadata` - Request metadata containing:
+///   * `node_address` - Address of the inference node
+///   * `node_id` - Identifier of the selected node
+///   * `num_compute_units` - Available compute units
+///   * `selected_stack_small_id` - Stack identifier
+///   * `endpoint` - The API endpoint being accessed
+///   * `model_name` - Name of the AI model being used
+/// * `headers` - HTTP request headers to forward to the inference service
+/// * `payload` - The JSON payload containing the chat completion request
+/// * `is_streaming` - Boolean flag indicating whether to use streaming response
+///
+/// # Returns
+///
+/// Returns a `Result` containing either:
+/// * A streaming SSE response for real-time completions
+/// * A single JSON response for non-streaming completions
+///
+/// # Errors
+///
+/// Returns an error if either the streaming or non-streaming handler encounters an error:
+/// * Network communication failures
+/// * Invalid response formats
+/// * State management errors
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let response = handle_chat_completions_request(
+///     &state,
+///     &metadata,
+///     headers,
+///     payload,
+///     true // for streaming
+/// ).await?;
+/// ```
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        path = metadata.endpoint,
+    )
+)]
+async fn handle_chat_completions_request(
+    state: &ProxyState,
+    metadata: &RequestMetadataExtension,
+    headers: HeaderMap,
+    payload: Value,
+    is_streaming: bool,
+) -> Result<Response<Body>> {
     if is_streaming {
         handle_streaming_response(
             state,
-            metadata.node_address,
+            &metadata.node_address,
             metadata.node_id,
             headers,
-            payload,
+            &payload,
             metadata.num_compute_units as i64,
             metadata.selected_stack_small_id,
-            metadata.endpoint,
-            metadata.salt,
-            metadata.node_x25519_public_key,
-            metadata.model_name,
+            metadata.endpoint.clone(),
+            metadata.model_name.clone(),
         )
         .await
     } else {
         handle_non_streaming_response(
             state,
-            metadata.node_address,
+            &metadata.node_address,
             metadata.node_id,
             headers,
-            payload,
+            &payload,
             metadata.num_compute_units as i64,
             metadata.selected_stack_small_id,
-            metadata.endpoint,
-            metadata.salt,
-            metadata.node_x25519_public_key,
-            metadata.model_name,
+            metadata.endpoint.clone(),
+            metadata.model_name.clone(),
         )
         .await
     }
@@ -185,10 +251,13 @@ pub async fn chat_completions_create_stream(
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
     Json(_payload): Json<CreateChatCompletionStreamRequest>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     // This endpoint exists only for OpenAPI documentation
     // Actual streaming is handled by chat_completions_create
-    Err(StatusCode::NOT_IMPLEMENTED)
+    Err(AtomaProxyError::NotImplemented {
+        message: "Streaming is not implemented".to_string(),
+        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+    })
 }
 
 /// OpenAPI documentation structure for confidential chat completions endpoint.
@@ -215,16 +284,7 @@ pub async fn chat_completions_create_stream(
 #[derive(OpenApi)]
 #[openapi(
     paths(confidential_chat_completions_create),
-    components(schemas(
-        ChatCompletionRequest,
-        ChatCompletionMessage,
-        ChatCompletionResponse,
-        ChatCompletionChoice,
-        CompletionUsage,
-        ChatCompletionChunk,
-        ChatCompletionChunkChoice,
-        ChatCompletionChunkDelta
-    ))
+    components(schemas(ConfidentialComputeRequest))
 )]
 pub(crate) struct ConfidentialChatCompletionsOpenApi;
 
@@ -255,14 +315,14 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// Returns a `Result` containing either:
 /// * An HTTP response with the chat completion result
 /// * A streaming SSE connection for real-time completions
-/// * A `StatusCode` error if the request processing fails
+/// * An `AtomaProxyError` error if the request processing fails
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::BAD_REQUEST` if:
+/// Returns `AtomaProxyError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaProxyError::InternalError` if:
 /// * The inference service request fails
 /// * Response processing encounters errors
 /// * State manager updates fail
@@ -287,13 +347,13 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 #[utoipa::path(
     post,
     path = "",
-    request_body = CreateChatCompletionRequest,
+    request_body = ConfidentialComputeRequest,
     security(
         ("bearerAuth" = [])
     ),
     request_body = ConfidentialChatCompletionRequest,
     responses(
-        (status = OK, description = "Confidential chat completions", body = ConfidentialChatCompletionResponse),
+        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeRequest),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -311,49 +371,31 @@ pub async fn confidential_chat_completions_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let is_streaming = payload
         .get("stream")
-        .ok_or_else(|| {
-            error!("Missing or invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Missing or invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?
         .as_bool()
-        .ok_or_else(|| {
-            error!("Invalid 'stream' field");
-            StatusCode::BAD_REQUEST
+        .ok_or_else(|| AtomaProxyError::InvalidBody {
+            message: "Invalid 'stream' field".to_string(),
+            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
         })?;
 
-    if is_streaming {
-        handle_streaming_response(
-            state,
-            metadata.node_address,
-            metadata.node_id,
-            headers,
-            payload,
-            metadata.num_compute_units as i64,
-            metadata.selected_stack_small_id,
-            metadata.endpoint,
-            metadata.salt,
-            metadata.node_x25519_public_key,
-            metadata.model_name,
-        )
-        .await
-    } else {
-        handle_non_streaming_response(
-            state,
-            metadata.node_address,
-            metadata.node_id,
-            headers,
-            payload,
-            metadata.num_compute_units as i64,
-            metadata.selected_stack_small_id,
-            metadata.endpoint,
-            metadata.salt,
-            metadata.node_x25519_public_key,
-            metadata.model_name,
-        )
-        .await
+    match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
     }
 }
 
@@ -376,11 +418,11 @@ pub async fn confidential_chat_completions_create(
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing the HTTP response from the inference service, or a `StatusCode` error.
+/// Returns a `Result` containing the HTTP response from the inference service, or an `AtomaProxyError` error.
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaProxyError::InternalError` if:
 /// - The inference service request fails
 /// - Response parsing fails
 /// - State manager updates fail
@@ -410,18 +452,16 @@ pub async fn confidential_chat_completions_create(
 )]
 #[allow(clippy::too_many_arguments)]
 async fn handle_non_streaming_response(
-    state: ProxyState,
-    node_address: String,
+    state: &ProxyState,
+    node_address: &String,
     selected_node_id: i64,
     headers: HeaderMap,
-    payload: Value,
+    payload: &Value,
     estimated_total_tokens: i64,
     selected_stack_small_id: i64,
     endpoint: String,
-    salt: Option<[u8; constants::SALT_SIZE]>,
-    node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
     let time = Instant::now();
 
@@ -431,40 +471,17 @@ async fn handle_non_streaming_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!(
-                level = "error",
-                node_address = node_address,
-                endpoint = endpoint,
-                error = ?err,
-                "Failed to send OpenAI API request"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to send OpenAI API request: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!(
-                level = "error",
-                node_address = node_address,
-                endpoint = endpoint,
-                error = ?err,
-                "Failed to parse OpenAI API response"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse OpenAI API response: {:?}", err),
+            endpoint: endpoint.to_string(),
         })
         .map(Json)?;
-
-    let response = if let (Some(node_x25519_public_key), Some(salt)) =
-        (node_x25519_public_key, salt)
-    {
-        let shared_secret = state.compute_shared_secret(&node_x25519_public_key);
-        let NodeEncryptionMetadata { ciphertext, nonce } =
-            extract_node_encryption_metadata(response.0)?;
-        handle_confidential_compute_decryption_response(shared_secret, &ciphertext, &salt, &nonce)?
-    } else {
-        response.0
-    };
 
     // Extract the response total number of tokens
     let total_tokens = response
@@ -488,20 +505,6 @@ async fn handle_non_streaming_response(
         .map(|n| n as i64)
         .unwrap_or(0);
 
-    // NOTE: We need to update the stack num tokens, because the inference response might have produced
-    // less tokens than estimated what we initially estimated, from the middleware.
-    if let Err(e) = utils::update_state_manager(
-        &state,
-        selected_stack_small_id,
-        estimated_total_tokens,
-        total_tokens,
-    )
-    .await
-    {
-        error!("Error updating state manager: {}", e);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
     state
         .state_manager_sender
         .send(
@@ -514,12 +517,27 @@ async fn handle_non_streaming_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Error updating node throughput performance: {}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Error updating node throughput performance: {}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
-    Ok(Json(response).into_response())
+    // NOTE: We need to update the stack num tokens, because the inference response might have produced
+    // less tokens than estimated what we initially estimated, from the middleware.
+    if let Err(e) = update_state_manager(
+        &state.state_manager_sender,
+        selected_stack_small_id,
+        estimated_total_tokens,
+        total_tokens,
+        &endpoint,
+    ) {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Error updating state manager: {}", e),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    Ok(response.into_response())
 }
 
 /// Handles streaming chat completion requests by establishing a Server-Sent Events (SSE) connection.
@@ -540,11 +558,11 @@ async fn handle_non_streaming_response(
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an SSE stream response, or a `StatusCode` error.
+/// Returns a `Result` containing an SSE stream response, or a `AtomaProxyError` error.
 ///
 /// # Errors
 ///
-/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if:
+/// Returns `AtomaProxyError::InternalError` if:
 /// - The inference service request fails
 /// - The inference service returns a non-success status code
 ///
@@ -569,18 +587,16 @@ async fn handle_non_streaming_response(
 )]
 #[allow(clippy::too_many_arguments)]
 async fn handle_streaming_response(
-    state: ProxyState,
-    node_address: String,
+    state: &ProxyState,
+    node_address: &String,
     node_id: i64,
     headers: HeaderMap,
-    payload: Value,
+    payload: &Value,
     estimated_total_tokens: i64,
     selected_stack_small_id: i64,
     endpoint: String,
-    salt: Option<[u8; constants::SALT_SIZE]>,
-    node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     // NOTE: If streaming is requested, add the include_usage option to the payload
     // so that the atoma node state manager can be updated with the total number of tokens
     // that were processed for this request.
@@ -593,32 +609,30 @@ async fn handle_streaming_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| {
-            error!("Error sending request to inference service: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Error sending request to inference service: {}", e),
+            endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        error!("Inference service returned error: {}", response.status());
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
     }
 
     let stream = response.bytes_stream();
 
-    let shared_secret = node_x25519_public_key
-        .map(|node_x25519_public_key| state.compute_shared_secret(&node_x25519_public_key));
-
     // Create the SSE stream
     let stream = Sse::new(Streamer::new(
         stream,
-        state.state_manager_sender,
+        state.state_manager_sender.clone(),
         selected_stack_small_id,
         estimated_total_tokens,
         start,
         node_id,
-        shared_secret,
-        salt,
         model_name,
+        endpoint,
     ))
     .keep_alive(
         axum::response::sse::KeepAlive::new()
@@ -645,26 +659,28 @@ pub struct RequestModelChatCompletions {
 }
 
 impl RequestModel for RequestModelChatCompletions {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
+    fn new(request: &Value) -> Result<Self> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            error!("Missing or invalid 'model' field");
-            StatusCode::BAD_REQUEST
+            AtomaProxyError::InvalidBody {
+                message: "Missing or invalid 'model' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+            }
         })?;
 
         let messages = request
             .get(MESSAGES)
             .and_then(|m| m.as_array())
-            .ok_or_else(|| {
-                error!("Missing or invalid 'messages' field");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaProxyError::InvalidBody {
+                message: "Missing or invalid 'messages' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
         let max_tokens = request
             .get(MAX_TOKENS)
             .and_then(|m| m.as_u64())
-            .ok_or_else(|| {
-                error!("Missing or invalid 'max_tokens' field");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaProxyError::InvalidBody {
+                message: "Missing or invalid 'max_tokens' field".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
         Ok(Self {
@@ -674,18 +690,18 @@ impl RequestModel for RequestModelChatCompletions {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
         let tokenizer_index = state
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| {
-                error!("Model not supported");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaProxyError::InvalidBody {
+                message: "Model not supported".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
         let tokenizer = &state.tokenizers[tokenizer_index];
 
@@ -695,16 +711,16 @@ impl RequestModel for RequestModelChatCompletions {
             let content = message
                 .get("content")
                 .and_then(|content| content.as_str())
-                .ok_or_else(|| {
-                    error!("Missing or invalid message content");
-                    StatusCode::BAD_REQUEST
+                .ok_or_else(|| AtomaProxyError::InvalidBody {
+                    message: "Missing or invalid message content".to_string(),
+                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
 
             let num_tokens = tokenizer
                 .encode(content, true)
-                .map_err(|err| {
-                    error!("Failed to encode message: {:?}", err);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to encode message: {:?}", err),
+                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?
                 .get_ids()
                 .len() as u64;
@@ -717,55 +733,6 @@ impl RequestModel for RequestModelChatCompletions {
         }
         total_num_tokens += self.max_tokens;
         Ok(total_num_tokens)
-    }
-}
-
-pub(crate) mod utils {
-    use super::*;
-
-    /// Updates the state manager with token usage and hash information for a stack.
-    ///
-    /// This function performs two main operations:
-    /// 1. Updates the token count for the stack with both estimated and actual usage
-    /// 2. Computes and updates a total hash combining the payload and response hashes
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Reference to the application state containing the state manager sender
-    /// * `stack_small_id` - Unique identifier for the stack
-    /// * `estimated_total_tokens` - The estimated number of tokens before processing
-    /// * `total_tokens` - The actual number of tokens used
-    /// * `payload_hash` - Hash of the request payload
-    /// * `response_hash` - Hash of the response data
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if both updates succeed, or a `StatusCode::INTERNAL_SERVER_ERROR` if either update fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The state manager channel is closed
-    /// - Either update operation fails to complete
-    pub(crate) async fn update_state_manager(
-        state: &ProxyState,
-        stack_small_id: i64,
-        estimated_total_tokens: i64,
-        total_tokens: i64,
-    ) -> Result<(), StatusCode> {
-        // Update stack num tokens
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokens {
-                stack_small_id,
-                estimated_total_tokens,
-                total_tokens,
-            })
-            .map_err(|e| {
-                error!("Error updating stack num tokens: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-        Ok(())
     }
 }
 

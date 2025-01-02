@@ -46,6 +46,14 @@ pub struct ProofRequest {
     pub signature: String,
 }
 
+/// Request payload for acknowledging a usdc payment.
+///
+/// Contains the transaction digest of the payment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct UsdcPaymentRequest {
+    pub transaction_digest: String,
+}
+
 /// Represents a computed units processed response
 /// This struct is used to represent the response for the get_compute_units_processed endpoint.
 /// The timestamp of the computed units processed measurement. We measure the computed units processed on hourly basis. We do these measurements for each model.
@@ -318,6 +326,9 @@ pub struct NodePublicKey {
     pub node_small_id: i64,
     /// Public key of the node
     pub public_key: Vec<u8>,
+    /// The stack small id that is associated with the selected node
+    #[sqlx(default)]
+    pub stack_small_id: Option<i64>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {
@@ -362,6 +373,28 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
+    /// Verifies if a stack is valid for confidential compute request
+    VerifyStackForConfidentialComputeRequest {
+        /// Unique small integer identifier for the stack   
+        stack_small_id: i64,
+
+        /// Available compute units for the stack
+        available_compute_units: i64,
+
+        /// Channel to send back the result
+        /// Returns Ok(bool) with true if the stack is valid or false if it is not
+        result_sender: oneshot::Sender<Result<bool>>,
+    },
+    /// Locks compute units for a stack
+    LockComputeUnitsForStack {
+        /// Unique small integer identifier for the stack
+        stack_small_id: i64,
+        /// Available compute units for the stack
+        available_compute_units: i64,
+        /// Channel to send back the result
+        /// Returns Ok(()) if the stack is valid or an error if it is not
+        result_sender: oneshot::Sender<Result<()>>,
+    },
     /// Retrieves all tasks associated with a specific model
     GetTasksForModel {
         /// The name/identifier of the model to query tasks for
@@ -379,6 +412,13 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Channel to send back the cheapest node
         /// Returns Ok(Option<CheapestNode>) with the cheapest node or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<CheapestNode>>>,
+    },
+    GetNodePublicUrlAndSmallId {
+        /// Unique small integer identifier for the stack
+        stack_small_id: i64,
+        /// Channel to send back the public url and small id
+        /// Returns Ok(Option<(String, i64)>) with the public url and small id or an error if the query fails
+        result_sender: oneshot::Sender<Result<(Option<String>, i64)>>,
     },
     /// Selects a node's public key for encryption
     SelectNodePublicKeyForEncryption {
@@ -409,6 +449,7 @@ pub enum AtomaAtomaStateManagerEvent {
     GetNodePublicAddress {
         /// Unique small integer identifier for the node
         node_small_id: i64,
+
         /// Channel to send back the public address
         /// Returns Ok(Option<String>) with the public address or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<String>>>,
@@ -562,5 +603,27 @@ pub enum AtomaAtomaStateManagerEvent {
         user_id: i64,
         /// Proven Sui address
         sui_address: String,
+    },
+    /// Retrieves the sui_address for a user
+    GetSuiAddress {
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
+    },
+    /// Retrieves the user ID by Sui address
+    GetUserId {
+        sui_address: String,
+        result_sender: oneshot::Sender<Result<Option<i64>>>,
+    },
+    /// Updates the balance of a user
+    TopUpBalance {
+        user_id: i64,
+        amount: i64,
+        timestamp: i64,
+    },
+    /// Withdraws the balance of a user
+    DeductFromUsdc {
+        user_id: i64,
+        amount: i64,
+        result_sender: oneshot::Sender<Result<()>>,
     },
 }

@@ -837,6 +837,19 @@ pub(crate) async fn handle_state_manager_event(
                 .send(node)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::LockComputeUnitsForStack {
+            stack_small_id,
+            available_compute_units,
+            result_sender,
+        } => {
+            let is_locked = state_manager
+                .state
+                .lock_compute_units(stack_small_id, available_compute_units)
+                .await;
+            result_sender
+                .send(is_locked)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
         AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
             model,
             max_num_tokens,
@@ -860,6 +873,22 @@ pub(crate) async fn handle_state_manager_event(
                 .await?;
             result_sender
                 .send(node)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::VerifyStackForConfidentialComputeRequest {
+            stack_small_id,
+            available_compute_units,
+            result_sender,
+        } => {
+            let is_valid = state_manager
+                .state
+                .verify_stack_for_confidential_compute_request(
+                    stack_small_id,
+                    available_compute_units,
+                )
+                .await;
+            result_sender
+                .send(is_valid)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {
@@ -894,6 +923,18 @@ pub(crate) async fn handle_state_manager_event(
                 .await;
             result_sender
                 .send(public_address)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetNodePublicUrlAndSmallId {
+            stack_small_id,
+            result_sender,
+        } => {
+            let result = state_manager
+                .state
+                .get_node_public_url_and_small_id(stack_small_id)
+                .await;
+            result_sender
+                .send(result)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::GetNodeSuiAddress {
@@ -1085,6 +1126,44 @@ pub(crate) async fn handle_state_manager_event(
                 .state
                 .update_sui_address(user_id, sui_address)
                 .await?;
+        }
+        AtomaAtomaStateManagerEvent::GetSuiAddress {
+            user_id,
+            result_sender,
+        } => {
+            let sui_address = state_manager.state.get_sui_address(user_id).await;
+            result_sender
+                .send(sui_address)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetUserId {
+            sui_address,
+            result_sender,
+        } => {
+            let user_id = state_manager.state.get_user_id(sui_address).await;
+            result_sender
+                .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::TopUpBalance {
+            user_id,
+            amount,
+            timestamp,
+        } => {
+            state_manager
+                .state
+                .top_up_balance(user_id, amount, timestamp)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::DeductFromUsdc {
+            user_id,
+            amount,
+            result_sender,
+        } => {
+            let success = state_manager.state.deduct_from_usdc(user_id, amount).await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
     }
     Ok(())

@@ -284,7 +284,7 @@ impl AtomaState {
         if is_confidential {
             query.push_str(
                 r#"
-                AND tasks.security_level = 2
+                AND tasks.security_level = 1
                 AND node_public_keys.is_valid = true"#,
             );
         }
@@ -424,7 +424,7 @@ impl AtomaState {
         if is_confidential {
             query.push_str(
                 r#"
-            AND tasks.security_level = 2
+            AND tasks.security_level = 1
             AND node_public_keys.is_valid = true"#,
             );
         }
@@ -449,7 +449,7 @@ impl AtomaState {
     /// This method queries the database to find the cheapest valid node that:
     /// 1. Has a valid public key for encryption
     /// 2. Has an associated stack with sufficient remaining compute capacity
-    /// 3. Supports the specified model with security level 2 (confidential computing)
+    /// 3. Supports the specified model with security level 1 (confidential computing)
     ///
     /// The nodes are ordered by each stac's price per one million compute units, so the most cost-effective stack meeting
     /// all requirements will be selected.
@@ -475,7 +475,7 @@ impl AtomaState {
     ///
     /// The results are filtered to ensure:
     /// - The stack supports the requested model
-    /// - The task requires security level 2 (confidential computing)
+    /// - The task requires security level 1 (confidential computing)
     /// - The stack has sufficient remaining compute units
     /// - The node's public key is valid
     ///
@@ -505,12 +505,12 @@ impl AtomaState {
     ) -> Result<Option<NodePublicKey>> {
         let node = sqlx::query(
             r#"
-            SELECT node_public_keys.public_key, node_public_keys.node_small_id
+            SELECT node_public_keys.public_key as public_key, node_public_keys.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
                 FROM node_public_keys
                 INNER JOIN stacks ON stacks.selected_node_id = node_public_keys.node_small_id
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
                 WHERE tasks.model_name = $1
-                AND tasks.security_level = 2
+                AND tasks.security_level = 1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND node_public_keys.is_valid = true
                 ORDER BY stacks.price_per_one_million_compute_units ASC
@@ -523,6 +523,58 @@ impl AtomaState {
         .await?;
         node.map(|node| NodePublicKey::from_row(&node).map_err(AtomaStateManagerError::from))
             .transpose()
+    }
+
+    /// Verifies if a stack is valid for confidential compute requests.
+    ///
+    /// This method checks if:
+    /// 1. The stack exists and has enough available compute units
+    /// 2. The associated node has a valid public key for confidential computing
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique identifier of the stack to verify
+    /// * `available_compute_units` - The number of compute units needed
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result containing either:
+    ///   - `Ok(true)` if the stack is valid for confidential computing
+    ///   - `Ok(false)` if the stack is invalid or has insufficient compute units
+    ///   - `Err(AtomaStateManagerError)` if there's a database error
+    #[instrument(level = "trace", skip_all, fields(%stack_small_id, %available_compute_units))]
+    pub async fn verify_stack_for_confidential_compute_request(
+        &self,
+        stack_small_id: i64,
+        available_compute_units: i64,
+    ) -> Result<bool> {
+        let result = sqlx::query_scalar::<_, bool>(
+            r#"
+            WITH latest_rotation AS (
+                SELECT key_rotation_counter 
+                FROM key_rotations 
+                ORDER BY key_rotation_counter DESC 
+                LIMIT 1
+            )
+            SELECT EXISTS (
+                SELECT 1 
+                FROM stacks
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.selected_node_id
+                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter
+                WHERE stacks.stack_small_id = $1
+                AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND tasks.security_level = 1
+                AND node_public_keys.is_valid = true
+                AND stacks.in_settle_period = false
+            )"#,
+        )
+        .bind(stack_small_id)
+        .bind(available_compute_units)
+        .fetch_one(&self.db)
+        .await?;
+
+        Ok(result)
     }
 
     /// Retrieves a node's public key for encryption by its node ID.
@@ -1585,6 +1637,69 @@ impl AtomaState {
         .await?;
 
         Ok(maybe_stack)
+    }
+
+    /// Locks (reserves) a specified number of compute units for a stack.
+    ///
+    /// This method atomically updates the `already_computed_units` field in the `stacks` table
+    /// by adding the specified number of compute units to the current value. This effectively
+    /// "locks" these compute units for use by preventing other processes from using the same units.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique small identifier of the stack to lock compute units for.
+    /// * `available_compute_units` - The number of compute units to lock/reserve.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The specified stack is not found (`AtomaStateManagerError::StackNotFound`).
+    /// - The specified stack does not have enough compute units to lock.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn lock_units(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let stack_small_id = 1;
+    ///     let units_to_lock = 100;
+    ///     
+    ///     state_manager.lock_compute_units_for_stack(stack_small_id, units_to_lock).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",    
+        skip_all,
+        fields(
+            %stack_small_id,
+            %available_compute_units
+        )
+    )]
+    pub async fn lock_compute_units(
+        &self,
+        stack_small_id: i64,
+        available_compute_units: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE stacks 
+            SET already_computed_units = already_computed_units + $1 
+            WHERE stack_small_id = $2 
+            AND already_computed_units + $1 <= num_compute_units",
+        )
+        .bind(available_compute_units)
+        .bind(stack_small_id)
+        .execute(&self.db)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(AtomaStateManagerError::StackNotFound);
+        }
+        Ok(())
     }
 
     /// Inserts a new stack into the database.
@@ -2658,6 +2773,65 @@ impl AtomaState {
         Ok(address)
     }
 
+    /// Retrieves the public address and small ID of the node associated with a specific stack.
+    ///
+    /// This method performs a JOIN between the `stacks` and `nodes` tables to fetch the node's
+    /// public address and small ID based on the stack's selected node.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique small identifier of the stack.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(Option<String>, i64)>`: A result containing either:
+    ///   - `Ok((Option<String>, i64))`: A tuple containing:
+    ///     - The node's public address (if set) or None
+    ///     - The node's small ID
+    ///   - `Err(AtomaStateManagerError)`: An error if:
+    ///     - The database query fails
+    ///     - The specified stack is not found
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - The specified stack does not exist (`AtomaStateManagerError::StackNotFound`)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_node_info(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let stack_small_id = 1;
+    ///     let (public_address, node_small_id) = state_manager
+    ///         .get_node_public_url_and_small_id(stack_small_id)
+    ///         .await?;
+    ///     
+    ///     println!("Node {} has public address: {:?}", node_small_id, public_address);
+    ///     Ok(())
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%stack_small_id))]
+    pub async fn get_node_public_url_and_small_id(
+        &self,
+        stack_small_id: i64,
+    ) -> Result<(Option<String>, i64)> {
+        let result = sqlx::query_as::<_, (Option<String>, i64)>(
+            "SELECT n.public_address, n.node_small_id 
+             FROM stacks s
+             JOIN nodes n ON s.selected_node_id = n.node_small_id 
+             WHERE s.stack_small_id = $1",
+        )
+        .bind(stack_small_id)
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or(AtomaStateManagerError::StackNotFound)?;
+
+        Ok(result)
+    }
+
     /// Retrieves the sui address of a node from the database.
     ///
     /// This method fetches the sui address of a node from the `nodes` table.
@@ -3684,10 +3858,166 @@ impl AtomaState {
     ///    state_manager.store_sui_address(user_id, sui_address).await
     /// }
     /// ```
+    #[instrument(level = "trace", skip(self))]
     pub async fn update_sui_address(&self, user_id: i64, sui_address: String) -> Result<()> {
         sqlx::query("UPDATE users SET sui_address = $1 WHERE id = $2")
             .bind(sui_address)
             .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieves the SUI address for the user.
+    ///
+    /// This method retrieves the SUI address for the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///  - `Ok(Some(String))`: The SUI address of the user.
+    /// - `Ok(None)`: If the user is not found.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_sui_address(state_manager: &AtomaStateManager, user_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_sui_address(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_sui_address(&self, user_id: i64) -> Result<Option<String>> {
+        let sui_address =
+            sqlx::query_scalar::<_, Option<String>>("SELECT sui_address FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.db)
+                .await?;
+
+        Ok(sui_address.flatten())
+    }
+
+    /// Retrieves the user id for the user.
+    ///
+    /// This method retrieves the user id the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `sui_address` - The sui_address of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<i64>>`: A result containing either:
+    ///  - `Ok(Some(i64))`: The user id of the user.
+    /// - `Ok(None)`: If the user is not found.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_sui_address(state_manager: &AtomaStateManager, sui_address: String) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.get_sui_address(sui_address).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_user_id(&self, sui_address: String) -> Result<Option<i64>> {
+        let user = sqlx::query("SELECT id FROM users WHERE sui_address = $1")
+            .bind(sui_address)
+            .fetch_optional(&self.db)
+            .await?;
+
+        Ok(user.map(|user| user.get("id")))
+    }
+
+    /// Update the balance for the user.
+    ///
+    /// This method updates the `balance` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The new balance to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_balance(state_manager: &AtomaStateManager, user_id: i64, balance: i64) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_balance(user_id, balance).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn top_up_balance(&self, user_id: i64, balance: i64, timestamp: i64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO balance (user_id, usdc_balance, usdc_last_timestamp) 
+                         VALUES ($1, $2, $3) 
+                         ON CONFLICT (user_id) 
+                         DO UPDATE SET 
+                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance, 
+                            usdc_last_timestamp = EXCLUDED.usdc_last_timestamp 
+                         WHERE balance.usdc_last_timestamp < EXCLUDED.usdc_last_timestamp",
+        )
+        .bind(user_id)
+        .bind(balance)
+        .bind(timestamp)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Deduct from the usdc balance for the user.
+    ///
+    /// This method withdraws the balance from the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The balance to withdraw from the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute (that could mean the balance is not available)
+    pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
+        sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1")
+            .bind(user_id)
+            .bind(balance)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -3913,7 +4243,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -3942,7 +4272,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with multiple nodes at different prices
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -3982,7 +4312,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data for confidential computing
-        create_test_task(&state.db, 1, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
         create_key_rotation(&state.db, 1, 1).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
@@ -4012,7 +4342,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with invalid public key
-        create_test_task(&state.db, 1, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
         create_test_node_subscription(&state.db, 1, 1, 100, 1000)
             .await
@@ -4077,7 +4407,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create test data with invalid subscription
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
         create_test_node(&state.db, 1).await.unwrap();
 
         // Create invalid subscription (valid = false)
@@ -4127,8 +4457,8 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create tasks with different security levels
-        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
-        create_test_task(&state.db, 2, "gpt-4", 2).await.unwrap();
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_task(&state.db, 2, "gpt-4", 1).await.unwrap();
         create_key_rotation(&state.db, 1, 1).await.unwrap();
 
         create_test_node(&state.db, 1).await.unwrap();
@@ -4174,7 +4504,7 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Create base task with security level 2 (confidential)
-        create_test_task(&state.db, 1, "gpt-4", 2).await?;
+        create_test_task(&state.db, 1, "gpt-4", 1).await?;
 
         Ok(state)
     }
@@ -4309,8 +4639,8 @@ mod tests {
     async fn test_security_level_requirement() -> Result<()> {
         let state = setup_test_environment().await?;
 
-        // Create task with security level 1 (non-confidential)
-        create_test_task(&state.db, 2, "gpt-4", 1).await?;
+        // Create task with security level 0 (non-confidential)
+        create_test_task(&state.db, 2, "gpt-4", 0).await?;
 
         // Setup valid node subscribed to non-confidential task
         create_test_node(&state.db, 1).await?;
@@ -4559,6 +4889,187 @@ mod tests {
             assert_eq!(node_key.node_small_id, 1);
             assert_eq!(node_key.public_key, vec![1, 2, 3, 4]);
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_stack_for_confidential_compute_request() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Set up test data
+        sqlx::query(
+            r#"
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
+            VALUES 
+                (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0),  -- Confidential task
+                (2, 'task2', 'gpt-4', 0, 0, false, null, null, 0)   -- Non-confidential task
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES 
+                (1, 1, 1, 'key1', 'attestation1', true),   -- Valid key
+                (2, 1, 1, 'key2', 'attestation2', false),  -- Invalid key
+                (3, 1, 1, 'key3', 'attestation3', true)    -- Valid key
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO stacks (
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
+            )
+            VALUES 
+                (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1),      -- Valid stack, confidential task
+                (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1),      -- Invalid node key
+                (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1),      -- Non-confidential task
+                (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1),    -- Not enough compute units
+                (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1),       -- In settle period
+                (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1)     -- Valid stack with partial usage
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Test cases
+        let test_cases = vec![
+            // (stack_small_id, available_compute_units, expected_result, description)
+            (1, 500, true, "Valid stack with enough compute units"),
+            (2, 500, false, "Stack with invalid node key"),
+            (3, 500, false, "Non-confidential task stack"),
+            (4, 200, false, "Stack with insufficient compute units"),
+            (5, 500, false, "Stack in settle period"),
+            (6, 400, true, "Valid stack with partial usage"),
+            (
+                6,
+                600,
+                false,
+                "Valid stack but requesting too many compute units",
+            ),
+            (999, 500, false, "Non-existent stack"),
+        ];
+
+        for (stack_id, compute_units, expected, description) in test_cases {
+            let result = state
+                .verify_stack_for_confidential_compute_request(stack_id, compute_units)
+                .await?;
+            assert_eq!(
+                result, expected,
+                "Failed test case: {} (stack_id: {}, compute_units: {})",
+                description, stack_id, compute_units
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Set up initial test data
+        sqlx::query(
+            r#"
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
+            VALUES (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES (1, 1, 1, 'key1', 'attestation1', true)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO stacks (
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
+            )
+            VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is initially valid
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(result, "Stack should be valid with current key rotation");
+
+        // Simulate key rotation
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (2, 2)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is now invalid due to outdated key
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(!result, "Stack should be invalid after key rotation");
+
+        // Update node's key for new rotation
+        sqlx::query(
+            r#"
+            UPDATE node_public_keys 
+            SET public_key = 'key1_new',
+                tee_remote_attestation_bytes = 'attestation1_new',
+                key_rotation_counter = 2,
+                epoch = 2
+            WHERE node_small_id = 1 
+            AND key_rotation_counter = 1
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is valid again with new key
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(result, "Stack should be valid with updated key");
 
         Ok(())
     }

@@ -5,7 +5,6 @@ use std::{
 };
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::{constants, parse_json_byte_array};
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
 use flume::Sender;
@@ -14,9 +13,8 @@ use reqwest;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::{error, instrument};
-use x25519_dalek::SharedSecret;
 
-use super::handlers::handle_confidential_compute_decryption_streaming_chunk;
+use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -32,9 +30,6 @@ const CHOICES: &str = "choices";
 
 /// The usage key
 const USAGE: &str = "usage";
-
-/// The nonce key, for confidential compute mode
-const NONCE: &str = "nonce";
 
 /// A structure for streaming chat completion chunks.
 pub struct Streamer {
@@ -54,12 +49,10 @@ pub struct Streamer {
     start_decode: Option<Instant>,
     /// Node id that's running this request
     node_id: i64,
-    /// Shared secret for decryption of ciphertext streamed response from the inference node
-    shared_secret: Option<SharedSecret>,
-    /// Salt for decryption of ciphertext streamed response from the inference node
-    salt: Option<[u8; constants::SALT_SIZE]>,
     /// Model name
     model_name: String,
+    /// Endpoint
+    endpoint: String,
 }
 
 /// Represents the various states of a streaming process
@@ -85,9 +78,8 @@ impl Streamer {
         estimated_total_tokens: i64,
         start: Instant,
         node_id: i64,
-        shared_secret: Option<SharedSecret>,
-        salt: Option<[u8; constants::SALT_SIZE]>,
         model_name: String,
+        endpoint: String,
     ) -> Self {
         Self {
             stream: Box::pin(stream),
@@ -98,9 +90,8 @@ impl Streamer {
             start,
             start_decode: None,
             node_id,
-            shared_secret,
-            salt,
             model_name,
+            endpoint,
         }
     }
 
@@ -168,21 +159,6 @@ impl Streamer {
                 Error::new("Error getting total tokens from usage")
             })?;
 
-        // Update stack num tokens
-        if let Err(e) =
-            self.state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokens {
-                    stack_small_id: self.stack_small_id,
-                    estimated_total_tokens: self.estimated_total_tokens,
-                    total_tokens,
-                })
-        {
-            error!("Error updating stack num tokens: {}", e);
-            return Err(Error::new(format!(
-                "Error updating stack num tokens: {}",
-                e
-            )));
-        }
         // Update the nodes throughput performance
         if let Err(e) = self.state_manager_sender.send(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
@@ -232,6 +208,21 @@ impl Streamer {
             )));
         }
 
+        // Update stack num tokens
+        if let Err(e) = update_state_manager(
+            &self.state_manager_sender,
+            self.stack_small_id,
+            self.estimated_total_tokens,
+            total_tokens,
+            &self.endpoint,
+        ) {
+            error!("Error updating stack num tokens: {}", e);
+            return Err(Error::new(format!(
+                "Error updating stack num tokens: {}",
+                e
+            )));
+        }
+
         Ok(())
     }
 }
@@ -257,7 +248,12 @@ impl Stream for Streamer {
                 let chunk_str = match std::str::from_utf8(&chunk) {
                     Ok(v) => v,
                     Err(e) => {
-                        error!("Invalid UTF-8 sequence: {}", e);
+                        error!(
+                            target = "atoma-service",
+                            level = "error",
+                            "Invalid UTF-8 sequence: {}",
+                            e
+                        );
                         return Poll::Ready(Some(Err(Error::new(format!(
                             "Invalid UTF-8 sequence: {}",
                             e
@@ -273,52 +269,15 @@ impl Stream for Streamer {
                     return Poll::Ready(None);
                 }
 
-                let chunk = serde_json::from_slice::<Value>(chunk_str.as_bytes()).map_err(|e| {
-                    error!("Error parsing chunk: {}", e);
+                let chunk = serde_json::from_str::<Value>(chunk_str).map_err(|e| {
+                    error!(
+                        target = "atoma-service",
+                        level = "error",
+                        "Error parsing chunk {chunk_str}: {}",
+                        e
+                    );
                     Error::new(format!("Error parsing chunk: {}", e))
                 })?;
-
-                let chunk = if let (Some(shared_secret), Some(salt)) =
-                    (self.shared_secret.as_ref(), self.salt.as_ref())
-                {
-                    let ciphertext =
-                        parse_json_byte_array(&chunk, constants::CIPHERTEXT).map_err(|e| {
-                            error!("Error parsing ciphertext from chunk: {}", e);
-                            Error::new(format!("Error parsing ciphertext from chunk: {}", e))
-                        })?;
-                    let nonce = parse_json_byte_array(&chunk, NONCE).map_err(|e| {
-                        error!("Error parsing nonce from chunk: {}", e);
-                        Error::new(format!("Error parsing nonce from chunk: {}", e))
-                    })?;
-
-                    match handle_confidential_compute_decryption_streaming_chunk(
-                        shared_secret,
-                        &ciphertext,
-                        salt,
-                        &nonce,
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("Error decrypting chunk: {}", e);
-                            return Poll::Ready(Some(Err(Error::new(format!(
-                                "Error decrypting chunk: {}",
-                                e
-                            )))));
-                        }
-                    }
-                } else {
-                    chunk
-                };
-
-                let choices = match chunk.get(CHOICES).and_then(|choices| choices.as_array()) {
-                    Some(choices) => choices,
-                    None => {
-                        error!("Error getting choices from chunk");
-                        return Poll::Ready(Some(Err(Error::new(
-                            "Error getting choices from chunk",
-                        ))));
-                    }
-                };
 
                 if self.start_decode.is_none() {
                     self.start_decode = Some(Instant::now());
@@ -335,11 +294,26 @@ impl Stream for Streamer {
                         })?;
                 }
 
-                if choices.is_empty() {
-                    if let Some(usage) = chunk.get(USAGE) {
-                        self.status = StreamStatus::Completed;
-                        self.handle_final_chunk(usage)?;
+                if self.endpoint == CHAT_COMPLETIONS_PATH {
+                    let choices = match chunk.get(CHOICES).and_then(|choices| choices.as_array()) {
+                        Some(choices) => choices,
+                        None => {
+                            error!("Error getting choices from chunk");
+                            return Poll::Ready(Some(Err(Error::new(
+                                "Error getting choices from chunk",
+                            ))));
+                        }
+                    };
+
+                    if choices.is_empty() {
+                        if let Some(usage) = chunk.get(USAGE) {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage)?;
+                        }
                     }
+                } else if let Some(usage) = chunk.get(USAGE) {
+                    self.status = StreamStatus::Completed;
+                    self.handle_final_chunk(usage)?;
                 }
 
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))

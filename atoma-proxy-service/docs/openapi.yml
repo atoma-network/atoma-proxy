@@ -197,6 +197,61 @@ paths:
           description: Failed to proof of address request
       security:
       - bearerAuth: []
+  /usdc_payment:
+    post:
+      tags:
+      - Auth
+      summary: OpenAPI documentation for the usdc_payment endpoint.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+        * `body` - The request body containing the transaction digest
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: usdc_payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsdcPaymentRequest'
+        required: true
+      responses:
+        '200':
+          description: USDC payment request
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to usdc payment request
+      security:
+      - bearerAuth: []
+  /get_sui_address:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the sui address for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Option<String>>>` - A JSON response containing the sui address
+      operationId: get_sui_address
+      responses:
+        '200':
+          description: Retrieves the sui address for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get sui address
+      security:
+      - bearerAuth: []
   /stacks:
     get:
       tags:
@@ -461,6 +516,17 @@ components:
         api_token:
           type: string
           description: The API token to be revoked
+    UsdcPaymentRequest:
+      type: object
+      description: |-
+        Request payload for acknowledging a usdc payment.
+
+        Contains the transaction digest of the payment.
+      required:
+      - transaction_digest
+      properties:
+        transaction_digest:
+          type: string
   securitySchemes:
     bearerAuth:
       type: http

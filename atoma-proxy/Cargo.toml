@@ -28,6 +28,7 @@ serde_yaml = { workspace = true }
 sqlx.workspace = true
 sui-keys.workspace = true
 sui-sdk.workspace = true
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing-appender.workspace = true
 tracing-subscriber = { workspace = true, features = [
@@ -40,5 +41,3 @@ tokenizers.workspace = true
 tower = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
-x25519-dalek = { workspace = true, features = ["static_secrets"] }
-zeroize = { workspace = true }

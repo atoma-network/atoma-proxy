@@ -1,28 +1,26 @@
 use std::time::Instant;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::constants;
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
     Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
-use x25519_dalek::PublicKey;
 
 use crate::server::{
-    handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
-    http_server::ProxyState,
-    middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
+    error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
+    types::ConfidentialComputeRequest,
 };
 
-use super::request_model::RequestModel;
+use super::{request_model::RequestModel, update_state_manager};
+use crate::server::Result;
 
 /// Path for the confidential embeddings endpoint.
 ///
@@ -67,15 +65,23 @@ pub struct RequestModelEmbeddings {
 pub(crate) struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
-        let model = request
-            .get(MODEL)
-            .and_then(|m| m.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
-        let input = request
-            .get(INPUT)
-            .and_then(|i| i.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+    fn new(request: &Value) -> Result<Self> {
+        let model =
+            request
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Model field is required".to_string(),
+                    endpoint: EMBEDDINGS_PATH.to_string(),
+                })?;
+        let input =
+            request
+                .get(INPUT)
+                .and_then(|i| i.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Input field is required".to_string(),
+                    endpoint: EMBEDDINGS_PATH.to_string(),
+                })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -83,26 +89,26 @@ impl RequestModel for RequestModelEmbeddings {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
         let tokenizer_index = state
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| {
-                error!("Model not supported");
-                StatusCode::BAD_REQUEST
+            .ok_or_else(|| AtomaProxyError::InvalidBody {
+                message: "Model not supported".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
             })?;
         let tokenizer = &state.tokenizers[tokenizer_index];
 
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
-            .map_err(|err| {
-                error!("Failed to encode input: {:?}", err);
-                StatusCode::INTERNAL_SERVER_ERROR
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to encode input: {:?}", err),
+                endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
             .len() as u64;
@@ -128,7 +134,7 @@ impl RequestModel for RequestModelEmbeddings {
 ///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
@@ -156,38 +162,44 @@ pub async fn embeddings_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let RequestMetadataExtension {
         node_address,
         node_id,
         num_compute_units: num_input_compute_units,
         ..
     } = metadata;
-    handle_embeddings_response(
-        state,
+    match handle_embeddings_response(
+        &state,
         node_address,
         node_id,
         headers,
         payload,
         num_input_compute_units as i64,
-        metadata.endpoint,
-        metadata.salt,
-        metadata.node_x25519_public_key,
+        metadata.endpoint.clone(),
         metadata.model_name,
     )
     .await
+    {
+        Ok(response) => Ok(Json(response).into_response()),
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                num_input_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
 }
 
 /// Atoma's confidential embeddings OpenAPI documentation.
 #[derive(OpenApi)]
 #[openapi(
     paths(confidential_embeddings_create),
-    components(schemas(
-        CreateEmbeddingRequest,
-        EmbeddingObject,
-        EmbeddingUsage,
-        CreateEmbeddingResponse
-    ))
+    components(schemas(ConfidentialComputeRequest,))
 )]
 pub(crate) struct ConfidentialEmbeddingsOpenApi;
 
@@ -209,19 +221,19 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
 ///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
     path = "",
-    request_body = CreateEmbeddingRequest,
+    request_body = ConfidentialComputeRequest,
     security(
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Confidential embeddings generated successfully", body = CreateEmbeddingResponse),
+        (status = OK, description = "Confidential embeddings generated successfully", body = ConfidentialComputeRequest),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -237,26 +249,63 @@ pub async fn confidential_embeddings_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Response<Body>> {
     let RequestMetadataExtension {
         node_address,
         node_id,
         num_compute_units: num_input_compute_units,
         ..
     } = metadata;
-    handle_embeddings_response(
-        state,
+    match handle_embeddings_response(
+        &state,
         node_address,
         node_id,
         headers,
         payload,
         num_input_compute_units as i64,
-        metadata.endpoint,
-        metadata.salt,
-        metadata.node_x25519_public_key,
+        metadata.endpoint.clone(),
         metadata.model_name,
     )
     .await
+    {
+        Ok(response) => {
+            // NOTE: In this case, we can safely assume that the response is a well-formed JSON object
+            // with a "total_tokens" field, which correctly specifies the number of total tokens
+            // processed by the node, as the latter is running within a TEE.
+            let total_tokens = response
+                .get("total_tokens")
+                .map(|u| {
+                    u.as_u64().ok_or_else(|| AtomaProxyError::InternalError {
+                        message: "Failed to get total tokens".to_string(),
+                        endpoint: metadata.endpoint.clone(),
+                    })
+                })
+                .transpose()
+                .map_err(|e| AtomaProxyError::InternalError {
+                    message: format!("Failed to get total tokens: {}", e),
+                    endpoint: metadata.endpoint.clone(),
+                })?
+                .unwrap_or(0);
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                num_input_compute_units as i64,
+                total_tokens as i64,
+                &metadata.endpoint,
+            )?;
+            Ok(Json(response).into_response())
+        }
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                num_input_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
 }
 
 /// Handles the response processing for embeddings requests by forwarding them to AI nodes and managing performance metrics.
@@ -278,7 +327,7 @@ pub async fn confidential_embeddings_create(
 ///
 /// # Returns
 /// * `Ok(Response<Body>)` - The processed embeddings response from the AI node
-/// * `Err(StatusCode)` - An error status code if any step fails
+/// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
 /// # Errors
 /// * Returns `INTERNAL_SERVER_ERROR` if:
@@ -296,17 +345,15 @@ pub async fn confidential_embeddings_create(
 )]
 #[allow(clippy::too_many_arguments)]
 async fn handle_embeddings_response(
-    state: ProxyState,
+    state: &ProxyState,
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     num_input_compute_units: i64,
     endpoint: String,
-    salt: Option<[u8; constants::SALT_SIZE]>,
-    node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+) -> Result<Value> {
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
@@ -316,27 +363,24 @@ async fn handle_embeddings_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!("Failed to send embeddings request: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to send embeddings request: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!("Failed to parse embeddings response: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
-        .map(Json)?;
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse embeddings response: {:?}", err),
+            endpoint: endpoint.to_string(),
+        })?;
 
-    let response = if let (Some(node_x25519_public_key), Some(salt)) =
-        (node_x25519_public_key, salt)
-    {
-        let shared_secret = state.compute_shared_secret(&node_x25519_public_key);
-        let NodeEncryptionMetadata { ciphertext, nonce } =
-            extract_node_encryption_metadata(response.0)?;
-        handle_confidential_compute_decryption_response(shared_secret, &ciphertext, &salt, &nonce)?
+    let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
+        response
+            .get("total_tokens")
+            .map(|u| u.as_u64().unwrap_or(0))
+            .unwrap_or(0) as i64
     } else {
-        response.0
+        num_input_compute_units
     };
 
     // Update the node throughput performance
@@ -352,12 +396,12 @@ async fn handle_embeddings_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Failed to update node throughput performance: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to update node throughput performance: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
-    Ok(Json(response).into_response())
+    Ok(response)
 }
 
 /// Request object for creating embeddings
