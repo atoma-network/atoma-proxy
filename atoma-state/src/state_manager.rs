@@ -4277,7 +4277,7 @@ mod tests {
                 total_hash,
                 num_total_messages,
                 user_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(stack_small_id)
         .bind("test_owner") // Default test owner
@@ -4291,6 +4291,7 @@ mod tests {
         .bind(vec![0u8; 32]) // Default total_hash (32 bytes of zeros)
         .bind(0i64) // Default num_total_messages
         .bind(user_id)
+        .bind(0i64) // Acquired timestamp
         .execute(pool)
         .await?;
         Ok(())
