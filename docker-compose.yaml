@@ -55,20 +55,13 @@ services:
       - .env
     networks:
       - atoma-network
-
     labels:
-    - "traefik.enable=true"
-
-      # Route for main domain: https://atomacloud.com
-      - "traefik.http.routers.dashboard.rule=Host(`atomacloud.com`)"
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard.atomacloud.com`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
-      
-      # Service definition: point to container's listening port
       - "traefik.http.routers.dashboard.service=dashboard_service"
       - "traefik.http.services.dashboard_service.loadbalancer.server.port=80"
-      # If your dashboard listens on port 3000 inside Docker, use '3000' instead:
-      # - "traefik.http.services.dashboard_service.loadbalancer.server.port=3000"
 
   atoma-proxy:
     image: ghcr.io/atoma-network/atoma-proxy:latest
