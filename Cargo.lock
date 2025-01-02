@@ -635,6 +635,7 @@ dependencies = [
  "atoma-state",
  "atoma-sui",
  "axum",
+ "chrono",
  "config",
  "serde",
  "serde_yaml 0.9.34+deprecated",

@@ -815,6 +815,7 @@ components:
       - nonce
       - salt
       - client_dh_public_key
+      - node_dh_public_key
       - plaintext_body_hash
       - model_name
       properties:
@@ -824,7 +825,16 @@ components:
         client_dh_public_key:
           type: string
           description: Client's public key for Diffie-Hellman key exchange (base64 encoded)
-        max_tokens:
+        model_name:
+          type: string
+          description: Model name
+        node_dh_public_key:
+          type: string
+          description: Node's public key for Diffie-Hellman key exchange (base64 encoded)
+        nonce:
+          type: string
+          description: Cryptographic nonce used for encryption (base64 encoded)
+        num_compute_units:
           type:
           - integer
           - 'null'
@@ -833,12 +843,6 @@ components:
             Number of compute units to be used for the request, for image generations,
             as this value is known in advance (the number of pixels to generate)
           minimum: 0
-        model_name:
-          type: string
-          description: Model name
-        nonce:
-          type: string
-          description: Cryptographic nonce used for encryption (base64 encoded)
         plaintext_body_hash:
           type: string
           description: Hash of the original plaintext body for integrity verification (base64 encoded)

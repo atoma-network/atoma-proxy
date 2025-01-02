@@ -10,6 +10,7 @@ atoma-auth.workspace = true
 atoma-state.workspace = true
 atoma-sui.workspace = true
 axum.workspace = true
+chrono.workspace = true
 config.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }

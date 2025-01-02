@@ -5,6 +5,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
@@ -151,7 +152,7 @@ pub(crate) struct GetStacksByUserId;
 pub(crate) async fn get_all_stacks_for_user(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<Stack>>> {
+) -> Result<Json<Vec<(Stack, DateTime<Utc>)>>> {
     let auth_header = headers
         .get("Authorization")
         .ok_or(StatusCode::UNAUTHORIZED)?

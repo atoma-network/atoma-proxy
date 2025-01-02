@@ -1517,14 +1517,18 @@ impl AtomaState {
         skip_all,
         fields(%user_id)
     )]
-    pub async fn get_stacks_by_user_id(&self, user_id: i64) -> Result<Vec<Stack>> {
+    pub async fn get_stacks_by_user_id(&self, user_id: i64) -> Result<Vec<(Stack, DateTime<Utc>)>> {
         let stacks = sqlx::query("SELECT * FROM stacks WHERE user_id = $1")
             .bind(user_id)
             .fetch_all(&self.db)
             .await?;
         stacks
             .into_iter()
-            .map(|stack| Stack::from_row(&stack).map_err(AtomaStateManagerError::from))
+            .map(|row| {
+                Stack::from_row(&row)
+                    .map_err(AtomaStateManagerError::from)
+                    .map(|stack| (stack, row.get("acquired_timestamp")))
+            })
             .collect()
     }
 
