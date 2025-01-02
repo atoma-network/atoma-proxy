@@ -61,7 +61,7 @@ services:
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
       - "traefik.http.routers.dashboard.service=dashboard_service"
-      - "traefik.http.services.dashboard_service.loadbalancer.server.port=3000"
+      - "traefik.http.services.dashboard_service.loadbalancer.server.port=${DASHBOARD_PORT:-3000}"
 
   atoma-proxy:
     image: ghcr.io/atoma-network/atoma-proxy:latest
@@ -91,14 +91,14 @@ services:
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.routers.api.service=api_service"
-      - "traefik.http.services.api_service.loadbalancer.server.port=8080"
+      - "traefik.http.services.api_service.loadbalancer.server.port=${ATOMA_API_SERVICE_PORT:-8080}"
       
       # Serving the Atoma proxy authentication service on credentials.atomacloud.com
       - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
       - "traefik.http.routers.credentials.entrypoints=websecure"
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
       - "traefik.http.routers.credentials.service=credentials_service"
-      - "traefik.http.services.credentials_service.loadbalancer.server.port=8081"
+      - "traefik.http.services.credentials_service.loadbalancer.server.port=${ATOMA_PROXY_SERVICE_PORT:-8081}"
 
 volumes:
   postgres-data:
