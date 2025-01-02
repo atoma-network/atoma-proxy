@@ -15,7 +15,9 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::{
-    error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
+    error::AtomaProxyError,
+    http_server::ProxyState,
+    middleware::RequestMetadataExtension,
     types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
 };
 
