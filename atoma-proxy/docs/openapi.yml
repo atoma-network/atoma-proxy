@@ -216,8 +216,6 @@ paths:
           description: Chat completions
           content:
             text/event-stream:
-              # DO NOT DELETE:This is a custom extension required by Speakeasy to handle SSE
-              x-speakeasy-sse-sentinel: '[DONE]'
               schema:
                 $ref: '#/components/schemas/ChatCompletionStreamResponse'
         '400':
@@ -1100,13 +1098,16 @@ components:
       description: Represents usage statistics for a confidential compute request
       required:
       - prompt_tokens
-      - completion_tokens
       - total_tokens
       properties:
         completion_tokens:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
-          description: Number of compute units used
+          description: |-
+            Number of compute units used
+            NOTE: This is not used for the embeddings endpoint
           minimum: 0
         completion_tokens_details:
           description: Details about the completion tokens

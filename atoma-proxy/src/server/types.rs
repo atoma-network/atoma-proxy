@@ -66,7 +66,9 @@ pub struct Usage {
     pub prompt_tokens: u64,
 
     /// Number of compute units used
-    pub completion_tokens: u64,
+    /// NOTE: This is not used for the embeddings endpoint
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
 
     /// Number of compute units used
     pub total_tokens: u64,
