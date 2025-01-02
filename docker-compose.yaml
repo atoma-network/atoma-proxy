@@ -61,7 +61,7 @@ services:
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
       - "traefik.http.routers.dashboard.service=dashboard_service"
-      - "traefik.http.services.dashboard_service.loadbalancer.server.port=80"
+      - "traefik.http.services.dashboard_service.loadbalancer.server.port=3000"
 
   atoma-proxy:
     image: ghcr.io/atoma-network/atoma-proxy:latest
