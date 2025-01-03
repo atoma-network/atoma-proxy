@@ -1,5 +1,26 @@
+# Base configurations that are common between environments
+x-atoma-proxy-base: &atoma-proxy-base
+  image: ghcr.io/atoma-network/atoma-proxy:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+     TRACE_LEVEL: ${TRACE_LEVEL:-info}
+  volumes:
+    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
+    - ./logs:/app/logs
+    - sui-config-volume:/root/.sui/sui_config
+    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
+  env_file:
+    - .env
+  depends_on:
+    - db
+  networks:
+    - atoma-network
+
 services:
   traefik:
+    profiles: ["cloud"]
     image: traefik:v2.9
     container_name: traefik
     restart: unless-stopped
@@ -8,17 +29,14 @@ services:
       # EntryPoints
       - "--entryPoints.web.address=:80"
       - "--entryPoints.websecure.address=:443"
-      
       # Enable Docker provider
       - "--providers.docker=true"
       - "--providers.docker.exposedByDefault=false"
-
       # Let's Encrypt (ACME) configuration
       - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
       - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
       - "--certificatesResolvers.myresolver.acme.email=${ACME_EMAIL}"
       - "--certificatesResolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-    
     ports:
       - "80:80"
       - "443:443"
@@ -28,27 +46,13 @@ services:
     networks:
       - atoma-network
     labels:
-      # (Optional) Set up a dashboard, etc. not strictly needed
       - "traefik.http.routers.traefik.rule=Host(`traefik.atomacloud.com`)"
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=myresolver"
       - "traefik.http.services.traefik.loadbalancer.server.port=8090"
 
-  db:
-    image: postgres:13
-    restart: always
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - atoma-network
-
   atoma-dashboard:
+    profiles: ["cloud"]
     image: ghcr.io/atoma-network/atoma-dashboard:latest
     container_name: atoma-dashboard
     env_file:
@@ -63,37 +67,40 @@ services:
       - "traefik.http.routers.dashboard.service=dashboard_service"
       - "traefik.http.services.dashboard_service.loadbalancer.server.port=${DASHBOARD_PORT:-3000}"
 
-  atoma-proxy:
-    image: ghcr.io/atoma-network/atoma-proxy:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-       TRACE_LEVEL: ${TRACE_LEVEL:-info}
+  db:
+    profiles: ["local", "cloud"]
+    image: postgres:13
+    restart: always
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ${CONFIG_PATH:-./config.toml}:/app/config.toml
-      - ./logs:/app/logs
-      - sui-config-volume:/root/.sui/sui_config
-      - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
-    env_file:
-      - .env
-    depends_on:
-      - db
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - atoma-network
 
-    labels:
-      # Traefik must be enabled explicitly
-      - "traefik.enable=true"
+  # Local proxy configuration
+  atoma-proxy-local:
+    profiles: ["local"]
+    <<: *atoma-proxy-base
+    ports:
+      - "${ATOMA_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
 
-      # Serving the Atoma api service on api.atomacloud.com
+  # Cloud proxy configuration
+  atoma-proxy-cloud:
+    profiles: ["cloud"]
+    <<: *atoma-proxy-base
+    labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.atomacloud.com`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.routers.api.service=api_service"
       - "traefik.http.services.api_service.loadbalancer.server.port=${ATOMA_API_SERVICE_PORT:-8080}"
-      
-      # Serving the Atoma proxy authentication service on credentials.atomacloud.com
       - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
       - "traefik.http.routers.credentials.entrypoints=websecure"
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
