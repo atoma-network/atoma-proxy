@@ -127,10 +127,10 @@ mkdir -p data logs
 
 ```bash
 # Build and start all services
-docker compose -f docker-compose.local.yaml up --build
+docker compose --profile local up --build
 
 # Or run in detached mode
-docker compose -f docker-compose.local.yaml up -d --build
+docker compose --profile local up -d --build
 ```
 
 #### Container Architecture
