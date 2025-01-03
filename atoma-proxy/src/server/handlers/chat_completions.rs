@@ -46,6 +46,9 @@ const MESSAGES: &str = "messages";
 /// The max_tokens field in the request payload.
 const MAX_TOKENS: &str = "max_tokens";
 
+/// The default max_tokens value.
+const DEFAULT_MAX_TOKENS: u64 = 4_096;
+
 #[derive(OpenApi)]
 #[openapi(
     paths(chat_completions_create, chat_completions_create_stream),
@@ -678,10 +681,7 @@ impl RequestModel for RequestModelChatCompletions {
         let max_tokens = request
             .get(MAX_TOKENS)
             .and_then(|m| m.as_u64())
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
-                message: "Missing or invalid 'max_tokens' field".to_string(),
-                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-            })?;
+            .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Self {
             model: model.to_string(),
