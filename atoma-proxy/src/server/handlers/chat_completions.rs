@@ -121,15 +121,8 @@ pub async fn chat_completions_create(
 ) -> Result<Response<Body>> {
     let is_streaming = payload
         .get("stream")
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Missing or invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?
-        .as_bool()
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?;
+        .and_then(|stream| stream.as_bool())
+        .unwrap_or_default();
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
