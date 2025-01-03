@@ -18,7 +18,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
 use super::update_state_manager;
-use crate::server::Result;
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -42,12 +42,6 @@ const MODEL: &str = "model";
 
 /// The messages field in the request payload.
 const MESSAGES: &str = "messages";
-
-/// The max_tokens field in the request payload.
-const MAX_TOKENS: &str = "max_tokens";
-
-/// The default max_tokens value.
-const DEFAULT_MAX_TOKENS: u64 = 4_096;
 
 /// The stream field in the request payload.
 const STREAM: &str = "stream";
@@ -120,16 +114,12 @@ pub async fn chat_completions_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(mut payload): Json<Value>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
         .get(STREAM)
         .and_then(|stream| stream.as_bool())
         .unwrap_or_default();
-
-    if !payload.get(MAX_TOKENS).is_some() {
-        payload[MAX_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
-    }
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
@@ -373,16 +363,12 @@ pub async fn confidential_chat_completions_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(mut payload): Json<Value>,
+    Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
         .get(STREAM)
         .and_then(|stream| stream.as_bool())
         .unwrap_or_default();
-
-    if !payload.get(MAX_TOKENS).is_some() {
-        payload[MAX_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
-    }
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
