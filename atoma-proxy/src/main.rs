@@ -115,7 +115,7 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
 
     // Create filter from environment variable or default to info
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("debug,atoma_proxy=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("info,atoma_proxy=info"));
 
     // Combine layers with filter
     Registry::default()
