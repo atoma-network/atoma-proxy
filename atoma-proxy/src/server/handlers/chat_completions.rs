@@ -18,7 +18,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
 use super::update_state_manager;
-use crate::server::Result;
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -43,11 +43,8 @@ const MODEL: &str = "model";
 /// The messages field in the request payload.
 const MESSAGES: &str = "messages";
 
-/// The max_tokens field in the request payload.
-const MAX_TOKENS: &str = "max_tokens";
-
-/// The default max_tokens value.
-const DEFAULT_MAX_TOKENS: u64 = 4_096;
+/// The stream field in the request payload.
+const STREAM: &str = "stream";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -120,16 +117,9 @@ pub async fn chat_completions_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
-        .get("stream")
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Missing or invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?
-        .as_bool()
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?;
+        .get(STREAM)
+        .and_then(|stream| stream.as_bool())
+        .unwrap_or_default();
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
@@ -376,16 +366,9 @@ pub async fn confidential_chat_completions_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
-        .get("stream")
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Missing or invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?
-        .as_bool()
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?;
+        .get(STREAM)
+        .and_then(|stream| stream.as_bool())
+        .unwrap_or_default();
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),

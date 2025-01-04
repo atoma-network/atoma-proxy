@@ -28,6 +28,7 @@ use super::{
         select_node_public_key::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
     },
     http_server::ProxyState,
+    DEFAULT_MAX_TOKENS, MAX_TOKENS,
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
@@ -231,17 +232,22 @@ pub async fn authenticate_middleware(
     next: Next,
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
+    let endpoint = req_parts.uri.path().to_string();
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to convert body to bytes: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
-    let body_json: Value =
+    let mut body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to parse body as JSON: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
+    if endpoint == CONFIDENTIAL_CHAT_COMPLETIONS_PATH || endpoint == CHAT_COMPLETIONS_PATH {
+        // NOTE: Chat completions endpoints processed by Atoma nodes require a max_tokens field
+        body_json[MAX_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
+    }
     let endpoint = req_parts.uri.path().to_string();
     let ProcessedRequest {
         node_address,
@@ -300,7 +306,7 @@ pub async fn authenticate_middleware(
 
     // update headers
     req_parts.headers = headers;
-    let req = Request::from_parts(req_parts, Body::from(body_bytes));
+    let req = Request::from_parts(req_parts, Body::from(body_json.to_string()));
     Ok(next.run(req).await)
 }
 
