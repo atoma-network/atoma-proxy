@@ -807,7 +807,8 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
-                    amount: node.price_per_one_million_compute_units * node.max_num_compute_units,
+                    amount: node.price_per_one_million_compute_units * node.max_num_compute_units
+                        / 1000000,
                     result_sender,
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
