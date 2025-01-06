@@ -908,40 +908,35 @@ components:
             description: Whether to stream back partial progress. Must be true for this request type.
             default: true
     CreateEmbeddingRequest:
-      allOf:
-      - $ref: '#/components/schemas/EmbeddingInput'
-        description: |-
-          Input text to get embeddings for. Can be a string or array of strings.
-          Each input must not exceed the max input tokens for the model
-      - type: object
-        required:
-        - model
-        properties:
-          dimensions:
-            type:
-            - integer
-            - 'null'
-            format: int32
-            description: |-
-              The number of dimensions the resulting output embeddings should have.
-              Only supported in text-embedding-3 models.
-            minimum: 0
-          encoding_format:
-            type:
-            - string
-            - 'null'
-            description: |-
-              The format to return the embeddings in. Can be "float" or "base64".
-              Defaults to "float"
-          model:
-            type: string
-            description: ID of the model to use.
-          user:
-            type:
-            - string
-            - 'null'
-            description: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+      type: object
       description: Request object for creating embeddings
+      required:
+      - model
+      properties:
+        dimensions:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: |-
+            The number of dimensions the resulting output embeddings should have.
+            Only supported in text-embedding-3 models.
+          minimum: 0
+        encoding_format:
+          type:
+          - string
+          - 'null'
+          description: |-
+            The format to return the embeddings in. Can be "float" or "base64".
+            Defaults to "float"
+        model:
+          type: string
+          description: ID of the model to use.
+        user:
+          type:
+          - string
+          - 'null'
+          description: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
     CreateEmbeddingResponse:
       type: object
       description: Response object from creating embeddings
@@ -1026,13 +1021,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ImageData'
-    EmbeddingInput:
-      oneOf:
-      - type: string
-      - type: array
-        items:
-          type: string
-      description: Input types for embeddings request
     EmbeddingObject:
       type: object
       description: Individual embedding object in the response

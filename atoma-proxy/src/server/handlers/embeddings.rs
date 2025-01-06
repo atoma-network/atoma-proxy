@@ -404,11 +404,11 @@ pub struct CreateEmbeddingRequest {
     /// ID of the model to use.
     pub model: String,
 
-    /// Input text to get embeddings for. Can be a string or array of strings.
-    /// Each input must not exceed the max input tokens for the model
-    #[serde(flatten)]
-    pub input: EmbeddingInput,
-
+    // /// Input text to get embeddings for. Can be a string or array of strings.
+    // /// Each input must not exceed the max input tokens for the model
+    // #[serde(flatten)]
+    // #[schema(inline)]
+    // pub input: EmbeddingInput,
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
@@ -426,7 +426,6 @@ pub struct CreateEmbeddingRequest {
 
 /// Input types for embeddings request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(untagged)]
 pub enum EmbeddingInput {
     Single(String),
     Multiple(Vec<String>),
