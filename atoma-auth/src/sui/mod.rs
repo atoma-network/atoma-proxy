@@ -43,8 +43,6 @@ pub struct StackEntryResponse {
 pub struct Sui {
     /// Sui wallet context
     wallet_ctx: WalletContext,
-    /// USDC wallet object ID
-    usdc_wallet_id: Option<ObjectID>,
     /// Atoma package object ID
     atoma_package_id: ObjectID,
     /// Atoma DB object ID
@@ -66,7 +64,6 @@ impl Sui {
 
         Ok(Self {
             wallet_ctx,
-            usdc_wallet_id: None,
             atoma_package_id: sui_config.atoma_package_id(),
             atoma_db_id: sui_config.atoma_db(),
             usdc_package_id: sui_config.usdc_package_id(),
@@ -176,16 +173,11 @@ impl Sui {
     /// ```
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
     pub async fn get_or_load_usdc_wallet_object_id(&mut self) -> Result<ObjectID> {
-        if let Some(usdc_wallet_id) = self.usdc_wallet_id {
-            Ok(usdc_wallet_id)
+        let usdc_wallet = self.find_usdc_token_wallet(self.usdc_package_id).await;
+        if let Ok(usdc_wallet) = usdc_wallet {
+            Ok(usdc_wallet)
         } else {
-            let usdc_wallet = self.find_usdc_token_wallet(self.usdc_package_id).await;
-            if let Ok(usdc_wallet) = usdc_wallet {
-                self.usdc_wallet_id = Some(usdc_wallet);
-                Ok(usdc_wallet)
-            } else {
-                anyhow::bail!("No USDC wallet found")
-            }
+            anyhow::bail!("No USDC coin found")
         }
     }
 
