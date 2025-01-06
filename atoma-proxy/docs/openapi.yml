@@ -931,23 +931,7 @@ components:
             The format to return the embeddings in. Can be "float" or "base64".
             Defaults to "float"
         input:
-          oneOf:
-          - oneOf:
-            - type: object
-              required:
-              - Single
-              properties:
-                Single:
-                  type: string
-            - type: object
-              required:
-              - Multiple
-              properties:
-                Multiple:
-                  type: array
-                  items:
-                    type: string
-            description: Input types for embeddings request
+          $ref: '#/components/schemas/EmbeddingInput'
           description: |-
             Input text to get embeddings for. Can be a string or array of strings.
             Each input must not exceed the max input tokens for the model
@@ -1043,6 +1027,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ImageData'
+    EmbeddingInput:
+      oneOf:
+      - type: string
+      - type: array
+        items:
+          type: string
     EmbeddingObject:
       type: object
       description: Individual embedding object in the response
