@@ -43,8 +43,6 @@ pub struct StackEntryResponse {
 pub struct Sui {
     /// Sui wallet context
     wallet_ctx: WalletContext,
-    /// USDC wallet object ID
-    usdc_wallet_id: Option<ObjectID>,
     /// Atoma package object ID
     atoma_package_id: ObjectID,
     /// Atoma DB object ID
@@ -66,7 +64,6 @@ impl Sui {
 
         Ok(Self {
             wallet_ctx,
-            usdc_wallet_id: None,
             atoma_package_id: sui_config.atoma_package_id(),
             atoma_db_id: sui_config.atoma_db(),
             usdc_package_id: sui_config.usdc_package_id(),
@@ -110,7 +107,7 @@ impl Sui {
     ) -> Result<StackEntryResponse> {
         let client = self.wallet_ctx.get_client().await?;
         let address = self.wallet_ctx.active_address()?;
-        let usdc_wallet_id = self.get_or_load_usdc_wallet_object_id().await?;
+        let usdc_coin_id = self.get_usdc_coin().await?;
 
         // TODO: once the function to get usdc wallet returns multiple coins, we should merge them. But I don't know how to do it in single transaction yet.
         let tx = client
@@ -123,7 +120,7 @@ impl Sui {
                 vec![],
                 vec![
                     SuiJsonValue::from_object_id(self.atoma_db_id),
-                    SuiJsonValue::from_object_id(usdc_wallet_id),
+                    SuiJsonValue::from_object_id(usdc_coin_id),
                     SuiJsonValue::new(task_small_id.to_string().into())?,
                     SuiJsonValue::new(num_compute_units.to_string().into())?,
                     SuiJsonValue::new(price_per_one_million_compute_units.to_string().into())?,
@@ -172,20 +169,15 @@ impl Sui {
     ///
     /// ```rust,ignore
     /// let mut client = AtomaProxy::new(config).await?;
-    /// let usdc_wallet_id = client.get_or_load_usdc_wallet_object_id().await?;
+    /// let usdc_coin_id = client.get_usdc_coin().await?;
     /// ```
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
-    pub async fn get_or_load_usdc_wallet_object_id(&mut self) -> Result<ObjectID> {
-        if let Some(usdc_wallet_id) = self.usdc_wallet_id {
-            Ok(usdc_wallet_id)
+    pub async fn get_usdc_coin(&mut self) -> Result<ObjectID> {
+        let usdc_coin = self.find_usdc_coin(self.usdc_package_id).await;
+        if let Ok(usdc_coin) = usdc_coin {
+            Ok(usdc_coin)
         } else {
-            let usdc_wallet = self.find_usdc_token_wallet(self.usdc_package_id).await;
-            if let Ok(usdc_wallet) = usdc_wallet {
-                self.usdc_wallet_id = Some(usdc_wallet);
-                Ok(usdc_wallet)
-            } else {
-                anyhow::bail!("No USDC wallet found")
-            }
+            anyhow::bail!("No USDC coin found")
         }
     }
 
@@ -250,7 +242,7 @@ impl Sui {
     ///
     /// Returns an error if no USDC wallet is found for the active address.
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
-    async fn find_usdc_token_wallet(&mut self, usdc_package: ObjectID) -> Result<ObjectID> {
+    async fn find_usdc_coin(&mut self, usdc_package: ObjectID) -> Result<ObjectID> {
         // TODO: This should return multiple USDC coins and merge them if the maximum coin is not enough.
         let client = self.wallet_ctx.get_client().await?;
         let active_address = self.wallet_ctx.active_address()?;
