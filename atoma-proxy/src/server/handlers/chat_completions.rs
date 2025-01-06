@@ -427,7 +427,16 @@ async fn handle_non_streaming_response(
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send OpenAI API request: {:?}", err),
             endpoint: endpoint.to_string(),
-        })?
+        })?;
+
+    if !response.status().is_success() {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
