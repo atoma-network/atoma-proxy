@@ -1,6 +1,6 @@
 # Atoma Proxy Infrastructure
 
-<img src="https://github.com/atoma-network/atoma-node/blob/ja-improve-readme/atoma-assets/atoma-banner.png" alt="Logo"/>
+<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
 
 [![Discord](https://img.shields.io/discord/1172593757586214964?label=Discord&logo=discord&logoColor=white)]
 [![Twitter](https://img.shields.io/twitter/follow/Atoma_Network?style=social)](https://x.com/Atoma_Network)
