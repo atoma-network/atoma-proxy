@@ -121,7 +121,7 @@ impl RequestModel for RequestModelImageGenerations {
     }
 }
 
-/// Create image generation
+/// Create image
 ///
 /// This endpoint processes requests to generate images using AI models by forwarding them
 /// to the appropriate AI node. The request metadata and compute units have already been
@@ -207,6 +207,12 @@ pub async fn image_generations_create(
 )]
 pub(crate) struct ConfidentialImageGenerationsOpenApi;
 
+/// Create confidential image
+///
+/// This handler processes image generation requests in a confidential manner, providing additional
+/// encryption and security measures for sensitive data processing. It supports both streaming and
+/// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
+/// for full private AI compute.
 #[utoipa::path(
     post,
     path = "",
