@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use atoma_auth::Auth;
 use atoma_state::AtomaState;
 use axum::{
@@ -17,6 +19,7 @@ use crate::{
         auth::auth_router, stacks::stacks_router, stats::stats_router,
         subscriptions::subscriptions_router, tasks::tasks_router,
     },
+    ModelModality,
 };
 
 /// The path for the health check endpoint.
@@ -57,6 +60,9 @@ pub struct ProxyServiceState {
 
     /// The authentication manager for the proxy service.
     pub auth: Auth,
+
+    /// List of models and their modalities.
+    pub models_with_modalities: HashMap<String, Vec<ModelModality>>,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
