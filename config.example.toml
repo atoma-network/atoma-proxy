@@ -22,7 +22,7 @@ models = [
   "meta-llama/Llama-3.2-1B-Instruct",
 ] # Models supported by proxy
 revisions = ["main", "main"] # Revision of the above models
-capabilities = [["Chat Completions"],["Chat Completions"]] # Capabilities of the above models
+modalities = [["Chat Completions"],["Chat Completions"]] # Modalities of the above models
 hf_token = "<API_KEY>" # Hugging face api token, required if you want to access a gated model
 
 [atoma_proxy_service]

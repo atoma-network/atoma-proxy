@@ -182,14 +182,14 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    let models_with_capabilities = config
+    let models_with_modalities = config
         .service
         .models
         .iter()
-        .zip(config.service.capabilities.iter())
-        .map(|(model, capabilities)| {
-            let capabilities = capabilities.clone();
-            (model.clone(), capabilities)
+        .zip(config.service.modalities.iter())
+        .map(|(model, modalities)| {
+            let modalities = modalities.clone();
+            (model.clone(), modalities)
         })
         .collect();
 
@@ -211,7 +211,7 @@ async fn main() -> Result<()> {
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
         auth,
-        models_with_capabilities,
+        models_with_modalities,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

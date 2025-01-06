@@ -8,7 +8,7 @@ use axum::{
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
-use crate::{ModelCapabilities, ProxyServiceState};
+use crate::{ModelModality, ProxyServiceState};
 
 type Result<T> = std::result::Result<T, StatusCode>;
 
@@ -108,7 +108,7 @@ pub(crate) struct GetAllTasksOpenApi;
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn get_all_tasks(
     State(proxy_service_state): State<ProxyServiceState>,
-) -> Result<Json<Vec<(Task, Vec<ModelCapabilities>)>>> {
+) -> Result<Json<Vec<(Task, Vec<ModelModality>)>>> {
     let all_tasks = proxy_service_state
         .atoma_state
         .get_all_tasks()
@@ -124,7 +124,8 @@ pub(crate) async fn get_all_tasks(
                 (
                     task.clone(),
                     task.model_name
-                        .map(|model| proxy_service_state.get_capabilities_for_model(&model))
+                        .and_then(|model| proxy_service_state.models_with_modalities.get(&model))
+                        .map(|modalities| modalities.clone())
                         .unwrap_or_default(),
                 )
             })

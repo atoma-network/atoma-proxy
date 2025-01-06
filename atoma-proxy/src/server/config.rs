@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use atoma_proxy_service::ModelCapabilities;
+use atoma_proxy_service::ModelModality;
 use serde::Deserialize;
 
 use config::{Config, File};
@@ -28,11 +28,11 @@ pub struct AtomaServiceConfig {
     /// model that is currently supported by the Atoma Service.
     pub revisions: Vec<String>,
 
-    /// List of model capabilities.
+    /// List of model modalities.
     ///
-    /// This field contains a list of the associated model capabilities, for each
+    /// This field contains a list of the associated model modalities, for each
     /// model that is currently supported by the Atoma Service.
-    pub capabilities: Vec<Vec<ModelCapabilities>>,
+    pub modalities: Vec<Vec<ModelModality>>,
 
     /// Hugging face api token.
     ///

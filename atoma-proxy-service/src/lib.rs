@@ -9,9 +9,9 @@ pub use proxy_service::*;
 pub use query::*;
 use serde::{Deserialize, Serialize};
 
-/// Model Capabilities.
+/// Model modality
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum ModelCapabilities {
+pub enum ModelModality {
     #[serde(rename = "Chat Completions")]
     ChatCompletions,
     #[serde(rename = "Images Generations")]
