@@ -511,6 +511,7 @@ impl AtomaState {
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
                 WHERE tasks.model_name = $1
                 AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND node_public_keys.is_valid = true
                 ORDER BY stacks.price_per_one_million_compute_units ASC
@@ -565,6 +566,7 @@ impl AtomaState {
                 WHERE stacks.stack_small_id = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
                 AND node_public_keys.is_valid = true
                 AND stacks.in_settle_period = false
             )"#,
