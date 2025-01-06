@@ -17,6 +17,7 @@ use crate::{
         auth::auth_router, stacks::stacks_router, stats::stats_router,
         subscriptions::subscriptions_router, tasks::tasks_router,
     },
+    ModelCapabilities,
 };
 
 /// The path for the health check endpoint.
@@ -57,6 +58,25 @@ pub struct ProxyServiceState {
 
     /// The authentication manager for the proxy service.
     pub auth: Auth,
+
+    /// List of models and their capabilities.
+    pub models_with_capabilities: Vec<(String, Vec<ModelCapabilities>)>,
+}
+
+impl ProxyServiceState {
+    /// Find the capabilities for a given model. If the model is not found, return an empty list.
+    pub fn get_capabilities_for_model(&self, model: &str) -> Vec<ModelCapabilities> {
+        self.models_with_capabilities
+            .iter()
+            .find_map(|(m, capabilities)| {
+                if m == model {
+                    Some(capabilities.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
