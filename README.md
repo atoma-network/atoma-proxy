@@ -1,6 +1,6 @@
-# Atoma Proxy infrastructure
+# Atoma Proxy Infrastructure
 
-<img src="https://github.com/atoma-network/atoma-node/blob/update-read-me/atoma-assets/atoma-pfp.jpg" alt="Logo" height="500"/>
+<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
 
 [![Discord](https://img.shields.io/discord/1172593757586214964?label=Discord&logo=discord&logoColor=white)]
 [![Twitter](https://img.shields.io/twitter/follow/Atoma_Network?style=social)](https://x.com/Atoma_Network)
@@ -167,7 +167,8 @@ View logs:
 docker compose logs
 
 # Specific service
-docker compose logs atoma-proxy
+docker compose logs atoma-proxy-cloud # Cloud
+docker compose logs atoma-proxy-local # Local
 
 # Follow logs
 docker compose logs -f
@@ -176,7 +177,8 @@ docker compose logs -f
 Stop services:
 
 ```bash
-docker compose down
+docker compose down --profile cloud # Cloud
+docker compose down --profile local # Local
 ```
 
 #### Troubleshooting
