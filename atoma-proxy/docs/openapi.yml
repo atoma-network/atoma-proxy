@@ -407,7 +407,7 @@ paths:
     post:
       tags:
       - Images
-      summary: Create image generation
+      summary: Create image
       description: |-
         This endpoint processes requests to generate images using AI models by forwarding them
         to the appropriate AI node. The request metadata and compute units have already been
@@ -460,7 +460,7 @@ paths:
     post:
       tags:
       - Confidential Images
-      summary: Create confidential image generation
+      summary: Create confidential image
       description: |-
         This handler processes image generation requests in a confidential manner, providing additional
         encryption and security measures for sensitive data processing. It supports both streaming and
