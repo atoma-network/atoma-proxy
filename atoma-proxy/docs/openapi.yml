@@ -971,15 +971,16 @@ components:
       required:
       - prompt
       - model
-      - n
       properties:
         model:
           type: string
           description: The model to use for image generation.
         n:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int32
-          description: The number of images to generate. Must be between 1 and 10.
+          description: The number of images to generate. Defaults to 1.
           minimum: 0
         prompt:
           type: string

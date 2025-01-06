@@ -366,8 +366,9 @@ pub struct CreateImageRequest {
     /// The model to use for image generation.
     pub model: String,
 
-    /// The number of images to generate. Must be between 1 and 10.
-    pub n: u32,
+    /// The number of images to generate. Defaults to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
 
     /// The quality of the image that will be generated.
     /// `hd` creates images with finer details and greater consistency across the image.
