@@ -127,27 +127,9 @@ impl RequestModel for RequestModelImageGenerations {
 /// to the appropriate AI node. The request metadata and compute units have already been
 /// validated by middleware before reaching this handler.
 ///
-/// # Arguments
-/// * `metadata` - Extension containing pre-processed request metadata (node address, compute units, etc.)
-/// * `state` - Application state containing configuration and shared resources
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - JSON payload containing image generation parameters
-///
-/// # Returns
-/// * `Result<Response<Body>>` - The processed response from the AI node or an error status
-///
-/// # Errors
+/// ## Errors
 /// * Returns various status codes based on the underlying `handle_image_generation_response`:
 ///   - `INTERNAL_SERVER_ERROR` - If there's an error communicating with the AI node
-///
-/// # Example Payload
-/// ```json
-/// {
-///     "model": "stable-diffusion-v1-5",
-///     "n": 1,
-///     "size": "1024x1024"
-/// }
-/// ```
 #[utoipa::path(
     post,
     path = "",
