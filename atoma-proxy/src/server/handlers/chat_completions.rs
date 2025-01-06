@@ -68,20 +68,13 @@ pub(crate) struct ChatCompletionsOpenApi;
 /// or non-streaming response handling based on the request payload. For streaming requests,
 /// it configures additional options to track token usage.
 ///
-/// # Arguments
-///
-/// * `metadata`: Extension containing request metadata (node address, ID, compute units, etc.)
-/// * `state`: The shared state of the application
-/// * `headers`: The headers of the request
-/// * `payload`: The JSON payload containing the chat completion request
-///
-/// # Returns
+/// ## Returns
 ///
 /// Returns a Response containing either:
 /// - A streaming SSE connection for real-time completions
 /// - A single JSON response for non-streaming completions
 ///
-/// # Errors
+/// ## Errors
 ///
 /// Returns an error status code if:
 /// - The request processing fails
@@ -289,29 +282,14 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
 /// for full private AI compute.
 ///
-/// # Arguments
-///
-/// * `metadata` - Extension containing request metadata including:
-///   * `endpoint` - The API endpoint being accessed
-///   * `node_address` - Address of the inference node
-///   * `node_id` - Identifier of the selected node
-///   * `num_compute_units` - Available compute units
-///   * `selected_stack_small_id` - Stack identifier
-///   * `salt` - Optional salt for encryption
-///   * `node_x25519_public_key` - Optional public key for encryption
-///   * `model_name` - Name of the AI model being used
-/// * `state` - Shared application state (ProxyState)
-/// * `headers` - HTTP request headers
-/// * `payload` - The chat completion request body
-///
-/// # Returns
+/// ## Returns
 ///
 /// Returns a `Result` containing either:
 /// * An HTTP response with the chat completion result
 /// * A streaming SSE connection for real-time completions
 /// * An `AtomaProxyError` error if the request processing fails
 ///
-/// # Errors
+/// ## Errors   
 ///
 /// Returns `AtomaProxyError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
@@ -321,23 +299,12 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// * Response processing encounters errors
 /// * State manager updates fail
 ///
-/// # Security Features
+/// ## Security Features
 ///
 /// * Utilizes AEAD encryption for request/response data
 /// * Supports TEE (Trusted Execution Environment) processing
 /// * Implements secure key exchange using X25519
 /// * Maintains confidentiality throughout the request lifecycle
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let response = confidential_chat_completions_handler(
-///     Extension(metadata),
-///     State(state),
-///     headers,
-///     Json(payload)
-/// ).await?;
-/// ```
 #[utoipa::path(
     post,
     path = "",

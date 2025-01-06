@@ -130,59 +130,6 @@ pub(crate) struct ModelsOpenApi;
 /// available models with their associated metadata and permissions. Each model
 /// includes standard OpenAI-compatible fields to ensure compatibility with
 /// existing OpenAI client libraries.
-///
-/// # Arguments
-///
-/// * `state` - The shared application state containing the list of available models
-///
-/// # Returns
-///
-/// Returns a JSON response containing:
-/// * An "object" field set to "list"
-/// * A "data" array containing model objects with the following fields:
-///   - id: The model identifier
-///   - object: Always set to "model"
-///   - created: Timestamp (currently hardcoded)
-///   - owned_by: Set to "atoma"
-///   - root: Same as the model id
-///   - parent: Set to null
-///   - max_model_len: Maximum context length (currently hardcoded to 2048)
-///   - permission: Array of permission objects describing model capabilities
-///
-/// # Example Response
-///
-/// ```json
-/// {
-///   "object": "list",
-///   "data": [
-///     {
-///       "id": "meta-llama/Llama-3.1-70B-Instruct",
-///       "object": "model",
-///       "created": 1730930595,
-///       "owned_by": "atoma",
-///       "root": "meta-llama/Llama-3.1-70B-Instruct",
-///       "parent": null,
-///       "max_model_len": 2048,
-///       "permission": [
-///         {
-///           "id": "modelperm-meta-llama/Llama-3.1-70B-Instruct",
-///           "object": "model_permission",
-///           "created": 1730930595,
-///           "allow_create_engine": false,
-///           "allow_sampling": true,
-///           "allow_logprobs": true,
-///           "allow_search_indices": false,
-///           "allow_view": true,
-///           "allow_fine_tuning": false,
-///           "organization": "*",
-///           "group": null,
-///           "is_blocking": false
-///         }
-///       ]
-///     }
-///   ]
-/// }
-/// ```
 #[utoipa::path(
     get,
     path = "",
@@ -263,16 +210,7 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 /// When a node comes online or changes its address, it can use this endpoint to ensure
 /// the system has its current address for routing requests.
 ///
-/// # Arguments
-///
-/// * `state` - The shared application state containing the state manager sender
-/// * `payload` - The registration payload containing the node's ID and public address
-///
-/// # Returns
-///
-/// Returns `Ok(Json(Value::Null))` on successful registration, or an error if the registration fails.
-///
-/// # Errors
+/// ## Errors
 ///
 /// Returns various `AtomaProxyError` variants:
 /// * `MissingHeader` - If the signature header is missing
@@ -286,16 +224,6 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 ///   - The state manager channel is closed
 ///   - The registration event cannot be sent
 ///   - Node Sui address lookup fails
-///
-/// # Example Request Payload
-///
-/// ```json
-/// {
-///     "node_small_id": 123,
-///     "public_address": "http://node-123.example.com:8080",
-///     "country": "US"
-/// }
-/// ```
 #[utoipa::path(
     post,
     path = "",

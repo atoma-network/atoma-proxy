@@ -58,7 +58,7 @@ pub fn openapi_routes() -> Router {
             (name = "Node Public Key Selection", description = "Node public key selection")
         ),
         servers(
-            (url = "http://localhost:8080"),
+            (url = "https://api.atomacloud.com"),
         )
     )]
     struct ApiDoc;

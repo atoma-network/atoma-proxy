@@ -125,20 +125,11 @@ impl RequestModel for RequestModelEmbeddings {
 /// The handler receives pre-processed metadata from middleware and forwards the request to
 /// the selected node.
 ///
-/// Note: Authentication, node selection, and initial request validation are handled by middleware
-/// before this handler is called.
-///
-/// # Arguments
-/// * `metadata` - Pre-processed request metadata containing node information and compute units
-/// * `state` - The shared proxy state containing configuration and runtime information
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - The JSON request body containing the model and input text
-///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
 /// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
-/// # Errors
+/// ## Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
@@ -212,20 +203,11 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
 /// The handler receives pre-processed metadata from middleware and forwards the request to
 /// the selected node.
 ///
-/// Note: Authentication, node selection, initial request validation and encryption
-/// are handled by middleware before this handler is called.
-///
-/// # Arguments
-/// * `metadata` - Pre-processed request metadata containing node information and compute units
-/// * `state` - The shared proxy state containing configuration and runtime information
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - The JSON request body containing the model and input text
-///
-/// # Returns
+/// ## Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
 /// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
-/// # Errors
+/// ## Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
@@ -406,7 +388,6 @@ pub struct CreateEmbeddingRequest {
 
     /// Input text to get embeddings for. Can be a string or array of strings.
     /// Each input must not exceed the max input tokens for the model
-    #[serde(flatten)]
     pub input: EmbeddingInput,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
@@ -424,7 +405,6 @@ pub struct CreateEmbeddingRequest {
     pub dimensions: Option<u32>,
 }
 
-/// Input types for embeddings request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum EmbeddingInput {
