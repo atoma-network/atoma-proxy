@@ -39,6 +39,8 @@ const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 /// This is to prevent DoS attacks by limiting the size of the request body.
 const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
 
+const ONE_MILLION: i64 = 1_000_000;
+
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
 /// This extension is attached to requests during authentication middleware processing
@@ -478,6 +480,8 @@ pub(crate) mod auth {
         error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
     };
 
+    use super::ONE_MILLION;
+
     /// Represents the processed and validated request data after authentication and initial processing.
     ///
     /// This struct contains all the necessary information needed to forward a request to an inference node,
@@ -808,7 +812,7 @@ pub(crate) mod auth {
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
                     amount: node.price_per_one_million_compute_units * node.max_num_compute_units
-                        / 1000000,
+                        / ONE_MILLION,
                     result_sender,
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
