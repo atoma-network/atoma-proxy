@@ -40,7 +40,7 @@ use crate::server::{
         embeddings::EMBEDDINGS_PATH,
         image_generations::image_generations_create,
         image_generations::IMAGE_GENERATIONS_PATH,
-        models::{models_handler, MODELS_PATH},
+        models::{models_list, MODELS_PATH},
     },
     Result,
 };
@@ -365,7 +365,7 @@ pub fn create_router(state: ProxyState) -> Router {
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_handler))
+        .route(MODELS_PATH, get(models_list))
         .route(
             NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
             post(node_public_address_registration),
