@@ -351,13 +351,14 @@ async fn handle_embeddings_response(
         });
     }
 
-    let response = response
-    .json::<Value>()
-    .await
-    .map_err(|err| AtomaProxyError::InternalError {
-        message: format!("Failed to parse embeddings response: {:?}", err),
-        endpoint: endpoint.to_string(),
-    })?;
+    let response =
+        response
+            .json::<Value>()
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to parse embeddings response: {:?}", err),
+                endpoint: endpoint.to_string(),
+            })?;
 
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
