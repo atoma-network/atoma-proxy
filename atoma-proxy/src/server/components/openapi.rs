@@ -22,10 +22,11 @@ use crate::server::handlers::{
     embeddings::EMBEDDINGS_PATH,
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
+    models::{ModelsOpenApi, MODELS_PATH},
     select_node_public_key::{SelectNodePublicKeyOpenApi, ENCRYPTION_PUBLIC_KEY_ENDPOINT},
 };
 use crate::server::http_server::{
-    HealthOpenApi, ModelsOpenApi, NodePublicAddressRegistrationOpenApi, HEALTH_PATH, MODELS_PATH,
+    HealthOpenApi, NodePublicAddressRegistrationOpenApi, HEALTH_PATH,
     NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
 };
 

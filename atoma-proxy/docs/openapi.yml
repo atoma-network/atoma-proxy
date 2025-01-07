@@ -30,16 +30,16 @@ paths:
       summary: List models
       description: |-
         This endpoint mimics the OpenAI models endpoint format, returning a list of
-        available models with their associated metadata and permissions. Each model
-        includes standard OpenAI-compatible fields to ensure compatibility with
-        existing OpenAI client libraries.
-      operationId: models_handler
+        available models with their associated metadata. Each model includes standard
+        OpenAI-compatible fields to ensure compatibility with existing OpenAI client libraries.
+      operationId: models_list
       responses:
         '200':
           description: List of available models
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ModelList'
         '500':
           description: Failed to retrieve list of available models
       security:
@@ -928,6 +928,43 @@ components:
           - 'null'
         url:
           type: string
+    Model:
+      type: object
+      description: Individual model object in the response
+      required:
+      - id
+      - object
+      - created
+      - owned_by
+      properties:
+        created:
+          type: integer
+          format: int64
+          description: Unix timestamp (in seconds) when this model was created
+        id:
+          type: string
+          description: The model identifier
+        object:
+          type: string
+          description: The object type, which is always "model"
+        owned_by:
+          type: string
+          description: Organization that owns the model
+    ModelList:
+      type: object
+      description: Response object for the models listing endpoint
+      required:
+      - object
+      - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+          description: List of model objects
+        object:
+          type: string
+          description: The object type, which is always "list"
     SelectNodePublicKeyRequest:
       type: object
       description: |-
