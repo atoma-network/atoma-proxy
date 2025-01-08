@@ -6,9 +6,6 @@ use utoipa::{
 };
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::server::handlers::chat_completions::{
-    ConfidentialChatCompletionsOpenApi, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-};
 use crate::server::handlers::embeddings::{
     ConfidentialEmbeddingsOpenApi, CONFIDENTIAL_EMBEDDINGS_PATH,
 };
@@ -23,7 +20,11 @@ use crate::server::handlers::{
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
     models::{ModelsOpenApi, MODELS_PATH},
-    nodes::{NodesOpenApi, NODE_PUBLIC_ADDRESS_REGISTRATION_PATH},
+    nodes::NodesOpenApi,
+};
+use crate::server::handlers::{
+    chat_completions::{ConfidentialChatCompletionsOpenApi, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
+    nodes::NODES_PATH,
 };
 use crate::server::http_server::{HealthOpenApi, HEALTH_PATH};
 
@@ -40,7 +41,7 @@ pub fn openapi_routes() -> Router {
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
             (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
-            (path = NODE_PUBLIC_ADDRESS_REGISTRATION_PATH, api = NodesOpenApi, tags = ["Node Public Address Registration"]),
+            (path = NODES_PATH, api = NodesOpenApi, tags = ["Node Public Address Registration"]),
         ),
         tags(
             (name = "Chat", description = "OpenAI's API chat completions v1 endpoint"),

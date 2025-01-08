@@ -23,14 +23,9 @@ use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
 use crate::server::middleware::RequestMetadataExtension;
 
-/// Path for the node public address registration endpoint.
-///
-/// This endpoint is used to register or update the public address of a node
-/// in the system, ensuring that the system has the correct address for routing requests.
-pub const NODE_PUBLIC_ADDRESS_REGISTRATION_PATH: &str = "/node/registration";
-
-/// The endpoint for selecting a node's public key for encryption
-pub const ENCRYPTION_PUBLIC_KEY_ENDPOINT: &str = "/v1/encryption/public-key";
+pub const NODES_PATH: &str = "/v1/nodes";
+pub const NODES_CREATE_PATH: &str = "/v1/nodes";
+pub const NODES_MODELS_RETRIEVE_PATH: &str = "/v1/nodes/models/:model";
 
 /// Size of the blake2b hash in bytes
 const BODY_HASH_SIZE: usize = 32;
@@ -46,7 +41,7 @@ const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
 pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
 
 #[derive(OpenApi)]
-#[openapi(paths(node_public_address_registration, select_node_public_key))]
+#[openapi(paths(nodes_create, nodes_models_retrieve))]
 /// OpenAPI documentation for the node public address registration endpoint.
 ///
 /// This struct is used to generate OpenAPI documentation for the node public address
@@ -54,7 +49,7 @@ pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
 /// generate the OpenAPI specification from the code.
 pub(crate) struct NodesOpenApi;
 
-/// Register node
+/// Create node
 ///
 /// This endpoint allows nodes to register or update their public address in the system.
 /// When a node comes online or changes its address, it can use this endpoint to ensure
@@ -83,7 +78,7 @@ pub(crate) struct NodesOpenApi;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub async fn node_public_address_registration(
+pub async fn nodes_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
     request: Request<Body>,
@@ -92,25 +87,25 @@ pub async fn node_public_address_registration(
         .get(SIGNATURE)
         .ok_or_else(|| AtomaProxyError::MissingHeader {
             header: SIGNATURE.to_string(),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .to_str()
         .map_err(|e| AtomaProxyError::InvalidHeader {
             message: format!("Failed to extract base64 signature encoding, with error: {e}"),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let body_bytes = axum::body::to_bytes(request.into_body(), MAX_BODY_SIZE)
         .await
         .map_err(|_| AtomaProxyError::InvalidBody {
             message: "Failed to convert body to bytes".to_string(),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let signature =
         Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::InvalidBody {
             message: format!("Failed to parse signature, with error: {e}"),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let public_key_bytes = signature.public_key_bytes();
@@ -118,7 +113,7 @@ pub async fn node_public_address_registration(
         SuiPublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
             AtomaProxyError::InvalidBody {
                 message: format!("Failed to extract public key from bytes, with error: {e}"),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+                endpoint: NODES_CREATE_PATH.to_string(),
             }
         })?;
     let sui_address = SuiAddress::from(&public_key);
@@ -131,12 +126,12 @@ pub async fn node_public_address_registration(
         .try_into()
         .map_err(|e| AtomaProxyError::InvalidBody {
             message: format!("Failed to convert blake2b hash to bytes, with error: {e}"),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
     verify_signature(base64_signature, &body_blake2b_hash_bytes).map_err(|e| {
         AtomaProxyError::InvalidBody {
             message: format!("Failed to verify signature, with error: {e}"),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         }
     })?;
 
@@ -144,7 +139,7 @@ pub async fn node_public_address_registration(
         serde_json::from_slice::<NodePublicAddressAssignment>(&body_bytes).map_err(|e| {
             AtomaProxyError::InvalidBody {
                 message: format!("Failed to parse request body, with error: {e}"),
-                endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+                endpoint: NODES_CREATE_PATH.to_string(),
             }
         })?;
 
@@ -158,29 +153,29 @@ pub async fn node_public_address_registration(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send GetNodeSuiAddress event: {:?}", err),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let node_sui_address = result_receiver
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to receive GetNodeSuiAddress result: {:?}", err),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to get node Sui address: {:?}", err),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .ok_or_else(|| AtomaProxyError::NotFound {
             message: "Node Sui address not found".to_string(),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     // Check if the address associated with the small ID in the request matches the Sui address in the signature.
     if node_sui_address != sui_address.to_string() {
         return Err(AtomaProxyError::InvalidBody {
             message: "The sui address associated with the node small ID does not match the signature sui address".to_string(),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         });
     }
 
@@ -193,7 +188,7 @@ pub async fn node_public_address_registration(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send UpsertNodePublicAddress event: {:?}", err),
-            endpoint: NODE_PUBLIC_ADDRESS_REGISTRATION_PATH.to_string(),
+            endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     Ok(Json(Value::Null))
@@ -212,34 +207,7 @@ pub struct NodePublicAddressAssignment {
     country: String,
 }
 
-/// The request body for selecting a node's public key for encryption
-/// from a client.
-#[derive(Deserialize, Serialize, ToSchema)]
-pub struct SelectNodePublicKeyRequest {
-    /// The request model name
-    model_name: String,
-}
-
-/// The response body for selecting a node's public key for encryption
-/// from a client. The client will use the provided public key to encrypt
-/// the request and send it back to the proxy. The proxy will then route this
-/// request to the selected node.
-#[derive(Deserialize, Serialize, ToSchema)]
-pub struct SelectNodePublicKeyResponse {
-    /// The public key for the selected node, base64 encoded
-    public_key: Vec<u8>,
-
-    /// The node small id for the selected node
-    node_small_id: u64,
-
-    /// Transaction digest for the transaction that acquires the stack entry, if any
-    stack_entry_digest: Option<String>,
-
-    /// The stack small id to which an available stack entry was acquired, for the selected node
-    stack_small_id: u64,
-}
-
-/// Select node public key
+/// Retrieve node for a given model
 ///
 /// This endpoint attempts to find a suitable node and retrieve its public key for encryption
 /// through a two-step process:
@@ -256,9 +224,12 @@ pub struct SelectNodePublicKeyResponse {
 ///   - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
 #[utoipa::path(
     get,
-    path = "",
+    path = "/models/{model}",
+    params(
+        ("model" = String, Path, description = "The name of the model to retrieve")
+    ),
     responses(
-        (status = OK, description = "Node DH public key requested successfully", body = Value),
+        (status = OK, description = "Node DH public key requested successfully", body = NodesModelsRetrieveResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to request node DH public key"),
         (status = SERVICE_UNAVAILABLE, description = "No node found for model with confidential compute enabled for requested model")
     )
@@ -268,17 +239,17 @@ pub struct SelectNodePublicKeyResponse {
     skip_all,
     fields(endpoint = metadata.endpoint)
 )]
-pub(crate) async fn select_node_public_key(
+pub(crate) async fn nodes_models_retrieve(
     State(state): State<ProxyState>,
     Extension(metadata): Extension<RequestMetadataExtension>,
-    Json(request): Json<SelectNodePublicKeyRequest>,
-) -> Result<Json<SelectNodePublicKeyResponse>, AtomaProxyError> {
+    model: axum::extract::Path<String>,
+) -> Result<Json<NodesModelsRetrieveResponse>, AtomaProxyError> {
     let (sender, receiver) = oneshot::channel();
     state
         .state_manager_sender
         .send(
             AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
-                model: request.model_name.clone(),
+                model: model.clone(),
                 max_num_tokens: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
                 result_sender: sender,
             },
@@ -300,7 +271,7 @@ pub(crate) async fn select_node_public_key(
                     message: "Stack small id not found for node public key".to_string(),
                     endpoint: metadata.endpoint.clone(),
                 })?;
-        Ok(Json(SelectNodePublicKeyResponse {
+        Ok(Json(NodesModelsRetrieveResponse {
             public_key: node_public_key.public_key,
             node_small_id: node_public_key.node_small_id as u64,
             stack_entry_digest: None,
@@ -311,7 +282,7 @@ pub(crate) async fn select_node_public_key(
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                model: request.model_name.clone(),
+                model: model.clone(),
                 is_confidential: true, // NOTE: This endpoint is only required for confidential compute
                 result_sender: sender,
             })
@@ -374,7 +345,7 @@ pub(crate) async fn select_node_public_key(
                 endpoint: metadata.endpoint.clone(),
             })?;
             if let Some(node_public_key) = node_public_key {
-                Ok(Json(SelectNodePublicKeyResponse {
+                Ok(Json(NodesModelsRetrieveResponse {
                     public_key: node_public_key.public_key,
                     node_small_id: node_public_key.node_small_id as u64,
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
@@ -390,10 +361,29 @@ pub(crate) async fn select_node_public_key(
             Err(AtomaProxyError::ServiceUnavailable {
                 message: format!(
                     "No node found for model {} with confidential compute enabled",
-                    request.model_name
+                    model.clone()
                 ),
                 endpoint: metadata.endpoint.clone(),
             })
         }
     }
+}
+
+/// The response body for selecting a node's public key for encryption
+/// from a client. The client will use the provided public key to encrypt
+/// the request and send it back to the proxy. The proxy will then route this
+/// request to the selected node.
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct NodesModelsRetrieveResponse {
+    /// The public key for the selected node, base64 encoded
+    public_key: Vec<u8>,
+
+    /// The node small id for the selected node
+    node_small_id: u64,
+
+    /// Transaction digest for the transaction that acquires the stack entry, if any
+    stack_entry_digest: Option<String>,
+
+    /// The stack small id to which an available stack entry was acquired, for the selected node
+    stack_small_id: u64,
 }

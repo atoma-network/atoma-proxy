@@ -314,46 +314,11 @@ paths:
           description: Failed to retrieve list of available models
       security:
       - bearerAuth: []
-  /node/registration:
-    get:
-      tags:
-      - Node Public Address Registration
-      summary: Select node public key
-      description: |-
-        This endpoint attempts to find a suitable node and retrieve its public key for encryption
-        through a two-step process:
-
-        1. First, it tries to select an existing node with a public key directly.
-        2. If no node is immediately available, it falls back to finding the cheapest compatible node
-           and acquiring a new stack entry for it.
-
-        This endpoint is specifically designed for confidential compute scenarios where
-        requests need to be encrypted before being processed by nodes.
-
-        ## Errors
-          - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
-          - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
-      operationId: select_node_public_key
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SelectNodePublicKeyRequest'
-        required: true
-      responses:
-        '200':
-          description: Node DH public key requested successfully
-          content:
-            application/json:
-              schema: {}
-        '500':
-          description: Failed to request node DH public key
-        '503':
-          description: No node found for model with confidential compute enabled for requested model
+  /v1/nodes:
     post:
       tags:
       - Node Public Address Registration
-      summary: Register node
+      summary: Create node
       description: |-
         This endpoint allows nodes to register or update their public address in the system.
         When a node comes online or changes its address, it can use this endpoint to ensure
@@ -373,7 +338,7 @@ paths:
           - The state manager channel is closed
           - The registration event cannot be sent
           - Node Sui address lookup fails
-      operationId: node_public_address_registration
+      operationId: nodes_create
       responses:
         '200':
           description: Node public address registered successfully
@@ -382,6 +347,44 @@ paths:
               schema: {}
         '500':
           description: Failed to register node public address
+  /v1/nodes/models/{model}:
+    get:
+      tags:
+      - Node Public Address Registration
+      summary: Retrieve node for a given model
+      description: |-
+        This endpoint attempts to find a suitable node and retrieve its public key for encryption
+        through a two-step process:
+
+        1. First, it tries to select an existing node with a public key directly.
+        2. If no node is immediately available, it falls back to finding the cheapest compatible node
+           and acquiring a new stack entry for it.
+
+        This endpoint is specifically designed for confidential compute scenarios where
+        requests need to be encrypted before being processed by nodes.
+
+        ## Errors
+          - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
+          - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
+      operationId: nodes_models_retrieve
+      parameters:
+      - name: model
+        in: path
+        description: The name of the model to retrieve
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Node DH public key requested successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesModelsRetrieveResponse'
+        '500':
+          description: Failed to request node DH public key
+        '503':
+          description: No node found for model with confidential compute enabled for requested model
 components:
   schemas:
     ChatCompletionChoice:
@@ -964,17 +967,40 @@ components:
         object:
           type: string
           description: The object type, which is always "list"
-    SelectNodePublicKeyRequest:
+    NodesModelsRetrieveResponse:
       type: object
       description: |-
-        The request body for selecting a node's public key for encryption
-        from a client.
+        The response body for selecting a node's public key for encryption
+        from a client. The client will use the provided public key to encrypt
+        the request and send it back to the proxy. The proxy will then route this
+        request to the selected node.
       required:
-      - model_name
+      - public_key
+      - node_small_id
+      - stack_small_id
       properties:
-        model_name:
-          type: string
-          description: The request model name
+        node_small_id:
+          type: integer
+          format: int64
+          description: The node small id for the selected node
+          minimum: 0
+        public_key:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          description: The public key for the selected node, base64 encoded
+        stack_entry_digest:
+          type:
+          - string
+          - 'null'
+          description: Transaction digest for the transaction that acquires the stack entry, if any
+        stack_small_id:
+          type: integer
+          format: int64
+          description: The stack small id to which an available stack entry was acquired, for the selected node
+          minimum: 0
     Usage:
       type: object
       description: Represents usage statistics for a confidential compute request
