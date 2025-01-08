@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
+use base64::engine::{general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -15,8 +16,7 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
-use super::request_model::RequestModel;
-use super::update_state_manager;
+use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::Result;
 
 /// Path for the confidential image generations endpoint.
@@ -164,6 +164,7 @@ pub async fn image_generations_create(
         metadata.num_compute_units as i64,
         metadata.endpoint.clone(),
         metadata.model_name,
+        metadata.selected_stack_small_id,
     )
     .await
     {
@@ -233,6 +234,7 @@ pub async fn confidential_image_generations_create(
         metadata.num_compute_units as i64,
         metadata.endpoint.clone(),
         metadata.model_name,
+        metadata.selected_stack_small_id,
     )
     .await
     {
@@ -302,6 +304,7 @@ async fn handle_image_generation_response(
     total_tokens: i64,
     endpoint: String,
     model_name: String,
+    stack_small_id: i64,
 ) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
     let time = Instant::now();
@@ -348,6 +351,31 @@ async fn handle_image_generation_response(
         )
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to update node throughput performance: {:?}", err),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    let total_hash = response
+        .get(RESPONSE_HASH_KEY)
+        .and_then(|hash| hash.as_str())
+        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
+            message: format!(
+                "Error converting response hash to array, received array of length {}",
+                e.len()
+            ),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    state
+        .state_manager_sender
+        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+            stack_small_id,
+            total_hash,
+        })
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Error updating stack total hash: {}", err),
             endpoint: endpoint.to_string(),
         })?;
 

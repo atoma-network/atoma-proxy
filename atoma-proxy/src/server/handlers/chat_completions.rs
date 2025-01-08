@@ -10,6 +10,7 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
+use base64::engine::{general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -17,7 +18,7 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
-use super::update_state_manager;
+use super::{update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS};
 
 /// Path for the confidential chat completions endpoint.
@@ -481,6 +482,33 @@ async fn handle_non_streaming_response(
         )
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Error updating node throughput performance: {}", err),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    // NOTE: It is not very secure to rely on the node's computed response hash,
+    // if the node is not running in a TEE, but for now it suffices
+    let total_hash = response
+        .get(RESPONSE_HASH_KEY)
+        .and_then(|hash| hash.as_str())
+        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
+            message: format!(
+                "Error converting response hash to array, received array of length {}",
+                e.len()
+            ),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    state
+        .state_manager_sender
+        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+            stack_small_id: selected_stack_small_id,
+            total_hash,
+        })
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Error updating stack total hash: {}", err),
             endpoint: endpoint.to_string(),
         })?;
 
