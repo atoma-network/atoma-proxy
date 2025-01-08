@@ -43,10 +43,8 @@ use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use super::handlers::nodes::{
-    node_public_address_registration, NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
-};
-use super::handlers::select_node_public_key::{
-    select_node_public_key, ENCRYPTION_PUBLIC_KEY_ENDPOINT,
+    node_public_address_registration, select_node_public_key, ENCRYPTION_PUBLIC_KEY_ENDPOINT,
+    NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
 };
 use super::middleware::{authenticate_middleware, confidential_compute_middleware};
 use super::AtomaServiceConfig;

@@ -23,8 +23,7 @@ use crate::server::handlers::{
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
     models::{ModelsOpenApi, MODELS_PATH},
-    nodes::{NodePublicAddressRegistrationOpenApi, NODE_PUBLIC_ADDRESS_REGISTRATION_PATH},
-    select_node_public_key::{SelectNodePublicKeyOpenApi, ENCRYPTION_PUBLIC_KEY_ENDPOINT},
+    nodes::{NodesOpenApi, NODE_PUBLIC_ADDRESS_REGISTRATION_PATH},
 };
 use crate::server::http_server::{HealthOpenApi, HEALTH_PATH};
 
@@ -33,27 +32,26 @@ pub fn openapi_routes() -> Router {
     #[openapi(
         modifiers(&SpeakeasyExtension, &SecurityAddon),
         nest(
-            (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
-            (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
-            (path = NODE_PUBLIC_ADDRESS_REGISTRATION_PATH, api = NodePublicAddressRegistrationOpenApi, tags = ["Node Public Address Registration"]),
             (path = CHAT_COMPLETIONS_PATH, api = ChatCompletionsOpenApi, tags = ["Chat"]),
             (path = CONFIDENTIAL_CHAT_COMPLETIONS_PATH, api = ConfidentialChatCompletionsOpenApi, tags = ["Confidential Chat"]),
-            (path = EMBEDDINGS_PATH, api = EmbeddingsOpenApi, tags = ["Embeddings"]),
             (path = CONFIDENTIAL_EMBEDDINGS_PATH, api = ConfidentialEmbeddingsOpenApi, tags = ["Confidential Embeddings"]),
-            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = CONFIDENTIAL_IMAGE_GENERATIONS_PATH, api = ConfidentialImageGenerationsOpenApi, tags = ["Confidential Images"]),
-            (path = ENCRYPTION_PUBLIC_KEY_ENDPOINT, api = SelectNodePublicKeyOpenApi, tags = ["Confidential Node Public Key Selection"])
+            (path = EMBEDDINGS_PATH, api = EmbeddingsOpenApi, tags = ["Embeddings"]),
+            (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
+            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
+            (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
+            (path = NODE_PUBLIC_ADDRESS_REGISTRATION_PATH, api = NodesOpenApi, tags = ["Node Public Address Registration"]),
         ),
         tags(
-            (name = "Health", description = "Health check"),
             (name = "Chat", description = "OpenAI's API chat completions v1 endpoint"),
             (name = "Confidential Chat", description = "Atoma's API confidential chat completions v1 endpoint"),
+            (name = "Confidential Embeddings", description = "Atoma's API confidential embeddings v1 endpoint"),
+            (name = "Confidential Images", description = "Atoma's API confidential images v1 endpoint"),
+            (name = "Embeddings", description = "OpenAI's API embeddings v1 endpoint"),
+            (name = "Health", description = "Health check"),
+            (name = "Images", description = "OpenAI's API images v1 endpoint"),
             (name = "Models", description = "OpenAI's API models v1 endpoint"),
             (name = "Node Public Address Registration", description = "Node public address registration"),
-            (name = "Embeddings", description = "OpenAI's API embeddings v1 endpoint"),
-            (name = "Confidential Embeddings", description = "Atoma's API confidential embeddings v1 endpoint"),
-            (name = "Images", description = "OpenAI's API images v1 endpoint"),
-            (name = "Confidential Images", description = "Atoma's API confidential images v1 endpoint"),
             (name = "Node Public Key Selection", description = "Node public key selection")
         ),
         servers(
