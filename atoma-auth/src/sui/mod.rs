@@ -427,7 +427,7 @@ impl Sui {
     ///
     /// # Returns
     ///
-    /// Returns a tuple containing the timestamp of the transaction and the balance changes
+    /// Returns the balance changes
     ///
     /// # Errors
     ///
@@ -437,7 +437,7 @@ impl Sui {
     pub async fn get_balance_changes(
         &self,
         transaction_digest: &str,
-    ) -> Result<(Option<u64>, Option<Vec<BalanceChange>>)> {
+    ) -> Result<Option<Vec<BalanceChange>>> {
         let transaction_digest = TransactionDigest::from_str(transaction_digest).unwrap();
         let client = self.wallet_ctx.get_client().await?;
         let transaction = client
@@ -450,6 +450,6 @@ impl Sui {
                 },
             )
             .await?;
-        Ok((transaction.timestamp_ms, transaction.balance_changes))
+        Ok(transaction.balance_changes)
     }
 }

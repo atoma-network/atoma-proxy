@@ -3975,19 +3975,20 @@ impl AtomaState {
         Ok(sui_address.flatten())
     }
 
-    /// Retrieves the user id for the user.
+    /// Confirms that the user is associated with the wallet.
     ///
-    /// This method retrieves the user id the user from the `users` table.
+    /// This method confirms that users has this wallet associated with them.
     ///
     /// # Arguments
     ///
     /// * `sui_address` - The sui_address of the user.
+    /// * `user_id` - The unique identifier of the user.
     ///
     /// # Returns
     ///
-    /// - `Result<Option<i64>>`: A result containing either:
-    ///  - `Ok(Some(i64))`: The user id of the user.
-    /// - `Ok(None)`: If the user is not found.
+    /// - `Result<bool>`: A result containing either:
+    /// - `Ok(true)`: If the user is associated with the wallet.
+    /// - `Ok(false)`: If the user is not associated with the wallet.
     /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
     ///
     /// # Errors
@@ -4001,18 +4002,20 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn get_sui_address(state_manager: &AtomaStateManager, sui_address: String) -> Result<Option<i64>, AtomaStateManagerError> {
-    ///    state_manager.get_sui_address(sui_address).await
+    /// async fn confirm_user(state_manager: &AtomaStateManager, sui_address: String, user_id: i64) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.confirm_user(sui_address, user_id).await
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_user_id(&self, sui_address: String) -> Result<Option<i64>> {
-        let user = sqlx::query("SELECT id FROM users WHERE sui_address = $1")
-            .bind(sui_address)
-            .fetch_optional(&self.db)
-            .await?;
-
-        Ok(user.map(|user| user.get("id")))
+    pub async fn confirm_user(&self, sui_address: String, user_id: i64) -> Result<bool> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE sui_address = $1 and id = $2)",
+        )
+        .bind(sui_address)
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await?;
+        Ok(exists)
     }
 
     /// Update the balance for the user.
@@ -4044,19 +4047,16 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn top_up_balance(&self, user_id: i64, balance: i64, timestamp: i64) -> Result<()> {
+    pub async fn top_up_balance(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query(
-            "INSERT INTO balance (user_id, usdc_balance, usdc_last_timestamp) 
-                         VALUES ($1, $2, $3) 
+            "INSERT INTO balance (user_id, usdc_balance) 
+                         VALUES ($1, $2) 
                          ON CONFLICT (user_id) 
                          DO UPDATE SET 
-                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance, 
-                            usdc_last_timestamp = EXCLUDED.usdc_last_timestamp 
-                         WHERE balance.usdc_last_timestamp < EXCLUDED.usdc_last_timestamp",
+                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance",
         )
         .bind(user_id)
         .bind(balance)
-        .bind(timestamp)
         .execute(&self.db)
         .await?;
         Ok(())
@@ -4080,10 +4080,37 @@ impl AtomaState {
     /// This function will return an error if:
     ///
     /// - The database query fails to execute (that could mean the balance is not available)
+    #[instrument(level = "trace", skip(self))]
     pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1")
             .bind(user_id)
             .bind(balance)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Insert a new usdc payment digest.
+    ///
+    /// This method inserts a new usdc payment digest into the `usdc_payment_digests` table. It fails if the digest already exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `digest` - The digest to insert.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute. Including if the digest already exists.
+    #[instrument(level = "trace", skip(self))]
+    pub async fn insert_new_usdc_payment_digest(&self, digest: String) -> Result<()> {
+        sqlx::query("INSERT INTO usdc_payment_digests (digest) VALUES ($1)")
+            .bind(digest)
             .execute(&self.db)
             .await?;
         Ok(())

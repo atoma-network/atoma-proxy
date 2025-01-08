@@ -1147,24 +1147,18 @@ pub(crate) async fn handle_state_manager_event(
                 .send(sui_address)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::GetUserId {
+        AtomaAtomaStateManagerEvent::ConfirmUser {
             sui_address,
+            user_id,
             result_sender,
         } => {
-            let user_id = state_manager.state.get_user_id(sui_address).await;
+            let confirmation = state_manager.state.confirm_user(sui_address, user_id).await;
             result_sender
-                .send(user_id)
+                .send(confirmation)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::TopUpBalance {
-            user_id,
-            amount,
-            timestamp,
-        } => {
-            state_manager
-                .state
-                .top_up_balance(user_id, amount, timestamp)
-                .await?;
+        AtomaAtomaStateManagerEvent::TopUpBalance { user_id, amount } => {
+            state_manager.state.top_up_balance(user_id, amount).await?;
         }
         AtomaAtomaStateManagerEvent::DeductFromUsdc {
             user_id,
@@ -1172,6 +1166,18 @@ pub(crate) async fn handle_state_manager_event(
             result_sender,
         } => {
             let success = state_manager.state.deduct_from_usdc(user_id, amount).await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::InsertNewUsdcPaymentDigest {
+            digest,
+            result_sender,
+        } => {
+            let success = state_manager
+                .state
+                .insert_new_usdc_payment_digest(digest)
+                .await;
             result_sender
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
