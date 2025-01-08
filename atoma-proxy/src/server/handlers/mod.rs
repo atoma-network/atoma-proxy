@@ -12,6 +12,8 @@ pub mod models;
 pub mod request_model;
 pub mod select_node_public_key;
 
+pub(crate) const RESPONSE_HASH_KEY: &str = "response_hash";
+
 /// Updates the state manager with token usage and hash information for a stack.
 ///
 /// This function performs two main operations:
