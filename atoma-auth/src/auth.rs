@@ -474,7 +474,15 @@ impl Auth {
     pub async fn usdc_payment(&self, jwt: &str, transaction_digest: &str) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
 
-        let (timestamp, balance_changes) = self
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender.send(
+            AtomaAtomaStateManagerEvent::InsertNewUsdcPaymentDigest {
+                digest: transaction_digest.to_string(),
+                result_sender,
+            },
+        )?;
+        result_receiver.await??;
+        let balance_changes = self
             .sui
             .read()
             .await
@@ -482,7 +490,6 @@ impl Auth {
             .await?;
         let balance_changes =
             balance_changes.ok_or_else(|| anyhow::anyhow!("No balance changes found"))?;
-        let timestamp = timestamp.ok_or_else(|| anyhow::anyhow!("No timestamp found"))?;
         let mut sender = None;
         let mut receiver = None;
         let mut money_in = None;
@@ -517,22 +524,21 @@ impl Auth {
         if receiver == own_address {
             let (result_sender, result_receiver) = oneshot::channel();
             self.state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::GetUserId {
+                .send(AtomaAtomaStateManagerEvent::ConfirmUser {
                     sui_address: sender.to_string(),
+                    user_id: claims.user_id,
                     result_sender,
                 })?;
-            let user_id = result_receiver
-                .await??
-                .ok_or_else(|| anyhow::anyhow!("User not found"))?;
-            if claims.user_id != user_id {
+            let is_their_wallet = result_receiver.await??;
+
+            if !is_their_wallet {
                 return Err(anyhow::anyhow!("The payment is not for this user"));
             }
             // We are the receiver and we know the sender
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::TopUpBalance {
-                    user_id,
+                    user_id: claims.user_id,
                     amount: money_in.unwrap() as i64,
-                    timestamp: timestamp as i64,
                 })?;
         }
         Ok(())

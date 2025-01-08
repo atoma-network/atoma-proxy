@@ -610,20 +610,22 @@ pub enum AtomaAtomaStateManagerEvent {
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
     /// Retrieves the user ID by Sui address
-    GetUserId {
+    ConfirmUser {
         sui_address: String,
-        result_sender: oneshot::Sender<Result<Option<i64>>>,
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<bool>>,
     },
     /// Updates the balance of a user
-    TopUpBalance {
-        user_id: i64,
-        amount: i64,
-        timestamp: i64,
-    },
+    TopUpBalance { user_id: i64, amount: i64 },
     /// Withdraws the balance of a user
     DeductFromUsdc {
         user_id: i64,
         amount: i64,
+        result_sender: oneshot::Sender<Result<()>>,
+    },
+    /// Acknowledges a USDC payment. Fails if the digest has already been acknowledged.
+    InsertNewUsdcPaymentDigest {
+        digest: String,
         result_sender: oneshot::Sender<Result<()>>,
     },
 }
