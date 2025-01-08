@@ -23,12 +23,10 @@ use crate::server::handlers::{
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
     models::{ModelsOpenApi, MODELS_PATH},
+    nodes::{NodePublicAddressRegistrationOpenApi, NODE_PUBLIC_ADDRESS_REGISTRATION_PATH},
     select_node_public_key::{SelectNodePublicKeyOpenApi, ENCRYPTION_PUBLIC_KEY_ENDPOINT},
 };
-use crate::server::http_server::{
-    HealthOpenApi, NodePublicAddressRegistrationOpenApi, HEALTH_PATH,
-    NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
-};
+use crate::server::http_server::{HealthOpenApi, HEALTH_PATH};
 
 pub fn openapi_routes() -> Router {
     #[derive(OpenApi)]
