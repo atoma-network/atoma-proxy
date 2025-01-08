@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::server::types::ConfidentialComputeResponse;
 use crate::server::{
     error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
     streamer::Streamer, types::ConfidentialComputeRequest,
@@ -17,7 +18,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
 use super::{update_state_manager, verify_and_sign_response, PROXY_SIGNATURE_KEY};
-use crate::server::Result;
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -42,8 +43,8 @@ const MODEL: &str = "model";
 /// The messages field in the request payload.
 const MESSAGES: &str = "messages";
 
-/// The max_tokens field in the request payload.
-const MAX_TOKENS: &str = "max_tokens";
+/// The stream field in the request payload.
+const STREAM: &str = "stream";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -67,20 +68,13 @@ pub(crate) struct ChatCompletionsOpenApi;
 /// or non-streaming response handling based on the request payload. For streaming requests,
 /// it configures additional options to track token usage.
 ///
-/// # Arguments
-///
-/// * `metadata`: Extension containing request metadata (node address, ID, compute units, etc.)
-/// * `state`: The shared state of the application
-/// * `headers`: The headers of the request
-/// * `payload`: The JSON payload containing the chat completion request
-///
-/// # Returns
+/// ## Returns
 ///
 /// Returns a Response containing either:
 /// - A streaming SSE connection for real-time completions
 /// - A single JSON response for non-streaming completions
 ///
-/// # Errors
+/// ## Errors
 ///
 /// Returns an error status code if:
 /// - The request processing fails
@@ -116,16 +110,9 @@ pub async fn chat_completions_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
-        .get("stream")
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Missing or invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?
-        .as_bool()
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?;
+        .get(STREAM)
+        .and_then(|stream| stream.as_bool())
+        .unwrap_or_default();
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
@@ -295,29 +282,14 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
 /// for full private AI compute.
 ///
-/// # Arguments
-///
-/// * `metadata` - Extension containing request metadata including:
-///   * `endpoint` - The API endpoint being accessed
-///   * `node_address` - Address of the inference node
-///   * `node_id` - Identifier of the selected node
-///   * `num_compute_units` - Available compute units
-///   * `selected_stack_small_id` - Stack identifier
-///   * `salt` - Optional salt for encryption
-///   * `node_x25519_public_key` - Optional public key for encryption
-///   * `model_name` - Name of the AI model being used
-/// * `state` - Shared application state (ProxyState)
-/// * `headers` - HTTP request headers
-/// * `payload` - The chat completion request body
-///
-/// # Returns
+/// ## Returns
 ///
 /// Returns a `Result` containing either:
 /// * An HTTP response with the chat completion result
 /// * A streaming SSE connection for real-time completions
 /// * An `AtomaProxyError` error if the request processing fails
 ///
-/// # Errors
+/// ## Errors   
 ///
 /// Returns `AtomaProxyError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
@@ -327,23 +299,12 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// * Response processing encounters errors
 /// * State manager updates fail
 ///
-/// # Security Features
+/// ## Security Features
 ///
 /// * Utilizes AEAD encryption for request/response data
 /// * Supports TEE (Trusted Execution Environment) processing
 /// * Implements secure key exchange using X25519
 /// * Maintains confidentiality throughout the request lifecycle
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let response = confidential_chat_completions_handler(
-///     Extension(metadata),
-///     State(state),
-///     headers,
-///     Json(payload)
-/// ).await?;
-/// ```
 #[utoipa::path(
     post,
     path = "",
@@ -352,7 +313,7 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeRequest),
+        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -372,16 +333,9 @@ pub async fn confidential_chat_completions_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let is_streaming = payload
-        .get("stream")
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Missing or invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?
-        .as_bool()
-        .ok_or_else(|| AtomaProxyError::InvalidBody {
-            message: "Invalid 'stream' field".to_string(),
-            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-        })?;
+        .get(STREAM)
+        .and_then(|stream| stream.as_bool())
+        .unwrap_or_default();
 
     match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
         Ok(response) => Ok(response),
@@ -473,7 +427,16 @@ async fn handle_non_streaming_response(
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send OpenAI API request: {:?}", err),
             endpoint: endpoint.to_string(),
-        })?
+        })?;
+
+    if !response.status().is_success() {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
@@ -685,10 +648,7 @@ impl RequestModel for RequestModelChatCompletions {
         let max_tokens = request
             .get(MAX_TOKENS)
             .and_then(|m| m.as_u64())
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
-                message: "Missing or invalid 'max_tokens' field".to_string(),
-                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-            })?;
+            .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Self {
             model: model.to_string(),

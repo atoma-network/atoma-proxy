@@ -252,7 +252,7 @@ paths:
           description: Failed to get sui address
       security:
       - bearerAuth: []
-  /stacks:
+  /current_stacks:
     get:
       tags:
       - Stacks
@@ -271,6 +271,55 @@ paths:
           description: Retrieves all stacks that are not settled
         '500':
           description: Failed to get all stacks
+  /all_stacks:
+    get:
+      tags:
+      - Stacks
+      summary: Retrieves all stacks for the user based on the access token.
+      description: |-
+        # Arguments
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+        * `Result<Json<Vec<Stack>>>` - A JSON response containing a list of stacks
+          - `Ok(Json<Vec<Stack>>)` - Successfully retrieved stacks
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve stacks from state manager
+
+        # Example Response
+        Returns a JSON array of Stack objects for the specified user
+      operationId: get_all_stacks_for_user
+      responses:
+        '200':
+          description: Retrieves all stacks for the user
+        '500':
+          description: Failed to get user stack
+      security:
+      - bearerAuth: []
+  /balance:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the balance for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<i64>>` - A JSON response containing the balance
+      operationId: get_balance
+      responses:
+        '200':
+          description: Retrieves the balance for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get balance
+      security:
+      - bearerAuth: []
   /tasks:
     get:
       tags:

@@ -37,6 +37,9 @@ pub(crate) const USDC_PAYMENT_PATH: &str = "/usdc_payment";
 /// The path for the get_sui_address endpoint.
 pub(crate) const GET_SUI_ADDRESS_PATH: &str = "/get_sui_address";
 
+/// The path for the balance endpoint.
+pub(crate) const GET_BALANCE_PATH: &str = "/balance";
+
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// OpenAPI documentation for the get_all_api_tokens endpoint.
@@ -62,6 +65,7 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(UPDATE_SUI_ADDRESS_PATH, post(update_sui_address))
         .route(USDC_PAYMENT_PATH, post(usdc_payment))
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
+        .route(GET_BALANCE_PATH, get(get_balance))
 }
 
 /// Retrieves all API tokens for the user.
@@ -489,4 +493,69 @@ pub(crate) async fn get_sui_address(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok(Json(sui_address))
+}
+
+/// OpenAPI documentation for the get_balance endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_balance
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_balance))]
+pub(crate) struct GetBalance;
+
+/// Retrieves the balance for the user.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+///
+/// # Returns
+///
+/// * `Result<Json<i64>>` - A JSON response containing the balance
+#[utoipa::path(
+    get,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Retrieves the balance for the user"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get balance")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub(crate) async fn get_balance(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<i64>> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let jwt = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let user_id = proxy_service_state
+        .auth
+        .get_user_id_from_token(jwt)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user ID from token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+    Ok(Json(
+        proxy_service_state
+            .atoma_state
+            .get_balance_for_user(user_id)
+            .await
+            .map_err(|e| {
+                error!("Failed to get balance: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
 }

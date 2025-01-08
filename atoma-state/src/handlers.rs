@@ -356,6 +356,7 @@ pub(crate) async fn handle_node_task_unsubscription_event(
 /// * `state_manager` - A reference to the `AtomaStateManager` for database operations.
 /// * `event` - A `StackCreatedEvent` containing the details of the stack creation event.
 /// * `node_small_ids` - A slice of `u64` values representing the small IDs of the current nodes.
+/// * `acquired_timestamp` - The timestamp of the event.
 ///
 /// # Returns
 ///
@@ -379,6 +380,7 @@ pub(crate) async fn handle_stack_created_event(
     event: StackCreatedEvent,
     already_computed_units: i64,
     user_id: i64,
+    acquired_timestamp: DateTime<Utc>,
 ) -> Result<()> {
     let node_small_id = event.selected_node_id.inner;
     trace!(
@@ -388,7 +390,10 @@ pub(crate) async fn handle_stack_created_event(
     );
     let mut stack: Stack = event.into();
     stack.already_computed_units = already_computed_units;
-    state_manager.state.insert_new_stack(stack, user_id).await?;
+    state_manager
+        .state
+        .insert_new_stack(stack, user_id, acquired_timestamp)
+        .await?;
     Ok(())
 }
 
@@ -958,11 +963,17 @@ pub(crate) async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::NewStackAcquired {
             event,
             already_computed_units,
-            transaction_timestamp: _,
+            transaction_timestamp,
             user_id,
         } => {
-            handle_stack_created_event(state_manager, event, already_computed_units, user_id)
-                .await?;
+            handle_stack_created_event(
+                state_manager,
+                event,
+                already_computed_units,
+                user_id,
+                transaction_timestamp,
+            )
+            .await?;
         }
         AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
             timestamp,

@@ -7,7 +7,7 @@ use atoma_utils::constants::SIGNATURE;
 use atoma_utils::verify_signature;
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::middleware::from_fn_with_state;
 use axum::{
     extract::State,
@@ -34,9 +34,13 @@ use utoipa::{OpenApi, ToSchema};
 use crate::server::{
     error::AtomaProxyError,
     handlers::{
-        chat_completions::chat_completions_create, chat_completions::CHAT_COMPLETIONS_PATH,
-        embeddings::embeddings_create, embeddings::EMBEDDINGS_PATH,
-        image_generations::image_generations_create, image_generations::IMAGE_GENERATIONS_PATH,
+        chat_completions::chat_completions_create,
+        chat_completions::CHAT_COMPLETIONS_PATH,
+        embeddings::embeddings_create,
+        embeddings::EMBEDDINGS_PATH,
+        image_generations::image_generations_create,
+        image_generations::IMAGE_GENERATIONS_PATH,
+        models::{models_list, MODELS_PATH},
     },
     Result,
 };
@@ -59,12 +63,6 @@ use super::AtomaServiceConfig;
 ///
 /// This endpoint is used to check the health of the atoma proxy service.
 pub const HEALTH_PATH: &str = "/health";
-
-/// Path for the models listing endpoint.
-///
-/// This endpoint follows the OpenAI API format and returns a list
-/// of available AI models with their associated metadata and capabilities.
-pub const MODELS_PATH: &str = "/v1/models";
 
 /// Path for the node public address registration endpoint.
 ///
@@ -115,126 +113,6 @@ pub struct ProxyState {
     pub models: Arc<Vec<String>>,
 }
 
-/// OpenAPI documentation for the models listing endpoint.
-///
-/// This struct is used to generate OpenAPI documentation for the models listing
-/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
-/// the OpenAPI specification from the code.
-#[derive(OpenApi)]
-#[openapi(paths(models_handler))]
-pub(crate) struct ModelsOpenApi;
-
-/// List models
-///
-/// This endpoint mimics the OpenAI models endpoint format, returning a list of
-/// available models with their associated metadata and permissions. Each model
-/// includes standard OpenAI-compatible fields to ensure compatibility with
-/// existing OpenAI client libraries.
-///
-/// # Arguments
-///
-/// * `state` - The shared application state containing the list of available models
-///
-/// # Returns
-///
-/// Returns a JSON response containing:
-/// * An "object" field set to "list"
-/// * A "data" array containing model objects with the following fields:
-///   - id: The model identifier
-///   - object: Always set to "model"
-///   - created: Timestamp (currently hardcoded)
-///   - owned_by: Set to "atoma"
-///   - root: Same as the model id
-///   - parent: Set to null
-///   - max_model_len: Maximum context length (currently hardcoded to 2048)
-///   - permission: Array of permission objects describing model capabilities
-///
-/// # Example Response
-///
-/// ```json
-/// {
-///   "object": "list",
-///   "data": [
-///     {
-///       "id": "meta-llama/Llama-3.1-70B-Instruct",
-///       "object": "model",
-///       "created": 1730930595,
-///       "owned_by": "atoma",
-///       "root": "meta-llama/Llama-3.1-70B-Instruct",
-///       "parent": null,
-///       "max_model_len": 2048,
-///       "permission": [
-///         {
-///           "id": "modelperm-meta-llama/Llama-3.1-70B-Instruct",
-///           "object": "model_permission",
-///           "created": 1730930595,
-///           "allow_create_engine": false,
-///           "allow_sampling": true,
-///           "allow_logprobs": true,
-///           "allow_search_indices": false,
-///           "allow_view": true,
-///           "allow_fine_tuning": false,
-///           "organization": "*",
-///           "group": null,
-///           "is_blocking": false
-///         }
-///       ]
-///     }
-///   ]
-/// }
-/// ```
-#[utoipa::path(
-    get,
-    path = "",
-    security(
-        ("bearerAuth" = [])
-    ),
-    responses(
-        (status = OK, description = "List of available models", body = Value),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")
-    )
-)]
-async fn models_handler(
-    State(state): State<ProxyState>,
-) -> std::result::Result<Json<Value>, StatusCode> {
-    // TODO: Implement proper model handling
-    Ok(Json(json!({
-        "object": "list",
-        "data": state
-        .models
-        .iter()
-        .map(|model| {
-            json!({
-              "id": model,
-              "object": "model",
-              "created": 1730930595,
-              "owned_by": "atoma",
-              "root": model,
-              "parent": null,
-              "max_model_len": 2048,
-              "permission": [
-                {
-                  "id": format!("modelperm-{}", model),
-                  "object": "model_permission",
-                  "created": 1730930595,
-                  "allow_create_engine": false,
-                  "allow_sampling": true,
-                  "allow_logprobs": true,
-                  "allow_search_indices": false,
-                  "allow_view": true,
-                  "allow_fine_tuning": false,
-                  "organization": "*",
-                  "group": null,
-                  "is_blocking": false
-                }
-              ]
-            })
-        })
-        .collect::<Vec<_>>()
-      }
-    )))
-}
-
 /// Represents the payload for the node public address registration request.
 ///
 /// This struct represents the payload for the node public address registration request.
@@ -263,16 +141,7 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 /// When a node comes online or changes its address, it can use this endpoint to ensure
 /// the system has its current address for routing requests.
 ///
-/// # Arguments
-///
-/// * `state` - The shared application state containing the state manager sender
-/// * `payload` - The registration payload containing the node's ID and public address
-///
-/// # Returns
-///
-/// Returns `Ok(Json(Value::Null))` on successful registration, or an error if the registration fails.
-///
-/// # Errors
+/// ## Errors
 ///
 /// Returns various `AtomaProxyError` variants:
 /// * `MissingHeader` - If the signature header is missing
@@ -286,16 +155,6 @@ pub(crate) struct NodePublicAddressRegistrationOpenApi;
 ///   - The state manager channel is closed
 ///   - The registration event cannot be sent
 ///   - Node Sui address lookup fails
-///
-/// # Example Request Payload
-///
-/// ```json
-/// {
-///     "node_small_id": 123,
-///     "public_address": "http://node-123.example.com:8080",
-///     "country": "US"
-/// }
-/// ```
 #[utoipa::path(
     post,
     path = "",
@@ -506,7 +365,7 @@ pub fn create_router(state: ProxyState) -> Router {
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_handler))
+        .route(MODELS_PATH, get(models_list))
         .route(
             NODE_PUBLIC_ADDRESS_REGISTRATION_PATH,
             post(node_public_address_registration),

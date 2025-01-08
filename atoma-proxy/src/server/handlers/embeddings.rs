@@ -15,8 +15,10 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::{
-    error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
-    types::ConfidentialComputeRequest,
+    error::AtomaProxyError,
+    http_server::ProxyState,
+    middleware::RequestMetadataExtension,
+    types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
 };
 
 use super::{
@@ -126,20 +128,11 @@ impl RequestModel for RequestModelEmbeddings {
 /// The handler receives pre-processed metadata from middleware and forwards the request to
 /// the selected node.
 ///
-/// Note: Authentication, node selection, and initial request validation are handled by middleware
-/// before this handler is called.
-///
-/// # Arguments
-/// * `metadata` - Pre-processed request metadata containing node information and compute units
-/// * `state` - The shared proxy state containing configuration and runtime information
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - The JSON request body containing the model and input text
-///
 /// # Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
 /// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
-/// # Errors
+/// ## Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
@@ -213,20 +206,11 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
 /// The handler receives pre-processed metadata from middleware and forwards the request to
 /// the selected node.
 ///
-/// Note: Authentication, node selection, initial request validation and encryption
-/// are handled by middleware before this handler is called.
-///
-/// # Arguments
-/// * `metadata` - Pre-processed request metadata containing node information and compute units
-/// * `state` - The shared proxy state containing configuration and runtime information
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - The JSON request body containing the model and input text
-///
-/// # Returns
+/// ## Returns
 /// * `Ok(Response)` - The embeddings response from the processing node
 /// * `Err(AtomaProxyError)` - An error status code if any step fails
 ///
-/// # Errors
+/// ## Errors
 /// * `INTERNAL_SERVER_ERROR` - Processing or node communication failures
 #[utoipa::path(
     post,
@@ -236,7 +220,7 @@ pub(crate) struct ConfidentialEmbeddingsOpenApi;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Confidential embeddings generated successfully", body = ConfidentialComputeRequest),
+        (status = OK, description = "Confidential embeddings generated successfully", body = ConfidentialComputeResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -285,7 +269,7 @@ pub async fn confidential_embeddings_create(
                 &state.state_manager_sender,
                 metadata.selected_stack_small_id,
                 num_input_compute_units as i64,
-                total_tokens as i64,
+                total_tokens,
                 &metadata.endpoint,
             )?;
             Ok(Json(response).into_response())
@@ -361,14 +345,23 @@ async fn handle_embeddings_response(
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send embeddings request: {:?}", err),
             endpoint: endpoint.to_string(),
-        })?
-        .json::<Value>()
-        .await
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse embeddings response: {:?}", err),
-            endpoint: endpoint.to_string(),
         })?;
 
+    if !response.status().is_success() {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    let response =
+        response
+            .json::<Value>()
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to parse embeddings response: {:?}", err),
+                endpoint: endpoint.to_string(),
+            })?;
     let guard = state.sui.read().await;
     let keystore = guard.get_keystore();
     let proxy_signature = verify_and_sign_response(&response, keystore)?;
@@ -413,7 +406,6 @@ pub struct CreateEmbeddingRequest {
 
     /// Input text to get embeddings for. Can be a string or array of strings.
     /// Each input must not exceed the max input tokens for the model
-    #[serde(flatten)]
     pub input: EmbeddingInput,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
@@ -431,7 +423,6 @@ pub struct CreateEmbeddingRequest {
     pub dimensions: Option<u32>,
 }
 
-/// Input types for embeddings request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum EmbeddingInput {

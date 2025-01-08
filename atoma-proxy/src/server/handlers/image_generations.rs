@@ -12,7 +12,7 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
-use crate::server::types::ConfidentialComputeRequest;
+use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
 use super::request_model::RequestModel;
@@ -121,33 +121,15 @@ impl RequestModel for RequestModelImageGenerations {
     }
 }
 
-/// Create image generation
+/// Create image
 ///
 /// This endpoint processes requests to generate images using AI models by forwarding them
 /// to the appropriate AI node. The request metadata and compute units have already been
 /// validated by middleware before reaching this handler.
 ///
-/// # Arguments
-/// * `metadata` - Extension containing pre-processed request metadata (node address, compute units, etc.)
-/// * `state` - Application state containing configuration and shared resources
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - JSON payload containing image generation parameters
-///
-/// # Returns
-/// * `Result<Response<Body>>` - The processed response from the AI node or an error status
-///
-/// # Errors
+/// ## Errors
 /// * Returns various status codes based on the underlying `handle_image_generation_response`:
 ///   - `INTERNAL_SERVER_ERROR` - If there's an error communicating with the AI node
-///
-/// # Example Payload
-/// ```json
-/// {
-///     "model": "stable-diffusion-v1-5",
-///     "n": 1,
-///     "size": "1024x1024"
-/// }
-/// ```
 #[utoipa::path(
     post,
     path = "",
@@ -207,6 +189,12 @@ pub async fn image_generations_create(
 )]
 pub(crate) struct ConfidentialImageGenerationsOpenApi;
 
+/// Create confidential image
+///
+/// This handler processes image generation requests in a confidential manner, providing additional
+/// encryption and security measures for sensitive data processing. It supports both streaming and
+/// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
+/// for full private AI compute.
 #[utoipa::path(
     post,
     path = "",
@@ -215,7 +203,7 @@ pub(crate) struct ConfidentialImageGenerationsOpenApi;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Image generations", body = ConfidentialComputeRequest),
+        (status = OK, description = "Image generations", body = ConfidentialComputeResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -327,7 +315,16 @@ async fn handle_image_generation_response(
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send image generation request: {:?}", err),
             endpoint: endpoint.to_string(),
-        })?
+        })?;
+
+    if !response.status().is_success() {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
@@ -372,8 +369,9 @@ pub struct CreateImageRequest {
     /// The model to use for image generation.
     pub model: String,
 
-    /// The number of images to generate. Must be between 1 and 10.
-    pub n: u32,
+    /// The number of images to generate. Defaults to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
 
     /// The quality of the image that will be generated.
     /// `hd` creates images with finer details and greater consistency across the image.

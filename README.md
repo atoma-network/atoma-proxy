@@ -1,6 +1,6 @@
-# Atoma Proxy infrastructure
+# Atoma Proxy Infrastructure
 
-<img src="https://github.com/atoma-network/atoma-node/blob/update-read-me/atoma-assets/atoma-pfp.jpg" alt="Logo" height="500"/>
+<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
 
 [![Discord](https://img.shields.io/discord/1172593757586214964?label=Discord&logo=discord&logoColor=white)]
 [![Twitter](https://img.shields.io/twitter/follow/Atoma_Network?style=social)](https://x.com/Atoma_Network)
@@ -21,6 +21,23 @@ This repository contains the proxy infrastructure that helps coordinate and opti
 1. Help manage and distribute AI workloads efficiently across the network;
 2. Contribute to the network's reliability and performance;
 3. Support the development of a more resilient and scalable AI infrastructure.
+
+Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [atomacloud.com](https://atomacloud.com). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
+
+```bash
+curl -X POST https://api.atomacloud.com/v1/chat/completions \
+-H "Authorization: Bearer YOUR_API_KEY" \
+-H "Content-Type: application/json" \
+-d '{
+  "model": "meta-llama/Llama-3.3-70B-Instruct",
+  "messages": [{"role": "user", "content": "Tell me a joke"}],
+  "max_tokens": 4096,
+  "stream": true
+}'
+```
+
+You can further deploy your own Atoma Proxy locally to power your own AI services. Please refer to the [Deployment Guide](#deploying-an-atoma-proxy) section for more information.
+
 
 ### Community Links
 
@@ -72,26 +89,32 @@ TRACE_LEVEL=info
 http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"                              # Current RPC node address for testnet
 atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"         # Current ATOMA DB object ID for testnet
 atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0" # Current ATOMA package ID for testnet
-usdc_package_id = "0xe0b1d6458f349d4bc71ef119694866f1d6ee6915b43f8cc05a5d44a49e3e1f0f"  # Current USDC package ID for testnet
+usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"  # Current USDC package ID for testnet
 request_timeout = { secs = 300, nanos = 0 }                                             # Some reference value
 max_concurrent_requests = 10                                                            # Some reference value
 limit = 100                                                                             # Some reference value
-sui_config_path = "~/.sui/sui_config/client.yaml"                                       # Path to the Sui client configuration file, by default (on Linux, or MacOS)
-sui_keystore_path = "~/.sui/sui_config/sui.keystore"                                    # Path to the Sui keystore file, by default (on Linux, or MacOS)
+sui_config_path = "/root/.sui/sui_config/client.yaml"                                       # Path to the Sui client configuration file, by default (on Linux, or MacOS)
+sui_keystore_path = "/root/.sui/sui_config/sui.keystore"                                    # Path to the Sui keystore file, by default (on Linux, or MacOS)
 cursor_path = "./cursor.toml"
 
 [atoma_state]
-# URL of the PostgreSQL database, it SHOULD be the same as the `ATOMA_STATE_DATABASE_URL` variable value in the .env file
-database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
+# URL of the PostgreSQL database, the <POSTGRES_USER>, <POSTGRES_PASSWORD> and <POSTGRES_DB> variables values should be the exactly same as in the .env file
+database_url = "postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@db:5432/<POSTGRES_DB>"
 
 [atoma_service]
 service_bind_address = "0.0.0.0:8080" # Address to bind the service to
-models = [
-  "meta-llama/Llama-3.2-3B-Instruct",
-  "meta-llama/Llama-3.2-1B-Instruct",
-] # Models supported by proxy
-revisions = ["main", "main"] # Revision of the above models
-hf_token = "<YOUR_HF_TOKEN>" # Hugging face api token, required if you want to access a gated model
+password = "password" # Password for the service
+models = ["<MODEL_NAME>"] # Models supported by proxy (e.g. "meta-llama/Llama-3.3-70B-Instruct")
+revisions = ["<REVISION_NAME>"] # Revision of the above models (e.g. "main")
+hf_token = "<API_KEY>" # Hugging face api token, required if you want to access a gated model
+
+[atoma_proxy_service]
+service_bind_address = "0.0.0.0:8081"
+
+[atoma_auth]
+secret_key = "secret_key" # Secret key for the tokens generation
+access_token_lifetime = 1 # In minutes
+refresh_token_lifetime = 1 # In days
 ```
 
 4. Create required directories
@@ -104,10 +127,10 @@ mkdir -p data logs
 
 ```bash
 # Build and start all services
-docker compose up --build
+docker compose --profile local up --build
 
 # Or run in detached mode
-docker compose up -d --build
+docker compose --profile local up -d --build
 ```
 
 #### Container Architecture
@@ -119,7 +142,10 @@ The deployment consists of two main services:
 
 #### Service URLs
 
-- Atoma Proxy: `http://localhost:8080` (configured via ATOMA_PROXY_PORT)
+- Atoma Proxy: `http://localhost:8080` (configured via ATOMA_PROXY_PORT). This is the main service that you will use to interact with the Atoma Network, via an
+OpenAI-compatible API.
+- Atoma Proxy Service: `http://localhost:8081` (configured via ATOMA_SERVICE_PORT). You can use this URL to authenticate locally. If you plan to have a custom
+service (with custom domain), this service allows users to register, authenticate and get an API keys to the Atoma Proxy.
 
 #### Volume Mounts
 
@@ -141,7 +167,8 @@ View logs:
 docker compose logs
 
 # Specific service
-docker compose logs atoma-proxy
+docker compose logs atoma-proxy-cloud # Cloud
+docker compose logs atoma-proxy-local # Local
 
 # Follow logs
 docker compose logs -f
@@ -150,7 +177,8 @@ docker compose logs -f
 Stop services:
 
 ```bash
-docker compose down
+docker compose down --profile cloud # Cloud
+docker compose down --profile local # Local
 ```
 
 #### Troubleshooting

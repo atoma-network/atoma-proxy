@@ -511,6 +511,7 @@ impl AtomaState {
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
                 WHERE tasks.model_name = $1
                 AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND node_public_keys.is_valid = true
                 ORDER BY stacks.price_per_one_million_compute_units ASC
@@ -565,6 +566,7 @@ impl AtomaState {
                 WHERE stacks.stack_small_id = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
                 AND node_public_keys.is_valid = true
                 AND stacks.in_settle_period = false
             )"#,
@@ -1483,6 +1485,55 @@ impl AtomaState {
             .collect()
     }
 
+    /// Retrieves all stacks associated with a specific user ID.
+    ///
+    /// This method fetches all stack records from the `stacks` table that are associated
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user whose stacks should be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<Stack>>`: A result containing either:
+    ///  - `Ok(Vec<Stack>)`: A vector of `Stack` objects associated with the given user ID.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database rows into `Stack` objects.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, Stack};
+    ///
+    /// async fn get_user_stacks(state_manager: &AtomaStateManager, user_id: i64) -> Result<Vec<Stack>, AtomaStateManagerError> {
+    ///    state_manager.get_stacks_by_user_id(user_id).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%user_id)
+    )]
+    pub async fn get_stacks_by_user_id(&self, user_id: i64) -> Result<Vec<(Stack, DateTime<Utc>)>> {
+        let stacks = sqlx::query("SELECT * FROM stacks WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&self.db)
+            .await?;
+        stacks
+            .into_iter()
+            .map(|row| {
+                Stack::from_row(&row)
+                    .map_err(AtomaStateManagerError::from)
+                    .map(|stack| (stack, row.get("acquired_timestamp")))
+            })
+            .collect()
+    }
+
     /// Retrieves stacks that are almost filled beyond a specified fraction threshold.
     ///
     /// This method fetches all stacks from the database where:
@@ -1738,12 +1789,17 @@ impl AtomaState {
             selected_node_id = %stack.selected_node_id,
             num_compute_units = %stack.num_compute_units,
             price = %stack.price_per_one_million_compute_units)
-    )]
-    pub async fn insert_new_stack(&self, stack: Stack, user_id: i64) -> Result<()> {
+        )]
+    pub async fn insert_new_stack(
+        &self,
+        stack: Stack,
+        user_id: i64,
+        acquired_timestamp: DateTime<Utc>,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks 
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
@@ -1757,6 +1813,7 @@ impl AtomaState {
             .bind(stack.total_hash)
             .bind(stack.num_total_messages)
             .bind(user_id)
+            .bind(acquired_timestamp)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -3622,6 +3679,15 @@ impl AtomaState {
             .collect()
     }
 
+    pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
+        let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+
+        Ok(balance.get::<i64, _>("usdc_balance"))
+    }
+
     /// Get latency performance for the last `last_hours` hours.
     ///
     /// This method fetches the latency performance for the last `last_hours` hours from the `stats_latency` table.
@@ -4216,8 +4282,9 @@ mod tests {
                 in_settle_period,
                 total_hash,
                 num_total_messages,
-                user_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                user_id,
+                acquired_timestamp
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(stack_small_id)
         .bind("test_owner") // Default test owner
@@ -4231,6 +4298,7 @@ mod tests {
         .bind(vec![0u8; 32]) // Default total_hash (32 bytes of zeros)
         .bind(0i64) // Default num_total_messages
         .bind(user_id)
+        .bind(chrono::Utc::now()) // Acquired timestamp
         .execute(pool)
         .await?;
         Ok(())
@@ -4936,15 +5004,15 @@ mod tests {
             r#"
             INSERT INTO stacks (
                 stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
-                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
             )
             VALUES 
-                (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1),      -- Valid stack, confidential task
-                (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1),      -- Invalid node key
-                (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1),      -- Non-confidential task
-                (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1),    -- Not enough compute units
-                (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1),       -- In settle period
-                (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1)     -- Valid stack with partial usage
+                (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now()),      -- Valid stack, confidential task
+                (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1, now()),      -- Invalid node key
+                (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1, now()),      -- Non-confidential task
+                (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1, now()),    -- Not enough compute units
+                (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1, now()),       -- In settle period
+                (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1, now())     -- Valid stack with partial usage
             "#,
         )
         .execute(&state.db)
@@ -5020,9 +5088,9 @@ mod tests {
             r#"
             INSERT INTO stacks (
                 stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
-                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
             )
-            VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1)
+            VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now())
             "#,
         )
         .execute(&state.db)

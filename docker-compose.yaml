@@ -1,5 +1,74 @@
+# Base configurations that are common between environments
+x-atoma-proxy-base: &atoma-proxy-base
+  image: ghcr.io/atoma-network/atoma-proxy:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+     TRACE_LEVEL: ${TRACE_LEVEL:-info}
+  volumes:
+    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
+    - ./logs:/app/logs
+    - sui-config-volume:/root/.sui/sui_config
+    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
+  env_file:
+    - .env
+  depends_on:
+    - db
+  networks:
+    - atoma-network
+
 services:
+  traefik:
+    profiles: ["cloud"]
+    image: traefik:v2.9
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--log.level=INFO"
+      # EntryPoints
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      # Let's Encrypt (ACME) configuration
+      - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
+      - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
+      - "--certificatesResolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesResolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - atoma-network
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`traefik.atomacloud.com`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8090"
+
+  atoma-dashboard:
+    profiles: ["cloud"]
+    image: ghcr.io/atoma-network/atoma-dashboard:latest
+    container_name: atoma-dashboard
+    env_file:
+      - .env
+    networks:
+      - atoma-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`atomacloud.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
+      - "traefik.http.routers.dashboard.service=dashboard_service"
+      - "traefik.http.services.dashboard_service.loadbalancer.server.port=${DASHBOARD_PORT:-3000}"
+
   db:
+    profiles: ["local", "cloud"]
     image: postgres:13
     restart: always
     environment:
@@ -13,31 +82,35 @@ services:
     networks:
       - atoma-network
 
-  atoma-proxy:
-    image: ghcr.io/atoma-network/atoma-proxy:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-       TRACE_LEVEL: ${TRACE_LEVEL:-info}
-    volumes:
-      - ${CONFIG_PATH:-./config.toml}:/app/config.toml
-      - ./logs:/app/logs
-      - sui-config-volume:/root/.sui/sui_config
-      - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
-    env_file:
-      - .env
+  # Local proxy configuration
+  atoma-proxy-local:
+    profiles: ["local"]
+    <<: *atoma-proxy-base
     ports:
-      - "${ATOMA_SERVICE_PORT:-8080}:8080"  # Expose Atoma service port
-      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"  # Expose Atoma proxy service port
-    depends_on:
-      - db
-    networks:
-      - atoma-network
+      - "${ATOMA_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
+
+  # Cloud proxy configuration
+  atoma-proxy-cloud:
+    profiles: ["cloud"]
+    <<: *atoma-proxy-base
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.atomacloud.com`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.routers.api.service=api_service"
+      - "traefik.http.services.api_service.loadbalancer.server.port=${ATOMA_API_SERVICE_PORT:-8080}"
+      - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
+      - "traefik.http.routers.credentials.entrypoints=websecure"
+      - "traefik.http.routers.credentials.tls.certresolver=myresolver"
+      - "traefik.http.routers.credentials.service=credentials_service"
+      - "traefik.http.services.credentials_service.loadbalancer.server.port=${ATOMA_PROXY_SERVICE_PORT:-8081}"
 
 volumes:
   postgres-data:
   sui-config-volume:
+  letsencrypt:
 
 networks:
   atoma-network:

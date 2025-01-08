@@ -8,9 +8,10 @@ use axum::{
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
-use crate::ProxyServiceState;
+use crate::{ModelModality, ProxyServiceState};
 
 type Result<T> = std::result::Result<T, StatusCode>;
+type TasksWithModalities = Vec<(Task, Vec<ModelModality>)>;
 
 /// The path for the tasks endpoint.
 pub(crate) const TASKS_PATH: &str = "/tasks";
@@ -108,7 +109,7 @@ pub(crate) struct GetAllTasksOpenApi;
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn get_all_tasks(
     State(proxy_service_state): State<ProxyServiceState>,
-) -> Result<Json<Vec<Task>>> {
+) -> Result<Json<TasksWithModalities>> {
     let all_tasks = proxy_service_state
         .atoma_state
         .get_all_tasks()
@@ -117,5 +118,18 @@ pub(crate) async fn get_all_tasks(
             error!("Failed to get all tasks");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    Ok(Json(all_tasks))
+    Ok(Json(
+        all_tasks
+            .into_iter()
+            .map(|task| {
+                (
+                    task.clone(),
+                    task.model_name
+                        .and_then(|model| proxy_service_state.models_with_modalities.get(&model))
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect(),
+    ))
 }
