@@ -51,22 +51,6 @@ services:
       - "traefik.http.routers.traefik.tls.certresolver=myresolver"
       - "traefik.http.services.traefik.loadbalancer.server.port=8090"
 
-  atoma-dashboard:
-    profiles: ["cloud"]
-    image: ghcr.io/atoma-network/atoma-dashboard:latest
-    container_name: atoma-dashboard
-    env_file:
-      - .env
-    networks:
-      - atoma-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`atomacloud.com`)"
-      - "traefik.http.routers.dashboard.entrypoints=websecure"
-      - "traefik.http.routers.dashboard.tls.certresolver=myresolver"
-      - "traefik.http.routers.dashboard.service=dashboard_service"
-      - "traefik.http.services.dashboard_service.loadbalancer.server.port=${DASHBOARD_PORT:-3000}"
-
   db:
     profiles: ["local", "cloud"]
     image: postgres:13
