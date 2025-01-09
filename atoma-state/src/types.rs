@@ -77,6 +77,14 @@ pub struct ComputedUnitsProcessedResponse {
     pub time: f64,
 }
 
+/// Represents a user profile
+/// This struct is used to represent the response for the get_user_profile endpoint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct UserProfile {
+    /// Username of the user
+    pub username: String,
+}
+
 /// Represents a latency response
 /// This struct is used to represent the response for the get_latency endpoint.
 /// The timestamp of the latency measurement. We measure the latency on hourly basis. So the timestamp is the hour for which it is measured.
