@@ -25,7 +25,7 @@ This repository contains the proxy infrastructure that helps coordinate and opti
 Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [cloud.atoma.network](https://cloud.atoma.network). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
 
 ```bash
-curl -X POST https://api.atomacloud.com/v1/chat/completions \
+curl -X POST https://api.atoma.network/v1/chat/completions \
 -H "Authorization: Bearer YOUR_API_KEY" \
 -H "Content-Type: application/json" \
 -d '{
