@@ -393,6 +393,8 @@ paths:
           description: Failed to request node DH public key
         '503':
           description: No node found for model with confidential compute enabled for requested model
+      security:
+      - bearerAuth: []
 components:
   schemas:
     ChatCompletionChoice:

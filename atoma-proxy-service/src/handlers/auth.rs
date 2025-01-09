@@ -309,8 +309,11 @@ pub(crate) async fn login(
         .check_user_password(&body.username, &body.password)
         .await
         .map_err(|e| {
-            error!("Failed to register user: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            error!("Failed to login user: {:?}", e);
+            match e {
+                AuthError::PasswordNotValidOrUserNotFound => StatusCode::UNAUTHORIZED,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
         })?;
     Ok(Json(AuthResponse {
         access_token,
