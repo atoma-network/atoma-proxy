@@ -3310,6 +3310,7 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    #[instrument(level = "trace", skip(self))]
     pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
         sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
             .bind(node_small_id)
@@ -3708,6 +3709,7 @@ impl AtomaState {
     ///     state_manager.get_balance_for_user(user_id).await
     /// }
     /// ```
+    #[instrument(level = "trace", skip(self))]
     pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
         let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
             .bind(user_id)
@@ -3745,6 +3747,7 @@ impl AtomaState {
     ///     state_manager.get_user_profile(user_id).await
     /// }
     /// ```
+    #[instrument(level = "trace", skip_all)]
     pub async fn get_user_profile(&self, user_id: i64) -> Result<UserProfile> {
         let user = sqlx::query("SELECT username FROM users WHERE id = $1")
             .bind(user_id)

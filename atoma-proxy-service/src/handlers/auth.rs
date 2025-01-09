@@ -3,7 +3,7 @@ use atoma_state::types::{
 };
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
@@ -74,7 +74,7 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
 
 fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
     headers
-        .get("Authorization")
+        .get(header::AUTHORIZATION)
         .ok_or(StatusCode::UNAUTHORIZED)?
         .to_str()
         .map_err(|_| StatusCode::UNAUTHORIZED)?
