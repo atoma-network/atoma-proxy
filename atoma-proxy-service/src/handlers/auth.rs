@@ -1,3 +1,4 @@
+use atoma_auth::AuthError;
 use atoma_state::types::{
     AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest, UserProfile,
 };
@@ -260,7 +261,10 @@ pub(crate) async fn register(
         .await
         .map_err(|e| {
             error!("Failed to register user: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            match e {
+                AuthError::UserAlreadyRegistered => StatusCode::CONFLICT,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
         })?;
     Ok(Json(AuthResponse {
         access_token,

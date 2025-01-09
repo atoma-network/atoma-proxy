@@ -584,6 +584,7 @@ dependencies = [
  "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.39.1)",
  "sui-keys",
  "sui-sdk",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
