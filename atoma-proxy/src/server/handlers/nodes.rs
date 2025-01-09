@@ -60,7 +60,6 @@ pub struct NodePublicAddressAssignment {
 pub struct NodesCreateRequest {
     /// The data required to register a node's public address
     data: NodePublicAddressAssignment,
-
     /// The signature of the data base 64 encoded
     signature: String,
 }
