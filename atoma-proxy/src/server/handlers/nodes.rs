@@ -17,7 +17,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
-use crate::server::middleware::RequestMetadataExtension;
+use crate::server::middleware::{RequestMetadataExtension, STACK_SIZE_TO_BUY};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
