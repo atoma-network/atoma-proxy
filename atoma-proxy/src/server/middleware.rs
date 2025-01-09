@@ -476,10 +476,9 @@ pub(crate) mod auth {
     use tokio::sync::{oneshot, RwLock};
     use tracing::instrument;
 
-    use crate::server::Result;
-    use crate::server::ONE_MILLION;
     use crate::server::{
-        error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
+        check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
+        http_server::ProxyState, Result, ONE_MILLION,
     };
 
     use super::STACK_SIZE_TO_BUY;
