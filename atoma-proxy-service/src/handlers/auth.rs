@@ -1,9 +1,9 @@
 use atoma_state::types::{
-    AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest,
+    AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest, UserProfile,
 };
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
@@ -40,6 +40,9 @@ pub(crate) const GET_SUI_ADDRESS_PATH: &str = "/get_sui_address";
 /// The path for the balance endpoint.
 pub(crate) const GET_BALANCE_PATH: &str = "/balance";
 
+/// Get user profile endpoint
+pub(crate) const GET_USER_PROFILE_PATH: &str = "/user_profile";
+
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// OpenAPI documentation for the get_all_api_tokens endpoint.
@@ -66,6 +69,17 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(USDC_PAYMENT_PATH, post(usdc_payment))
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
         .route(GET_BALANCE_PATH, get(get_balance))
+        .route(GET_USER_PROFILE_PATH, get(get_user_profile))
+}
+
+fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)
 }
 
 /// Retrieves all API tokens for the user.
@@ -94,15 +108,7 @@ pub(crate) async fn get_all_api_tokens(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<String>>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
     Ok(Json(
         proxy_service_state
             .auth
@@ -151,15 +157,8 @@ pub(crate) async fn generate_api_token(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<String>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
     Ok(Json(
         proxy_service_state
             .auth
@@ -210,15 +209,8 @@ pub(crate) async fn revoke_api_token(
     headers: HeaderMap,
     body: Json<RevokeApiTokenRequest>,
 ) -> Result<Json<()>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
     proxy_service_state
         .auth
         .revoke_api_token(jwt, &body.api_token)
@@ -360,15 +352,8 @@ pub(crate) async fn update_sui_address(
     headers: HeaderMap,
     body: Json<ProofRequest>,
 ) -> Result<Json<()>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
     proxy_service_state
         .auth
         .update_sui_address(jwt, &body.signature)
@@ -418,15 +403,8 @@ pub(crate) async fn usdc_payment(
     headers: HeaderMap,
     body: Json<UsdcPaymentRequest>,
 ) -> Result<Json<()>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
     proxy_service_state
         .auth
         .usdc_payment(jwt, &body.transaction_digest)
@@ -474,15 +452,7 @@ pub(crate) async fn get_sui_address(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<Option<String>>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
     let sui_address = proxy_service_state
         .auth
@@ -531,15 +501,8 @@ pub(crate) async fn get_balance(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<i64>> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(StatusCode::UNAUTHORIZED)?
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let jwt = get_jwt_from_headers(&headers)?;
 
-    let jwt = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
     let user_id = proxy_service_state
         .auth
         .get_user_id_from_token(jwt)
@@ -555,6 +518,70 @@ pub(crate) async fn get_balance(
             .await
             .map_err(|e| {
                 error!("Failed to get balance: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
+}
+
+/// OpenAPI documentation for the get_user_profile endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_user_profile
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_user_profile))]
+pub(crate) struct GetUserProfile;
+
+/// Retrieves the user profile for the user.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+///
+/// # Returns
+///
+/// * `Result<Json<Value>>` - A JSON response containing the user profile
+///
+/// # Errors
+///
+/// * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+/// * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+#[utoipa::path(
+    get,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Retrieves the user profile for the user"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get user profile")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub(crate) async fn get_user_profile(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<UserProfile>> {
+    let jwt = get_jwt_from_headers(&headers)?;
+
+    let user_id = proxy_service_state
+        .auth
+        .get_user_id_from_token(jwt)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user ID from token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    Ok(Json(
+        proxy_service_state
+            .atoma_state
+            .get_user_profile(user_id)
+            .await
+            .map_err(|e| {
+                error!("Failed to get user profile: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
             })?,
     ))

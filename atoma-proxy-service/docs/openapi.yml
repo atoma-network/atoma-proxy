@@ -320,6 +320,35 @@ paths:
           description: Failed to get balance
       security:
       - bearerAuth: []
+  /user_profile:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the user profile for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the user profile
+
+        # Errors
+
+        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+      operationId: get_user_profile
+      responses:
+        '200':
+          description: Retrieves the user profile for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get user profile
+      security:
+      - bearerAuth: []
   /tasks:
     get:
       tags:
