@@ -8,7 +8,6 @@ use blake2::digest::consts::U32;
 use blake2::digest::generic_array::GenericArray;
 use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sui_sdk::types::base_types::SuiAddress;
 use sui_sdk::types::crypto::{PublicKey as SuiPublicKey, Signature, SuiSignature};
 use tokio::sync::oneshot;
