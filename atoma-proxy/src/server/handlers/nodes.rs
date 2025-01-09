@@ -307,7 +307,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    node.max_num_compute_units as u64,
+                    STACK_SIZE_TO_BUY as u64,
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
