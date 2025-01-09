@@ -39,9 +39,9 @@ pub fn openapi_routes() -> Router {
             (path = CONFIDENTIAL_IMAGE_GENERATIONS_PATH, api = ConfidentialImageGenerationsOpenApi, tags = ["Confidential Images"]),
             (path = EMBEDDINGS_PATH, api = EmbeddingsOpenApi, tags = ["Embeddings"]),
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
-            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
+            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]), 
             (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
-            (path = NODES_PATH, api = NodesOpenApi, tags = ["Node Public Address Registration"]),
+            (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
         tags(
             (name = "Chat", description = "OpenAI's API chat completions v1 endpoint"),
@@ -52,7 +52,7 @@ pub fn openapi_routes() -> Router {
             (name = "Health", description = "Health check"),
             (name = "Images", description = "OpenAI's API images v1 endpoint"),
             (name = "Models", description = "OpenAI's API models v1 endpoint"),
-            (name = "Node Public Address Registration", description = "Node public address registration"),
+            (name = "Nodes", description = "Nodes Management"),
             (name = "Node Public Key Selection", description = "Node public key selection")
         ),
         servers(
