@@ -32,16 +32,15 @@ use super::{
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
+/// The size of the stack to buy in compute units.
+pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
+
 /// Default image resolution for image generations, in pixels.
 const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 
 /// Maximum size of the body in bytes.
 /// This is to prevent DoS attacks by limiting the size of the request body.
 const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
-
-const ONE_MILLION: i64 = 1_000_000;
-
-pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
 
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
@@ -477,12 +476,11 @@ pub(crate) mod auth {
     use tokio::sync::{oneshot, RwLock};
     use tracing::instrument;
 
-    use crate::server::Result;
     use crate::server::{
-        error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
+        check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
+        http_server::ProxyState, Result, ONE_MILLION,
     };
 
-    use super::ONE_MILLION;
     use super::STACK_SIZE_TO_BUY;
 
     /// Represents the processed and validated request data after authentication and initial processing.
@@ -619,71 +617,6 @@ pub(crate) mod auth {
         })
     }
 
-    /// Checks the authentication of the request.
-    ///
-    /// This function checks the authentication of the request by comparing the
-    /// provided Bearer token from the `Authorization` header against the stored tokens.
-    ///
-    /// # Arguments
-    ///
-    /// * `state_manager_sender`: The sender for the state manager channel.
-    /// * `headers`: The headers of the request.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the authentication is successful, `false` otherwise.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `AtomaProxyError` error if there is an internal server error.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let is_authenticated = check_auth(
-    ///     &state_manager_sender,
-    ///     &headers
-    /// ).await?;
-    /// println!("Token is : {}", is_authenticated?"Valid":"Invalid");
-    /// ```
-    #[instrument(level = "info", skip_all)]
-    async fn check_auth(
-        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
-        headers: &HeaderMap,
-        endpoint: &str,
-    ) -> Result<i64> {
-        if let Some(auth) = headers.get("Authorization") {
-            if let Ok(auth) = auth.to_str() {
-                if let Some(token) = auth.strip_prefix("Bearer ") {
-                    let (sender, receiver) = oneshot::channel();
-                    state_manager_sender
-                        .send(AtomaAtomaStateManagerEvent::IsApiTokenValid {
-                            api_token: token.to_string(),
-                            result_sender: sender,
-                        })
-                        .map_err(|err| AtomaProxyError::InternalError {
-                            message: format!("Failed to send IsApiTokenValid event: {:?}", err),
-                            endpoint: endpoint.to_string(),
-                        })?;
-                    return receiver
-                        .await
-                        .map_err(|err| AtomaProxyError::InternalError {
-                            message: format!("Failed to receive IsApiTokenValid result: {:?}", err),
-                            endpoint: endpoint.to_string(),
-                        })?
-                        .map_err(|err| AtomaProxyError::InternalError {
-                            message: format!("Failed to get IsApiTokenValid result: {:?}", err),
-                            endpoint: endpoint.to_string(),
-                        });
-                }
-            }
-        }
-        Err(AtomaProxyError::AuthError {
-            auth_error: "Invalid or missing api token for request".to_string(),
-            endpoint: endpoint.to_string(),
-        })
-    }
-
     /// Metadata returned when selecting a node for processing a model request
     #[derive(Debug)]
     pub struct SelectedNodeMetadata {
@@ -815,7 +748,7 @@ pub(crate) mod auth {
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
                     amount: node.price_per_one_million_compute_units * STACK_SIZE_TO_BUY
-                        / ONE_MILLION,
+                        / ONE_MILLION as i64,
                     result_sender,
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
