@@ -10,7 +10,7 @@ use axum::{
 };
 
 use flume::Sender;
-use serde_json::{json, Value};
+use serde::Serialize;
 
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
@@ -19,7 +19,7 @@ use tower::ServiceBuilder;
 use tracing::instrument;
 
 pub use components::openapi::openapi_routes;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 
 use crate::server::{
     handlers::{
@@ -102,17 +102,25 @@ pub struct ProxyState {
 /// JSON response indicating the service status.
 pub(crate) struct HealthOpenApi;
 
+#[derive(Serialize, ToSchema)]
+pub struct HealthResponse {
+    /// The status of the service
+    message: String,
+}
+
 /// Health
 #[utoipa::path(
     get,
     path = "",
     responses(
-        (status = OK, description = "Service is healthy", body = Value),
+        (status = OK, description = "Service is healthy", body = HealthResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Service is unhealthy")
     )
 )]
-pub async fn health() -> Result<Json<Value>> {
-    Ok(Json(json!({ "status": "ok" })))
+pub async fn health() -> Result<Json<HealthResponse>> {
+    Ok(Json(HealthResponse {
+        message: "ok".to_string(),
+    }))
 }
 
 /// Creates a router with the appropriate routes and state for the atoma proxy service.
