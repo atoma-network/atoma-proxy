@@ -46,7 +46,7 @@ services:
     networks:
       - atoma-network
     labels:
-      - "traefik.http.routers.traefik.rule=Host(`traefik.atomacloud.com`)"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.atoma.network`)"
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=myresolver"
       - "traefik.http.services.traefik.loadbalancer.server.port=8090"
@@ -80,12 +80,12 @@ services:
     <<: *atoma-proxy-base
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.atomacloud.com`)"
+      - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.routers.api.service=api_service"
       - "traefik.http.services.api_service.loadbalancer.server.port=${ATOMA_API_SERVICE_PORT:-8080}"
-      - "traefik.http.routers.credentials.rule=Host(`credentials.atomacloud.com`)"
+      - "traefik.http.routers.credentials.rule=Host(`credentials.atoma.network`)"
       - "traefik.http.routers.credentials.entrypoints=websecure"
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
       - "traefik.http.routers.credentials.service=credentials_service"

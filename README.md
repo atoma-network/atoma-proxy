@@ -22,10 +22,10 @@ This repository contains the proxy infrastructure that helps coordinate and opti
 2. Contribute to the network's reliability and performance;
 3. Support the development of a more resilient and scalable AI infrastructure.
 
-Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [atomacloud.com](https://atomacloud.com). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
+Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [cloud.atoma.network](https://cloud.atoma.network). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
 
 ```bash
-curl -X POST https://api.atomacloud.com/v1/chat/completions \
+curl -X POST https://api.atoma.network/v1/chat/completions \
 -H "Authorization: Bearer YOUR_API_KEY" \
 -H "Content-Type: application/json" \
 -d '{
@@ -37,7 +37,6 @@ curl -X POST https://api.atomacloud.com/v1/chat/completions \
 ```
 
 You can further deploy your own Atoma Proxy locally to power your own AI services. Please refer to the [Deployment Guide](#deploying-an-atoma-proxy) section for more information.
-
 
 ### Community Links
 
@@ -143,9 +142,9 @@ The deployment consists of two main services:
 #### Service URLs
 
 - Atoma Proxy: `http://localhost:8080` (configured via ATOMA_PROXY_PORT). This is the main service that you will use to interact with the Atoma Network, via an
-OpenAI-compatible API.
+  OpenAI-compatible API.
 - Atoma Proxy Service: `http://localhost:8081` (configured via ATOMA_SERVICE_PORT). You can use this URL to authenticate locally. If you plan to have a custom
-service (with custom domain), this service allows users to register, authenticate and get an API keys to the Atoma Proxy.
+  service (with custom domain), this service allows users to register, authenticate and get an API keys to the Atoma Proxy.
 
 #### Volume Mounts
 
