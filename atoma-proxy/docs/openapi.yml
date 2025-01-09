@@ -317,7 +317,7 @@ paths:
   /v1/nodes:
     post:
       tags:
-      - Node Public Address Registration
+      - Nodes
       summary: Create node
       description: |-
         This endpoint allows nodes to register or update their public address in the system.
@@ -350,13 +350,14 @@ paths:
           description: Node public address registered successfully
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/NodesCreateResponse'
         '500':
           description: Failed to register node public address
   /v1/nodes/models/{model}:
     get:
       tags:
-      - Node Public Address Registration
+      - Nodes
       summary: Retrieve node for a given model
       description: |-
         This endpoint attempts to find a suitable node and retrieve its public key for encryption
@@ -1008,6 +1009,14 @@ components:
         signature:
           type: string
           description: The signature of the data base 64 encoded
+    NodesCreateResponse:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          type: string
+          description: The message of the response
     NodesModelsRetrieveResponse:
       type: object
       description: |-
@@ -1091,8 +1100,8 @@ tags:
   description: OpenAI's API images v1 endpoint
 - name: Models
   description: OpenAI's API models v1 endpoint
-- name: Node Public Address Registration
-  description: Node public address registration
+- name: Nodes
+  description: Nodes Management
 - name: Node Public Key Selection
   description: Node public key selection
 x-speakeasy-name-override:

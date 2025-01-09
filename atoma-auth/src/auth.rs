@@ -1,7 +1,6 @@
 use std::{str::FromStr, sync::Arc};
 
-use anyhow::Result;
-use atoma_state::types::AtomaAtomaStateManagerEvent;
+use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
 use atoma_utils::hashing::blake2b_hash;
 use blake2::{
     digest::{consts::U32, generic_array::GenericArray},
@@ -10,6 +9,7 @@ use blake2::{
 use chrono::{Duration, Utc};
 use fastcrypto::{
     ed25519::{Ed25519PublicKey, Ed25519Signature},
+    error::FastCryptoError,
     secp256k1::{Secp256k1PublicKey, Secp256k1Signature},
     secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
     traits::{ToFromBytes, VerifyingKey},
@@ -25,6 +25,7 @@ use sui_sdk::types::{
     object::Owner,
     TypeTag,
 };
+use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
 
@@ -44,6 +45,49 @@ pub struct Claims {
     refresh_token_hash: Option<String>,
 }
 
+#[derive(Error, Debug)]
+pub enum AuthError {
+    #[error("Json Web Token error: {0}")]
+    JsonWebTokenError(#[from] jsonwebtoken::errors::Error),
+    #[error("Flume error: {0}")]
+    FlumeError(#[from] flume::SendError<AtomaAtomaStateManagerEvent>),
+    #[error("Token is not refresh token")]
+    NotRefreshToken,
+    #[error("Error: {0}")]
+    OneShotReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
+    #[error("AtomaStateManagerError: {0}")]
+    AtomaStateManagerError(#[from] AtomaStateManagerError),
+    #[error("Refresh token is not valid")]
+    InvalidRefreshToken,
+    #[error("User already registered")]
+    UserAlreadyRegistered,
+    #[error("Password not valid or user not found")]
+    PasswordNotValidOrUserNotFound,
+    #[error("Revoked token")]
+    RevokedToken,
+    #[error("Failed to parse signature: {0}")]
+    FailedToParseSignature(String),
+    #[error("Error: {0}")]
+    BcsError(#[from] bcs::Error),
+    #[error("Error: {0}")]
+    FastCryptoError(#[from] FastCryptoError),
+    #[error("Unsupported signature scheme {0}")]
+    UnsupportedSignatureScheme(SignatureScheme),
+    #[error("Error: {0}")]
+    SuiError(anyhow::Error),
+    #[error("No balance changes found")]
+    NoBalanceChangesFound,
+    #[error("Multiple senders")]
+    MultipleSenders,
+    #[error("Multiple receivers")]
+    MultipleReceivers,
+    #[error("Sender or receiver not found")]
+    SenderOrReceiverNotFound,
+    #[error("The payment is not for this user")]
+    PaymentNotForThisUser,
+}
+
+type Result<T> = std::result::Result<T, AuthError>;
 /// The Auth struct
 #[derive(Clone)]
 pub struct Auth {
@@ -134,7 +178,7 @@ impl Auth {
 
         let claims = token_data.claims;
         if claims.refresh_token_hash.is_none() != is_refresh {
-            Err(anyhow::anyhow!("Invalid token type"))
+            Err(AuthError::NotRefreshToken)
         } else {
             Ok(claims)
         }
@@ -185,7 +229,7 @@ impl Auth {
             .check_refresh_token_validity(claims.user_id, &refresh_token_hash)
             .await?
         {
-            return Err(anyhow::anyhow!("Refresh token is not valid"));
+            return Err(AuthError::InvalidRefreshToken);
         }
         let expiration = Utc::now() + Duration::days(self.access_token_lifetime as i64);
 
@@ -235,7 +279,7 @@ impl Auth {
         let user_id = result_receiver
             .await??
             .map(|user_id| user_id as u64)
-            .ok_or_else(|| anyhow::anyhow!("User already registred"))?;
+            .ok_or_else(|| AuthError::UserAlreadyRegistered)?;
         let refresh_token = self.generate_refresh_token(user_id as i64).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
@@ -262,7 +306,7 @@ impl Auth {
         let user_id = result_receiver
             .await??
             .map(|user_id| user_id as u64)
-            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+            .ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
         let refresh_token = self.generate_refresh_token(user_id as i64).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
@@ -365,7 +409,7 @@ impl Auth {
             )
             .await?
         {
-            return Err(anyhow::anyhow!("Access token was revoked"));
+            return Err(AuthError::RevokedToken);
         }
         Ok(claims)
     }
@@ -401,7 +445,7 @@ impl Auth {
         let claims = self.validate_token(jwt, false)?;
         let signature = Signature::from_str(signature).map_err(|e| {
             error!("Failed to parse signature: {}", e);
-            anyhow::anyhow!("Failed to parse signature {e}")
+            AuthError::FailedToParseSignature(signature.to_string())
         })?;
         let signature_bytes = signature.signature_bytes();
         let public_key_bytes = signature.public_key_bytes();
@@ -437,9 +481,9 @@ impl Auth {
                 let signature = Secp256r1Signature::from_bytes(signature_bytes)?;
                 public_key.verify(message_hash.as_slice(), &signature)?;
             }
-            _ => {
-                error!("Currently unsupported signature scheme");
-                return Err(anyhow::anyhow!("Currently unsupported signature scheme"));
+            schema => {
+                error!("Currently unsupported signature scheme {schema}");
+                return Err(AuthError::UnsupportedSignatureScheme(schema));
             }
         }
         let public_key = PublicKey::try_from_bytes(signature_scheme, public_key_bytes).unwrap();
@@ -487,9 +531,9 @@ impl Auth {
             .read()
             .await
             .get_balance_changes(transaction_digest)
-            .await?;
-        let balance_changes =
-            balance_changes.ok_or_else(|| anyhow::anyhow!("No balance changes found"))?;
+            .await
+            .map_err(AuthError::SuiError)?;
+        let balance_changes = balance_changes.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
         let mut receiver = None;
         let mut money_in = None;
@@ -498,14 +542,14 @@ impl Auth {
                 if tag.address.to_hex() == self.sui.read().await.usdc_package_id.to_hex() {
                     if balance_change.amount < 0 {
                         if sender.is_some() {
-                            return Err(anyhow::anyhow!("Multiple senders"));
+                            return Err(AuthError::MultipleSenders);
                         }
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
                             sender = Some(*owner);
                         }
                     } else {
                         if receiver.is_some() {
-                            return Err(anyhow::anyhow!("Multiple receivers"));
+                            return Err(AuthError::MultipleReceivers);
                         }
                         money_in = Some(balance_change.amount);
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
@@ -516,11 +560,16 @@ impl Auth {
             }
         }
         if sender.is_none() || receiver.is_none() {
-            return Err(anyhow::anyhow!("No sender or receiver found"));
+            return Err(AuthError::SenderOrReceiverNotFound);
         }
         let sender = sender.unwrap();
         let receiver = receiver.unwrap();
-        let own_address = self.sui.write().await.get_wallet_address()?;
+        let own_address = self
+            .sui
+            .write()
+            .await
+            .get_wallet_address()
+            .map_err(AuthError::SuiError)?;
         if receiver == own_address {
             let (result_sender, result_receiver) = oneshot::channel();
             self.state_manager_sender
@@ -532,7 +581,7 @@ impl Auth {
             let is_their_wallet = result_receiver.await??;
 
             if !is_their_wallet {
-                return Err(anyhow::anyhow!("The payment is not for this user"));
+                return Err(AuthError::PaymentNotForThisUser);
             }
             // We are the receiver and we know the sender
             self.state_manager_sender

@@ -9,10 +9,10 @@ use crate::{
     handlers::{
         auth::{
             GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSuiAddress,
-            LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress, UsdcPayment,
-            GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH,
-            GET_SUI_ADDRESS_PATH, LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH,
-            UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
+            GetUserProfile, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress,
+            UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH,
+            GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH, LOGIN_PATH, REGISTER_PATH,
+            REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
@@ -46,6 +46,7 @@ pub fn openapi_router() -> Router {
             (path = GET_CURRENT_STACKS_PATH, api = GetCurrentStacksOpenApi, tags = ["Stacks"]),
             (path = GET_ALL_STACKS_FOR_USER_PATH, api = GetStacksByUserId, tags = ["Stacks"]),
             (path = GET_BALANCE_PATH, api = GetBalance, tags = ["Auth"]),
+            (path = GET_USER_PROFILE_PATH, api = GetUserProfile, tags = ["Auth"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),
             (path = LATENCY_PATH, api = GetLatency, tags = ["Stats"]),

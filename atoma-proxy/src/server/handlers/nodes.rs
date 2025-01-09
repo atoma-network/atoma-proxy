@@ -8,7 +8,6 @@ use blake2::digest::consts::U32;
 use blake2::digest::generic_array::GenericArray;
 use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sui_sdk::types::base_types::SuiAddress;
 use sui_sdk::types::crypto::{PublicKey as SuiPublicKey, Signature, SuiSignature};
 use tokio::sync::oneshot;
@@ -17,7 +16,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
-use crate::server::{check_auth, ONE_MILLION};
+use crate::server::{check_auth, middleware::STACK_SIZE_TO_BUY, ONE_MILLION};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
@@ -64,6 +63,12 @@ pub struct NodesCreateRequest {
     signature: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct NodesCreateResponse {
+    /// The message of the response
+    message: String,
+}
+
 /// Create node
 ///
 /// This endpoint allows nodes to register or update their public address in the system.
@@ -88,7 +93,7 @@ pub struct NodesCreateRequest {
     post,
     path = "",
     responses(
-        (status = OK, description = "Node public address registered successfully", body = Value),
+        (status = OK, description = "Node public address registered successfully", body = NodesCreateResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to register node public address")
     )
 )]
@@ -96,7 +101,7 @@ pub struct NodesCreateRequest {
 pub async fn nodes_create(
     State(state): State<ProxyState>,
     Json(payload): Json<NodesCreateRequest>,
-) -> Result<Json<Value>, AtomaProxyError> {
+) -> Result<Json<NodesCreateResponse>, AtomaProxyError> {
     let base64_signature = &payload.signature;
     let body_bytes =
         serde_json::to_vec(&payload.data).map_err(|e| AtomaProxyError::InvalidBody {
@@ -185,7 +190,9 @@ pub async fn nodes_create(
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
-    Ok(Json(Value::Null))
+    Ok(Json(NodesCreateResponse {
+        message: "Success".to_string(),
+    }))
 }
 
 /// The response body for selecting a node's public key for encryption
@@ -346,7 +353,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    max_num_compute_units as u64,
+                    STACK_SIZE_TO_BUY as u64,
                     price_per_one_million_compute_units as u64,
                 )
                 .await

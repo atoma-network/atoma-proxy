@@ -3,7 +3,7 @@ use crate::handlers::{handle_atoma_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
     NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task,
+    StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
 use atoma_sui::events::AtomaEvent;
@@ -3310,6 +3310,7 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    #[instrument(level = "trace", skip(self))]
     pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
         sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
             .bind(node_small_id)
@@ -3679,6 +3680,36 @@ impl AtomaState {
             .collect()
     }
 
+    /// Get balance for a user.
+    ///
+    /// This method fetches the balance for a user from the `balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<i64>`: A result containing either:
+    ///   - `Ok(i64)`: The balance for the user.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_balance(state_manager: &AtomaStateManager, user_id: i64) -> Result<i64, AtomaStateManagerError> {
+    ///     state_manager.get_balance_for_user(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
     pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
         let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
             .bind(user_id)
@@ -3686,6 +3717,44 @@ impl AtomaState {
             .await?;
 
         Ok(balance.get::<i64, _>("usdc_balance"))
+    }
+
+    /// Get the user profile by user_id.
+    ///
+    /// This method fetches the user profile by user_id from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<UserProfile>`: A result containing either:
+    ///   - `Ok(UserProfile)`: The user profile for the user_id.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_profile(state_manager: &AtomaStateManager, user_id: i64) -> Result<UserProfile, AtomaStateManagerError> {
+    ///     state_manager.get_user_profile(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_user_profile(&self, user_id: i64) -> Result<UserProfile> {
+        let user = sqlx::query("SELECT username FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+
+        UserProfile::from_row(&user).map_err(AtomaStateManagerError::from)
     }
 
     /// Get latency performance for the last `last_hours` hours.
