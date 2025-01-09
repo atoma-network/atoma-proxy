@@ -32,6 +32,9 @@ use super::{
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
+/// The size of the stack to buy in compute units.
+pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
+
 /// Default image resolution for image generations, in pixels.
 const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 
@@ -479,6 +482,8 @@ pub(crate) mod auth {
         error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
     };
 
+    use super::STACK_SIZE_TO_BUY;
+
     /// Represents the processed and validated request data after authentication and initial processing.
     ///
     /// This struct contains all the necessary information needed to forward a request to an inference node,
@@ -743,7 +748,7 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
-                    amount: node.price_per_one_million_compute_units * node.max_num_compute_units
+                    amount: node.price_per_one_million_compute_units * STACK_SIZE_TO_BUY
                         / ONE_MILLION as i64,
                     result_sender,
                 })
@@ -771,7 +776,7 @@ pub(crate) mod auth {
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    node.max_num_compute_units as u64,
+                    STACK_SIZE_TO_BUY as u64,
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
