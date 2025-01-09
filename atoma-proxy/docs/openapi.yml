@@ -343,7 +343,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/NodePublicAddressAssignment'
+              $ref: '#/components/schemas/NodesCreateRequest'
         required: true
       responses:
         '200':
@@ -995,6 +995,19 @@ components:
         public_address:
           type: string
           description: The public address of the node
+    NodesCreateRequest:
+      type: object
+      description: Represents the payload for the node public address registration request.
+      required:
+      - data
+      - signature
+      properties:
+        data:
+          $ref: '#/components/schemas/NodePublicAddressAssignment'
+          description: The data required to register a node's public address
+        signature:
+          type: string
+          description: The signature of the data base 64 encoded
     NodesModelsRetrieveResponse:
       type: object
       description: |-

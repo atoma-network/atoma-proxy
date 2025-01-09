@@ -36,24 +36,6 @@ pub struct ErrorDetails {
 /// tokens that were processed before the error occurred.
 #[derive(Debug, Error)]
 pub enum AtomaProxyError {
-    /// Error returned when a required HTTP header is missing from the request
-    #[error("Missing required header: {header}")]
-    MissingHeader {
-        /// The name of the missing header
-        header: String,
-        /// The endpoint that the error occurred on
-        endpoint: String,
-    },
-
-    /// Error returned when an HTTP header contains an invalid value
-    #[error("Invalid header value: {message}")]
-    InvalidHeader {
-        /// Description of why the header value is invalid
-        message: String,
-        /// The endpoint that the error occurred on
-        endpoint: String,
-    },
-
     /// Error returned when the request body is malformed or contains invalid data
     #[error("Invalid request body: {message}")]
     InvalidBody {
@@ -127,8 +109,6 @@ impl AtomaProxyError {
     /// - `"INTERNAL_ERROR"` for unexpected server errors
     fn error_code(&self) -> &'static str {
         match self {
-            Self::MissingHeader { .. } => "MISSING_HEADER",
-            Self::InvalidHeader { .. } => "INVALID_HEADER",
             Self::InvalidBody { .. } => "INVALID_BODY",
             Self::AuthError { .. } => "AUTH_ERROR",
             Self::InternalError { .. } => "INTERNAL_ERROR",
@@ -155,8 +135,6 @@ impl AtomaProxyError {
     /// - For internal errors: A generic server error message
     fn client_message(&self) -> String {
         match self {
-            Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
-            Self::InvalidHeader { .. } => "Invalid header value provided".to_string(),
             Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
             Self::AuthError { .. } => "Authentication failed".to_string(),
             Self::InternalError { .. } => "Internal server error occurred".to_string(),
@@ -178,9 +156,7 @@ impl AtomaProxyError {
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::MissingHeader { .. } | Self::InvalidHeader { .. } | Self::InvalidBody { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidBody { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
@@ -199,8 +175,6 @@ impl AtomaProxyError {
     /// A `String` containing the API endpoint path where the error was encountered.
     fn endpoint(&self) -> String {
         match self {
-            Self::MissingHeader { endpoint, .. } => endpoint.clone(),
-            Self::InvalidHeader { endpoint, .. } => endpoint.clone(),
             Self::InvalidBody { endpoint, .. } => endpoint.clone(),
             Self::AuthError { endpoint, .. } => endpoint.clone(),
             Self::InternalError { endpoint, .. } => endpoint.clone(),
@@ -227,8 +201,6 @@ impl AtomaProxyError {
     /// - For internal errors: The detailed internal error message
     fn message(&self) -> String {
         match self {
-            Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
-            Self::InvalidHeader { message, .. } => format!("Invalid header value: {}", message),
             Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
             Self::AuthError { auth_error, .. } => format!("Authentication error: {}", auth_error),
             Self::InternalError { message, .. } => format!("Internal server error: {}", message),

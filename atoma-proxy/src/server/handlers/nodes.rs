@@ -1,9 +1,7 @@
 use std::str::FromStr;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::constants::SIGNATURE;
 use atoma_utils::verify_signature;
-use axum::http::HeaderMap;
 use axum::Extension;
 use axum::{extract::State, Json};
 use blake2::digest::consts::U32;
@@ -57,6 +55,16 @@ pub struct NodePublicAddressAssignment {
     country: String,
 }
 
+/// Represents the payload for the node public address registration request.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct NodesCreateRequest {
+    /// The data required to register a node's public address
+    data: NodePublicAddressAssignment,
+
+    /// The signature of the data base 64 encoded
+    signature: String,
+}
+
 /// Create node
 ///
 /// This endpoint allows nodes to register or update their public address in the system.
@@ -88,25 +96,14 @@ pub struct NodePublicAddressAssignment {
 #[instrument(level = "info", skip_all)]
 pub async fn nodes_create(
     State(state): State<ProxyState>,
-    headers: HeaderMap,
-    Json(payload): Json<NodePublicAddressAssignment>,
+    Json(payload): Json<NodesCreateRequest>,
 ) -> Result<Json<Value>, AtomaProxyError> {
-    let base64_signature = headers
-        .get(SIGNATURE)
-        .ok_or_else(|| AtomaProxyError::MissingHeader {
-            header: SIGNATURE.to_string(),
-            endpoint: NODES_CREATE_PATH.to_string(),
-        })?
-        .to_str()
-        .map_err(|e| AtomaProxyError::InvalidHeader {
-            message: format!("Failed to extract base64 signature encoding, with error: {e}"),
+    let base64_signature = &payload.signature;
+    let body_bytes =
+        serde_json::to_vec(&payload.data).map_err(|e| AtomaProxyError::InvalidBody {
+            message: format!("Failed to serialize payload to bytes, with error: {e}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
-
-    let body_bytes = serde_json::to_vec(&payload).map_err(|e| AtomaProxyError::InvalidBody {
-        message: format!("Failed to serialize payload to bytes, with error: {e}"),
-        endpoint: NODES_CREATE_PATH.to_string(),
-    })?;
 
     let signature =
         Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::InvalidBody {
@@ -146,7 +143,7 @@ pub async fn nodes_create(
     state
         .state_manager_sender
         .send(AtomaAtomaStateManagerEvent::GetNodeSuiAddress {
-            node_small_id: payload.node_small_id as i64,
+            node_small_id: payload.data.node_small_id as i64,
             result_sender,
         })
         .map_err(|err| AtomaProxyError::InternalError {
@@ -180,9 +177,9 @@ pub async fn nodes_create(
     state
         .state_manager_sender
         .send(AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {
-            node_small_id: payload.node_small_id as i64,
-            public_address: payload.public_address.clone(),
-            country: payload.country.clone(),
+            node_small_id: payload.data.node_small_id as i64,
+            public_address: payload.data.public_address.clone(),
+            country: payload.data.country.clone(),
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send UpsertNodePublicAddress event: {:?}", err),
