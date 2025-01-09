@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::verify_signature;
-use axum::Extension;
+use axum::http::HeaderMap;
 use axum::{extract::State, Json};
 use blake2::digest::consts::U32;
 use blake2::digest::generic_array::GenericArray;
@@ -17,7 +17,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
-use crate::server::middleware::RequestMetadataExtension;
+use crate::server::{check_auth, ONE_MILLION};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
@@ -225,6 +225,9 @@ pub struct NodesModelsRetrieveResponse {
 #[utoipa::path(
     get,
     path = "/models/{model}",
+    security(
+        ("bearerAuth"= [])
+    ),
     params(
         ("model" = String, Path, description = "The name of the model to retrieve")
     ),
@@ -237,11 +240,11 @@ pub struct NodesModelsRetrieveResponse {
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = metadata.endpoint)
+    fields(endpoint = NODES_MODELS_RETRIEVE_PATH)
 )]
 pub(crate) async fn nodes_models_retrieve(
     State(state): State<ProxyState>,
-    Extension(metadata): Extension<RequestMetadataExtension>,
+    headers: HeaderMap,
     model: axum::extract::Path<String>,
 ) -> Result<Json<NodesModelsRetrieveResponse>, AtomaProxyError> {
     let (sender, receiver) = oneshot::channel();
@@ -256,11 +259,11 @@ pub(crate) async fn nodes_models_retrieve(
         )
         .map_err(|_| AtomaProxyError::InternalError {
             message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
-            endpoint: metadata.endpoint.clone(),
+            endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
         })?;
     let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to receive node public key: {}", e),
-        endpoint: metadata.endpoint.clone(),
+        endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
     })?;
 
     if let Some(node_public_key) = node_public_key {
@@ -269,7 +272,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .stack_small_id
                 .ok_or_else(|| AtomaProxyError::InternalError {
                     message: "Stack small id not found for node public key".to_string(),
-                    endpoint: metadata.endpoint.clone(),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
                 })?;
         Ok(Json(NodesModelsRetrieveResponse {
             public_key: node_public_key.public_key,
@@ -278,6 +281,14 @@ pub(crate) async fn nodes_models_retrieve(
             stack_small_id: stack_small_id as u64,
         }))
     } else {
+        // NOTE: We need to check the user's balance before acquiring a new stack entry.
+        // If this is not the case, we actually do not need authentication from the user.
+        let user_id = check_auth(
+            &state.state_manager_sender,
+            &headers,
+            NODES_MODELS_RETRIEVE_PATH,
+        )
+        .await?;
         let (sender, receiver) = oneshot::channel();
         state
             .state_manager_sender
@@ -288,32 +299,60 @@ pub(crate) async fn nodes_models_retrieve(
             })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetCheapestNodeForModel event: {:?}", e),
-                endpoint: metadata.endpoint.clone(),
+                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })?;
         let node = receiver
             .await
             .map_err(|_| AtomaProxyError::InternalError {
                 message: "Failed to receive GetCheapestNodeForModel result".to_string(),
-                endpoint: metadata.endpoint.clone(),
+                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })?
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetCheapestNodeForModel result: {:?}", e),
-                endpoint: metadata.endpoint.clone(),
+                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })?;
         if let Some(node) = node {
+            let price_per_one_million_compute_units = node.price_per_one_million_compute_units;
+            let max_num_compute_units = node.max_num_compute_units;
+            // NOTE: We need to deduct the cost of the stack entry from the user's balance, first.
+            // This will fail if the balance is not enough.
+            let (result_sender, result_receiver) = oneshot::channel();
+            state
+                .state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
+                    user_id,
+                    amount: price_per_one_million_compute_units * max_num_compute_units
+                        / (ONE_MILLION as i64),
+                    result_sender,
+                })
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to send DeductFromUsdc event: {:?}", err),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                })?;
+            result_receiver
+                .await
+                .map_err(|e| AtomaProxyError::InternalError {
+                    message: format!("Failed to receive DeductFromUsdc result: {:?}", e),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                })?
+                .map_err(|e| AtomaProxyError::InternalError {
+                    message: format!("Failed to deduct from usdc: {:?}", e),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                })?;
+
             let stack_entry_resp = state
                 .sui
                 .write()
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    node.max_num_compute_units as u64,
-                    node.price_per_one_million_compute_units as u64,
+                    max_num_compute_units as u64,
+                    price_per_one_million_compute_units as u64,
                 )
                 .await
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {:?}", e),
-                    endpoint: metadata.endpoint.clone(),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
                 })?;
             // NOTE: The contract might select a different node than the one we used to extract
             // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
@@ -335,14 +374,14 @@ pub(crate) async fn nodes_models_retrieve(
                         "Failed to send GetNodePublicKeyForEncryption event: {:?}",
                         e
                     ),
-                    endpoint: metadata.endpoint.clone(),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
                 })?;
             let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
                 message: format!(
                     "Failed to receive GetNodePublicKeyForEncryption result: {:?}",
                     e
                 ),
-                endpoint: metadata.endpoint.clone(),
+                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })?;
             if let Some(node_public_key) = node_public_key {
                 Ok(Json(NodesModelsRetrieveResponse {
@@ -354,7 +393,7 @@ pub(crate) async fn nodes_models_retrieve(
             } else {
                 Err(AtomaProxyError::InternalError {
                     message: format!("No node public key found for node {}", node.node_small_id),
-                    endpoint: metadata.endpoint.clone(),
+                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
                 })
             }
         } else {
@@ -363,7 +402,7 @@ pub(crate) async fn nodes_models_retrieve(
                     "No node found for model {} with confidential compute enabled",
                     model.clone()
                 ),
-                endpoint: metadata.endpoint.clone(),
+                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })
         }
     }
