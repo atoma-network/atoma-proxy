@@ -9,8 +9,8 @@ pub mod chat_completions;
 pub mod embeddings;
 pub mod image_generations;
 pub mod models;
+pub mod nodes;
 pub mod request_model;
-pub mod select_node_public_key;
 
 pub(crate) const RESPONSE_HASH_KEY: &str = "response_hash";
 
