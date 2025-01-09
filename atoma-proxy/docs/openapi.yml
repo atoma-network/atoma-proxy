@@ -339,6 +339,12 @@ paths:
           - The registration event cannot be sent
           - Node Sui address lookup fails
       operationId: nodes_create
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodePublicAddressAssignment'
+        required: true
       responses:
         '200':
           description: Node public address registered successfully
@@ -967,6 +973,28 @@ components:
         object:
           type: string
           description: The object type, which is always "list"
+    NodePublicAddressAssignment:
+      type: object
+      description: |-
+        Represents the payload for the node public address registration request.
+
+        This struct represents the payload for the node public address registration request.
+      required:
+      - node_small_id
+      - public_address
+      - country
+      properties:
+        country:
+          type: string
+          description: The country of the node
+        node_small_id:
+          type: integer
+          format: int64
+          description: Unique small integer identifier for the node
+          minimum: 0
+        public_address:
+          type: string
+          description: The public address of the node
     NodesModelsRetrieveResponse:
       type: object
       description: |-

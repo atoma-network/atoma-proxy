@@ -3,8 +3,6 @@ use std::str::FromStr;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants::SIGNATURE;
 use atoma_utils::verify_signature;
-use axum::body::Body;
-use axum::extract::Request;
 use axum::http::HeaderMap;
 use axum::Extension;
 use axum::{extract::State, Json};
@@ -30,9 +28,6 @@ pub const NODES_MODELS_RETRIEVE_PATH: &str = "/v1/nodes/models/:model";
 /// Size of the blake2b hash in bytes
 const BODY_HASH_SIZE: usize = 32;
 
-/// Body size limit for signature verification (contains the body size of the request)
-const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
-
 /// The maximum number of tokens to be processed for confidential compute.
 /// Since requests are encrypted, the proxy is not able to determine the number of tokens
 /// in the request. We set a default value here to be used for node selection, as a upper
@@ -48,6 +43,19 @@ pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
 /// registration endpoint. It uses the `utoipa` crate's derive macro to automatically
 /// generate the OpenAPI specification from the code.
 pub(crate) struct NodesOpenApi;
+
+/// Represents the payload for the node public address registration request.
+///
+/// This struct represents the payload for the node public address registration request.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct NodePublicAddressAssignment {
+    /// Unique small integer identifier for the node
+    node_small_id: u64,
+    /// The public address of the node
+    public_address: String,
+    /// The country of the node
+    country: String,
+}
 
 /// Create node
 ///
@@ -81,7 +89,7 @@ pub(crate) struct NodesOpenApi;
 pub async fn nodes_create(
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    request: Request<Body>,
+    Json(payload): Json<NodePublicAddressAssignment>,
 ) -> Result<Json<Value>, AtomaProxyError> {
     let base64_signature = headers
         .get(SIGNATURE)
@@ -95,12 +103,10 @@ pub async fn nodes_create(
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
-    let body_bytes = axum::body::to_bytes(request.into_body(), MAX_BODY_SIZE)
-        .await
-        .map_err(|_| AtomaProxyError::InvalidBody {
-            message: "Failed to convert body to bytes".to_string(),
-            endpoint: NODES_CREATE_PATH.to_string(),
-        })?;
+    let body_bytes = serde_json::to_vec(&payload).map_err(|e| AtomaProxyError::InvalidBody {
+        message: format!("Failed to serialize payload to bytes, with error: {e}"),
+        endpoint: NODES_CREATE_PATH.to_string(),
+    })?;
 
     let signature =
         Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::InvalidBody {
@@ -134,14 +140,6 @@ pub async fn nodes_create(
             endpoint: NODES_CREATE_PATH.to_string(),
         }
     })?;
-
-    let payload =
-        serde_json::from_slice::<NodePublicAddressAssignment>(&body_bytes).map_err(|e| {
-            AtomaProxyError::InvalidBody {
-                message: format!("Failed to parse request body, with error: {e}"),
-                endpoint: NODES_CREATE_PATH.to_string(),
-            }
-        })?;
 
     let (result_sender, result_receiver) = oneshot::channel();
 
@@ -194,17 +192,23 @@ pub async fn nodes_create(
     Ok(Json(Value::Null))
 }
 
-/// Represents the payload for the node public address registration request.
-///
-/// This struct represents the payload for the node public address registration request.
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct NodePublicAddressAssignment {
-    /// Unique small integer identifier for the node
+/// The response body for selecting a node's public key for encryption
+/// from a client. The client will use the provided public key to encrypt
+/// the request and send it back to the proxy. The proxy will then route this
+/// request to the selected node.
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct NodesModelsRetrieveResponse {
+    /// The public key for the selected node, base64 encoded
+    public_key: Vec<u8>,
+
+    /// The node small id for the selected node
     node_small_id: u64,
-    /// The public address of the node
-    public_address: String,
-    /// The country of the node
-    country: String,
+
+    /// Transaction digest for the transaction that acquires the stack entry, if any
+    stack_entry_digest: Option<String>,
+
+    /// The stack small id to which an available stack entry was acquired, for the selected node
+    stack_small_id: u64,
 }
 
 /// Retrieve node for a given model
@@ -367,23 +371,4 @@ pub(crate) async fn nodes_models_retrieve(
             })
         }
     }
-}
-
-/// The response body for selecting a node's public key for encryption
-/// from a client. The client will use the provided public key to encrypt
-/// the request and send it back to the proxy. The proxy will then route this
-/// request to the selected node.
-#[derive(Deserialize, Serialize, ToSchema)]
-pub struct NodesModelsRetrieveResponse {
-    /// The public key for the selected node, base64 encoded
-    public_key: Vec<u8>,
-
-    /// The node small id for the selected node
-    node_small_id: u64,
-
-    /// Transaction digest for the transaction that acquires the stack entry, if any
-    stack_entry_digest: Option<String>,
-
-    /// The stack small id to which an available stack entry was acquired, for the selected node
-    stack_small_id: u64,
 }
