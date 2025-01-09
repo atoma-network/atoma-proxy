@@ -16,7 +16,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
-use crate::server::middleware::RequestMetadataExtension;
+use crate::server::middleware::{RequestMetadataExtension, STACK_SIZE_TO_BUY};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
@@ -314,7 +314,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    node.max_num_compute_units as u64,
+                    STACK_SIZE_TO_BUY as u64,
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
