@@ -41,6 +41,8 @@ const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
 
 const ONE_MILLION: i64 = 1_000_000;
 
+const DEFAULT_STACK_SIZE: i64 = 1_000_000;
+
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
 /// This extension is attached to requests during authentication middleware processing
@@ -480,6 +482,7 @@ pub(crate) mod auth {
         error::AtomaProxyError, handlers::request_model::RequestModel, http_server::ProxyState,
     };
 
+    use super::DEFAULT_STACK_SIZE;
     use super::ONE_MILLION;
 
     /// Represents the processed and validated request data after authentication and initial processing.
@@ -811,7 +814,7 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
-                    amount: node.price_per_one_million_compute_units * node.max_num_compute_units
+                    amount: node.price_per_one_million_compute_units * DEFAULT_STACK_SIZE
                         / ONE_MILLION,
                     result_sender,
                 })
@@ -839,7 +842,7 @@ pub(crate) mod auth {
                 .await
                 .acquire_new_stack_entry(
                     node.task_small_id as u64,
-                    node.max_num_compute_units as u64,
+                    DEFAULT_STACK_SIZE as u64,
                     node.price_per_one_million_compute_units as u64,
                 )
                 .await
