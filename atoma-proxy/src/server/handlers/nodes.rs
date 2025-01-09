@@ -320,7 +320,6 @@ pub(crate) async fn nodes_models_retrieve(
             })?;
         if let Some(node) = node {
             let price_per_one_million_compute_units = node.price_per_one_million_compute_units;
-            let max_num_compute_units = node.max_num_compute_units;
             // NOTE: We need to deduct the cost of the stack entry from the user's balance, first.
             // This will fail if the balance is not enough.
             let (result_sender, result_receiver) = oneshot::channel();
@@ -328,7 +327,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
                     user_id,
-                    amount: price_per_one_million_compute_units * max_num_compute_units
+                    amount: price_per_one_million_compute_units * STACK_SIZE_TO_BUY
                         / (ONE_MILLION as i64),
                     result_sender,
                 })
