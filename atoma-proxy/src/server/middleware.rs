@@ -33,7 +33,7 @@ use super::{
 use super::{types::ConfidentialComputeRequest, Result};
 
 /// The size of the stack to buy in compute units.
-/// 
+///
 /// NOTE: Right now, we buy the maximum number of compute units that a node supports
 /// as hardcoded in Atoma's smart contract.
 pub const STACK_SIZE_TO_BUY: i64 = 2_560_000;
@@ -719,7 +719,10 @@ pub(crate) mod auth {
             // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
             if total_tokens > STACK_SIZE_TO_BUY as u64 {
                 return Err(AtomaProxyError::InvalidBody {
-                    message: format!("Total tokens {} exceed the maximum stack size of {}", total_tokens, STACK_SIZE_TO_BUY),
+                    message: format!(
+                        "Total tokens {} exceed the maximum stack size of {}",
+                        total_tokens, STACK_SIZE_TO_BUY
+                    ),
                     endpoint: endpoint.to_string(),
                 });
             }
