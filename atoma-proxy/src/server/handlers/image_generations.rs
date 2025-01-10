@@ -17,7 +17,7 @@ use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeRespon
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
-use crate::server::Result;
+use crate::server::{Result, MODEL};
 
 /// Path for the confidential image generations endpoint.
 ///
@@ -30,8 +30,6 @@ pub const CONFIDENTIAL_IMAGE_GENERATIONS_PATH: &str = "/v1/confidential/images/g
 /// This endpoint follows the OpenAI API format for image generations
 pub const IMAGE_GENERATIONS_PATH: &str = "/v1/images/generations";
 
-/// The model field in the request payload.
-const MODEL: &str = "model";
 
 /// The n field in the request payload.
 const N: &str = "n";

@@ -267,7 +267,7 @@ pub async fn authenticate_middleware(
     //
     // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
     // In this case, this method cannot error (as it just returns the underlying stack data). Otherwise, it will try to buy a new stack.
-    // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager, already.
+    // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager.
     // Otherwise, we are safe to assume that the proxy has not locked enough compute units for the request, within the state manager, and we will not be able to process the request.
     let SelectedNodeMetadata {
         stack_small_id,
@@ -995,6 +995,8 @@ pub(crate) mod auth {
 pub(crate) mod utils {
     use sui_sdk::types::digests::TransactionDigest;
 
+    use crate::server::MODEL;
+
     use super::*;
 
     /// Validates and prepares a request for processing by a specific stack and node.
@@ -1126,9 +1128,9 @@ pub(crate) mod utils {
                 .headers
                 .insert(constants::TX_DIGEST, tx_digest_header);
         }
-        let request_model = body_json.get("model").and_then(|m| m.as_str()).ok_or(
+        let request_model = body_json.get(MODEL).and_then(|m| m.as_str()).ok_or(
             AtomaProxyError::InvalidBody {
-                message: "Model not found".to_string(),
+                message: "{MODEL} not found".to_string(),
                 endpoint: req_parts.uri.path().to_string(),
             },
         )?;
