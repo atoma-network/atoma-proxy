@@ -425,8 +425,8 @@ impl Stream for Streamer {
             }
             Poll::Ready(Some(Err(e))) => {
                 self.status = StreamStatus::Failed(e.to_string());
-                // NOTE: If the stream fails, the node as failed, so we update the state manager
-                // number of tokens to 0
+                // NOTE: If the stream fails, the node has failed, so we need to update
+                // the state manager number of tokens to 0
                 if let Err(e) = update_state_manager(
                     &self.state_manager_sender,
                     self.stack_small_id,
