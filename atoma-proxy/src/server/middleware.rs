@@ -33,7 +33,10 @@ use super::{
 use super::{types::ConfidentialComputeRequest, Result};
 
 /// The size of the stack to buy in compute units.
-pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
+///
+/// NOTE: Right now, we buy the maximum number of compute units that a node supports
+/// as hardcoded in Atoma's smart contract.
+pub const STACK_SIZE_TO_BUY: i64 = 2_560_000;
 
 /// Default image resolution for image generations, in pixels.
 const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
@@ -712,6 +715,17 @@ pub(crate) mod auth {
                 tx_digest: None,
             })
         } else {
+            // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
+            // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
+            if total_tokens > STACK_SIZE_TO_BUY as u64 {
+                return Err(AtomaProxyError::InvalidBody {
+                    message: format!(
+                        "Total tokens {} exceed the maximum stack size of {}",
+                        total_tokens, STACK_SIZE_TO_BUY
+                    ),
+                    endpoint: endpoint.to_string(),
+                });
+            }
             let (result_sender, result_receiver) = oneshot::channel();
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
