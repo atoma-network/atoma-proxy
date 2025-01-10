@@ -270,31 +270,29 @@ impl Stream for Streamer {
         }
 
         match self.stream.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(chunk))) => {
-                match self.handle_stream_chunk(chunk) {
-                    Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(Ok(event))),
-                    Poll::Ready(Some(Err(e))) => {
-                        self.status = StreamStatus::Failed(e.to_string());
-                        if let Err(e) = update_state_manager(
-                            &self.state_manager_sender,
-                            self.stack_small_id,
-                            self.estimated_total_tokens,
-                            self.estimated_total_tokens,
-                            &self.endpoint,
-                        ) {
-                            error!(
-                                target = "atoma-service-streamer",
-                                level = "error",
-                                "Error updating stack num tokens: {}",
-                                e
-                            );
-                        }
-                        Poll::Ready(Some(Err(e)))
+            Poll::Ready(Some(Ok(chunk))) => match self.handle_stream_chunk(chunk) {
+                Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(Ok(event))),
+                Poll::Ready(Some(Err(e))) => {
+                    self.status = StreamStatus::Failed(e.to_string());
+                    if let Err(e) = update_state_manager(
+                        &self.state_manager_sender,
+                        self.stack_small_id,
+                        self.estimated_total_tokens,
+                        self.estimated_total_tokens,
+                        &self.endpoint,
+                    ) {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error updating stack num tokens: {}",
+                            e
+                        );
                     }
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(None) => Poll::Ready(None),
+                    Poll::Ready(Some(Err(e)))
                 }
-            }
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(None) => Poll::Ready(None),
+            },
             Poll::Ready(Some(Err(e))) => {
                 self.status = StreamStatus::Failed(e.to_string());
                 Poll::Ready(None)
@@ -316,14 +314,11 @@ impl Stream for Streamer {
     }
 }
 
-
 impl Streamer {
     #[instrument(
         level = "info",
         skip(self, chunk),
-        fields(
-            endpoint = "handle_stream_chunk",
-        )
+        fields(endpoint = "handle_stream_chunk",)
     )]
     fn handle_stream_chunk(&mut self, chunk: Bytes) -> Poll<Option<Result<Event, Error>>> {
         if self.status != StreamStatus::Started {
@@ -459,9 +454,7 @@ impl Streamer {
                         level = "error",
                         "Error getting choices from chunk"
                     );
-                    return Poll::Ready(Some(Err(Error::new(
-                        "Error getting choices from chunk",
-                    ))));
+                    return Poll::Ready(Some(Err(Error::new("Error getting choices from chunk"))));
                 }
             };
 
