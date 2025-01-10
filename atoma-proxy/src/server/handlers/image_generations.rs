@@ -30,7 +30,6 @@ pub const CONFIDENTIAL_IMAGE_GENERATIONS_PATH: &str = "/v1/confidential/images/g
 /// This endpoint follows the OpenAI API format for image generations
 pub const IMAGE_GENERATIONS_PATH: &str = "/v1/images/generations";
 
-
 /// The n field in the request payload.
 const N: &str = "n";
 

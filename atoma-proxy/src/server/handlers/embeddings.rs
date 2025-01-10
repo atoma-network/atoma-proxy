@@ -19,7 +19,8 @@ use crate::server::{
     error::AtomaProxyError,
     http_server::ProxyState,
     middleware::RequestMetadataExtension,
-    types::{ConfidentialComputeRequest, ConfidentialComputeResponse}, MODEL,
+    types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
+    MODEL,
 };
 
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};

@@ -1128,12 +1128,14 @@ pub(crate) mod utils {
                 .headers
                 .insert(constants::TX_DIGEST, tx_digest_header);
         }
-        let request_model = body_json.get(MODEL).and_then(|m| m.as_str()).ok_or(
-            AtomaProxyError::InvalidBody {
-                message: "{MODEL} not found".to_string(),
-                endpoint: req_parts.uri.path().to_string(),
-            },
-        )?;
+        let request_model =
+            body_json
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "{MODEL} not found".to_string(),
+                    endpoint: req_parts.uri.path().to_string(),
+                })?;
 
         req_parts.extensions.insert(RequestMetadataExtension {
             node_address,
