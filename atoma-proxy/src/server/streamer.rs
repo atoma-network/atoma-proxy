@@ -425,6 +425,22 @@ impl Stream for Streamer {
             }
             Poll::Ready(Some(Err(e))) => {
                 self.status = StreamStatus::Failed(e.to_string());
+                // NOTE: If the stream fails, the node as failed, so we update the state manager
+                // number of tokens to 0
+                if let Err(e) = update_state_manager(
+                    &self.state_manager_sender,
+                    self.stack_small_id,
+                    self.estimated_total_tokens,
+                    0,
+                    &self.endpoint,
+                ) {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error updating stack num tokens: {}",
+                        e
+                    );
+                }
                 Poll::Ready(None)
             }
             Poll::Ready(None) => {
