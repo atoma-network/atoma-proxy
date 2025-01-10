@@ -1,6 +1,6 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
-use auth::{authenticate_and_process, ProcessedRequest};
+use auth::{ProcessedRequest, SelectedNodeMetadata};
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -16,16 +16,10 @@ use tracing::instrument;
 use super::{
     error::AtomaProxyError,
     handlers::{
-        chat_completions::{
-            RequestModelChatCompletions, CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-        },
-        embeddings::{RequestModelEmbeddings, CONFIDENTIAL_EMBEDDINGS_PATH, EMBEDDINGS_PATH},
-        image_generations::{
-            RequestModelImageGenerations, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-            IMAGE_GENERATIONS_PATH,
-        },
+        chat_completions::{CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-        request_model::RequestModel,
+        update_state_manager,
     },
     http_server::ProxyState,
     DEFAULT_MAX_TOKENS, MAX_TOKENS,
@@ -255,64 +249,70 @@ pub async fn authenticate_middleware(
         body_json[MAX_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
     }
     let endpoint = req_parts.uri.path().to_string();
-    let ProcessedRequest {
-        node_address,
-        node_id,
-        signature,
-        stack_small_id,
-        mut headers,
-        num_compute_units,
-        tx_digest,
-    } = utils::process_request(&state, &endpoint, &body_json, &mut req_parts).await?;
-    let stack_small_id_header =
-        HeaderValue::from_str(&stack_small_id.to_string()).map_err(|e| {
-            AtomaProxyError::InternalError {
-                message: format!("Failed to convert stack small id to header value: {}", e),
-                endpoint: req_parts.uri.path().to_string(),
-            }
-        })?;
-    let signature_header =
-        HeaderValue::from_str(&signature).map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to convert signature to header value: {}", e),
-            endpoint: req_parts.uri.path().to_string(),
-        })?;
-    let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to convert content length to header value: {}", e),
-            endpoint: req_parts.uri.path().to_string(),
-        })?;
-    headers.insert(constants::SIGNATURE, signature_header);
-    headers.insert(constants::STACK_SMALL_ID, stack_small_id_header);
-    headers.insert(CONTENT_LENGTH, content_length_header);
-    if let Some(tx_digest) = tx_digest {
-        let tx_digest_header = HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
-            AtomaProxyError::InternalError {
-                message: format!("Failed to convert tx digest to header value: {}", e),
-                endpoint: req_parts.uri.path().to_string(),
-            }
-        })?;
-        headers.insert(constants::TX_DIGEST, tx_digest_header);
-    }
-    let request_model =
-        body_json
-            .get("model")
-            .and_then(|m| m.as_str())
-            .ok_or(AtomaProxyError::InvalidBody {
-                message: "Model not found".to_string(),
-                endpoint: req_parts.uri.path().to_string(),
-            })?;
-    req_parts.extensions.insert(RequestMetadataExtension {
-        node_address,
-        node_id,
-        num_compute_units,
-        selected_stack_small_id: stack_small_id,
-        endpoint: endpoint.clone(),
-        model_name: request_model.to_string(),
-    });
 
-    // update headers
-    req_parts.headers = headers;
-    let req = Request::from_parts(req_parts, Body::from(body_json.to_string()));
+    // Authenticate request and lock compute units for a Stack.
+    //
+    // NOTE: If this method succeeds and the `optional_stack` is Some, this means that the proxy has locked
+    // enough compute units for the request, within the state manager. Otherwise, this has not been the case.
+    let (optional_stack, total_compute_units, model, user_id) =
+        auth::handle_authenticate_and_lock_compute_units(
+            &state,
+            &req_parts.headers,
+            &body_json,
+            &endpoint,
+        )
+        .await?;
+
+    // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
+    //
+    // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
+    // In this case, this method cannot error (as it just returns the underlying stack data). Otherwise, it will try to buy a new stack.
+    // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager.
+    // Otherwise, we are safe to assume that the proxy has not locked enough compute units for the request, within the state manager, and we will not be able to process the request.
+    let SelectedNodeMetadata {
+        stack_small_id,
+        selected_node_id,
+        tx_digest,
+    } = auth::get_selected_node(
+        &model,
+        &state.state_manager_sender,
+        &state.sui,
+        optional_stack,
+        total_compute_units,
+        user_id,
+        &endpoint,
+    )
+    .await?;
+
+    // Validates the stack for the request.
+    //
+    // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
+    // the proxy will be in an inconsistent state for the current stack.
+    let req = match utils::try_validate_stack_for_request(
+        &state,
+        &body_json,
+        &mut req_parts,
+        selected_node_id,
+        stack_small_id,
+        total_compute_units,
+        tx_digest,
+        user_id,
+        &endpoint,
+    )
+    .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                stack_small_id,
+                total_compute_units as i64,
+                0,
+                &endpoint,
+            )?;
+            return Err(e);
+        }
+    };
     Ok(next.run(req).await)
 }
 
@@ -470,6 +470,7 @@ pub(crate) mod auth {
 
     use atoma_auth::StackEntryResponse;
     use atoma_auth::Sui;
+    use atoma_state::types::Stack;
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
     use flume::Sender;
@@ -479,12 +480,246 @@ pub(crate) mod auth {
     use tokio::sync::{oneshot, RwLock};
     use tracing::instrument;
 
+    use crate::server::handlers::chat_completions::RequestModelChatCompletions;
+    use crate::server::handlers::chat_completions::CHAT_COMPLETIONS_PATH;
+    use crate::server::handlers::embeddings::RequestModelEmbeddings;
+    use crate::server::handlers::embeddings::EMBEDDINGS_PATH;
+    use crate::server::handlers::image_generations::RequestModelImageGenerations;
+    use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
     use crate::server::{
         check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
         http_server::ProxyState, Result, ONE_MILLION,
     };
 
     use super::STACK_SIZE_TO_BUY;
+
+    /// Handles authentication and compute unit locking for incoming API requests.
+    ///
+    /// This function serves as a routing layer that processes different types of API requests
+    /// (chat completions, embeddings, and image generations) by:
+    /// 1. Validating the request body against the appropriate model type
+    /// 2. Authenticating the request
+    /// 3. Locking the required compute units for processing
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to the proxy server state containing shared resources
+    /// * `headers` - HTTP headers from the incoming request, used for authentication
+    /// * `body_json` - The parsed JSON body of the request
+    /// * `endpoint` - The API endpoint path being accessed (e.g., "/v1/chat/completions")
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<Option<Stack>>` where:
+    /// * `Ok(Some(Stack))` - Authentication succeeded and compute units were locked
+    /// * `Ok(None)` - Authentication succeeded but no stack was required
+    /// * `Err(AtomaProxyError)` - Processing failed with specific error details
+    ///
+    /// # Errors
+    ///
+    /// Returns `AtomaProxyError` in the following cases:
+    /// * `InvalidBody` - Request body doesn't match the expected model format
+    /// * `InternalError` - Unexpected endpoint or internal processing failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use axum::http::HeaderMap;
+    /// use serde_json::json;
+    ///
+    /// async fn process_chat_request(state: &ProxyState) -> Result<Option<Stack>> {
+    ///     let headers = HeaderMap::new();
+    ///     let body = json!({
+    ///         "model": "gpt-4",
+    ///         "messages": [{"role": "user", "content": "Hello"}]
+    ///     });
+    ///
+    ///     handle_authenticate_and_lock_compute_units(
+    ///         state,
+    ///         &headers,
+    ///         &body,
+    ///         "/v1/chat/completions"
+    ///     ).await
+    /// }
+    /// ```
+    ///
+    /// # Supported Endpoints
+    ///
+    /// * `CHAT_COMPLETIONS_PATH` - For chat completion requests
+    /// * `EMBEDDINGS_PATH` - For text embedding requests
+    /// * `IMAGE_GENERATIONS_PATH` - For image generation requests
+    ///
+    /// # Request Flow
+    ///
+    /// 1. Matches the endpoint to determine request type
+    /// 2. Parses request body into appropriate model struct
+    /// 3. Authenticates request and locks compute units
+    /// 4. Returns stack information if successful
+    ///
+    /// # Security Considerations
+    ///
+    /// * Ensures all requests are properly authenticated
+    /// * Validates request body format before processing
+    /// * Locks compute units to prevent resource exhaustion
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(endpoint = %endpoint)
+    )]
+    pub(crate) async fn handle_authenticate_and_lock_compute_units(
+        state: &ProxyState,
+        headers: &HeaderMap,
+        body_json: &Value,
+        endpoint: &str,
+    ) -> Result<(Option<Stack>, u64, String, i64)> {
+        match endpoint {
+            CHAT_COMPLETIONS_PATH => {
+                let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
+                    AtomaProxyError::InvalidBody {
+                        message: format!(
+                            "Failed to parse body as chat completions request model: {}",
+                            e
+                        ),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                authenticate_and_lock_compute_units(state, headers, request_model, endpoint).await
+            }
+            EMBEDDINGS_PATH => {
+                let request_model = RequestModelEmbeddings::new(body_json).map_err(|e| {
+                    AtomaProxyError::InvalidBody {
+                        message: format!("Failed to parse body as embeddings request model: {}", e),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                authenticate_and_lock_compute_units(state, headers, request_model, endpoint).await
+            }
+            IMAGE_GENERATIONS_PATH => {
+                let request_model = RequestModelImageGenerations::new(body_json).map_err(|e| {
+                    AtomaProxyError::InvalidBody {
+                        message: format!(
+                            "Failed to parse body as image generations request model: {}",
+                            e
+                        ),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                authenticate_and_lock_compute_units(state, headers, request_model, endpoint).await
+            }
+            _ => {
+                return Err(AtomaProxyError::InternalError {
+                    message: format!(
+                        "Invalid endpoint for current middleware, this should never happen: {}",
+                        endpoint
+                    ),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Authenticates a request and attempts to lock compute units for model execution.
+    ///
+    /// This function performs several key operations in sequence:
+    /// 1. Authenticates the user using provided headers
+    /// 2. Estimates required compute units for the request
+    /// 3. Attempts to find and lock available compute units from existing stacks
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Server state containing authentication and resource management components
+    /// * `headers` - HTTP request headers containing authentication information
+    /// * `request_model` - The parsed request model implementing the `RequestModel` trait
+    /// * `endpoint` - The API endpoint path being accessed
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<Option<Stack>>` where:
+    /// * `Ok(Some(Stack))` - Authentication succeeded and compute units were successfully locked
+    /// * `Ok(None)` - Authentication succeeded but no suitable stack was found
+    /// * `Err(AtomaProxyError)` - Authentication or compute unit locking failed
+    ///
+    /// # Errors
+    ///
+    /// Returns `AtomaProxyError` in the following cases:
+    /// * Authentication failure
+    /// * Failed to estimate compute units
+    /// * Failed to communicate with state manager
+    /// * Failed to lock compute units
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use axum::http::HeaderMap;
+    ///
+    /// async fn process_request(state: &ProxyState, headers: &HeaderMap) -> Result<()> {
+    ///     let request_model = ChatCompletionsModel::new(&body)?;
+    ///     let result = authenticate_and_lock_compute_units(
+    ///         state,
+    ///         headers,
+    ///         request_model,
+    ///         "/v1/chat/completions"
+    ///     ).await?;
+    ///     
+    ///     match result {
+    ///         Some(stack) => println!("Compute units locked on stack {}", stack.id),
+    ///         None => println!("No suitable stack found"),
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Implementation Notes
+    ///
+    /// * The function is instrumented with tracing at the info level
+    /// * Non-confidential compute is assumed (is_confidential is hardcoded to false)
+    /// * Compute units are estimated based on the specific request model implementation
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(endpoint = %endpoint)
+    )]
+    pub(crate) async fn authenticate_and_lock_compute_units(
+        state: &ProxyState,
+        headers: &HeaderMap,
+        request_model: impl RequestModel,
+        endpoint: &str,
+    ) -> Result<(Option<Stack>, u64, String, i64)> {
+        let user_id = check_auth(&state.state_manager_sender, headers, endpoint).await?;
+
+        // Estimate compute units and the request model
+        let model = request_model.get_model()?;
+        let total_compute_units = request_model.get_compute_units_estimate(state)?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
+                model: model.to_string(),
+                free_compute_units: total_compute_units as i64,
+                user_id,
+                is_confidential: false, // NOTE: This method is only used for non-confidential compute
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetStacksForModel event: {:?}", err),
+                endpoint: endpoint.to_string(),
+            })?;
+
+        let optional_stack = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetStacksForModel result: {:?}", err),
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get GetStacksForModel result: {:?}", err),
+                endpoint: endpoint.to_string(),
+            })?;
+
+        Ok((optional_stack, total_compute_units, model, user_id))
+    }
 
     /// Represents the processed and validated request data after authentication and initial processing.
     ///
@@ -494,18 +729,8 @@ pub(crate) mod auth {
     pub(crate) struct ProcessedRequest {
         /// The public address of the selected inference node
         pub node_address: String,
-        /// The unique identifier for the selected node
-        pub node_id: i64,
         /// The authentication signature for the request
         pub signature: String,
-        /// The unique identifier for the selected stack
-        pub stack_small_id: i64,
-        /// HTTP headers to be forwarded with the request, excluding sensitive authentication headers
-        pub headers: HeaderMap,
-        /// The estimated number of compute units for this request (input + output)
-        pub num_compute_units: u64,
-        /// Optional transaction digest from stack entry creation, if a new stack was acquired
-        pub tx_digest: Option<TransactionDigest>,
     }
 
     /// Authenticates the request and processes initial steps up to signature creation.
@@ -535,37 +760,13 @@ pub(crate) mod auth {
     /// - `NOT_FOUND`: No available node address found
     /// - `INTERNAL_SERVER_ERROR`: Various internal processing failures
     #[instrument(level = "info", skip_all)]
-    pub(crate) async fn authenticate_and_process(
-        request_model: impl RequestModel,
+    pub(crate) async fn process_selected_stack(
         state: &ProxyState,
-        headers: HeaderMap,
+        headers: &mut HeaderMap,
         payload: &Value,
-        is_confidential: bool,
+        selected_node_id: i64,
         endpoint: &str,
     ) -> Result<ProcessedRequest> {
-        // Authenticate
-        let user_id = check_auth(&state.state_manager_sender, &headers, endpoint).await?;
-
-        // Estimate compute units and the request model
-        let model = request_model.get_model()?;
-        let total_compute_units = request_model.get_compute_units_estimate(state)?;
-
-        // Get node selection
-        let SelectedNodeMetadata {
-            stack_small_id: selected_stack_small_id,
-            selected_node_id,
-            tx_digest,
-        } = get_selected_node(
-            &model,
-            &state.state_manager_sender,
-            &state.sui,
-            total_compute_units,
-            user_id,
-            is_confidential,
-            endpoint,
-        )
-        .await?;
-
         // Get node address
         let (result_sender, result_receiver) = oneshot::channel();
         state
@@ -606,17 +807,11 @@ pub(crate) mod auth {
             })?;
 
         // Prepare headers
-        let mut headers = headers;
         headers.remove(AUTHORIZATION);
 
         Ok(ProcessedRequest {
             node_address,
-            node_id: selected_node_id,
             signature,
-            stack_small_id: selected_stack_small_id,
-            headers,
-            num_compute_units: total_compute_units,
-            tx_digest,
         })
     }
 
@@ -673,41 +868,15 @@ pub(crate) mod auth {
     /// println!("Selected stack ID: {}", metadata.stack_small_id);
     /// ```
     #[instrument(level = "info", skip_all, fields(%model))]
-    async fn get_selected_node(
+    pub(crate) async fn get_selected_node(
         model: &str,
         state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
         sui: &Arc<RwLock<Sui>>,
+        optional_stack: Option<Stack>,
         total_tokens: u64,
         user_id: i64,
-        is_confidential: bool,
         endpoint: &str,
     ) -> Result<SelectedNodeMetadata> {
-        let (result_sender, result_receiver) = oneshot::channel();
-
-        state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
-                model: model.to_string(),
-                free_compute_units: total_tokens as i64,
-                user_id,
-                is_confidential,
-                result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetStacksForModel event: {:?}", err),
-                endpoint: endpoint.to_string(),
-            })?;
-
-        let optional_stack = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetStacksForModel result: {:?}", err),
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetStacksForModel result: {:?}", err),
-                endpoint: endpoint.to_string(),
-            })?;
-
         if let Some(stack) = optional_stack {
             Ok(SelectedNodeMetadata {
                 stack_small_id: stack.stack_small_id,
@@ -730,7 +899,7 @@ pub(crate) mod auth {
             state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
                     model: model.to_string(),
-                    is_confidential,
+                    is_confidential: false,
                     result_sender,
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
@@ -824,124 +993,162 @@ pub(crate) mod auth {
 }
 
 pub(crate) mod utils {
+    use sui_sdk::types::digests::TransactionDigest;
+
+    use crate::server::MODEL;
+
     use super::*;
 
-    /// Processes an incoming API request by validating the request model and performing authentication.
+    /// Validates and prepares a request for processing by a specific stack and node.
     ///
-    /// This function handles three types of requests:
-    /// - Chat completions (both standard and confidential)
-    /// - Embeddings (both standard and confidential)
-    /// - Image generations (both standard and confidential)
-    ///
-    /// For each request type, it:
-    /// 1. Parses and validates the request body into the appropriate model type
-    /// 2. Authenticates the request and performs initial processing
+    /// This function performs several key operations to prepare a request for forwarding:
+    /// 1. Processes the selected stack to obtain node address and signature
+    /// 2. Sets up required headers for node communication
+    /// 3. Configures request metadata for tracking and routing
     ///
     /// # Arguments
     ///
-    /// * `state` - Server state containing shared resources and configuration
-    /// * `endpoint` - The API endpoint path being accessed
+    /// * `state` - Server state containing shared resources and connections
     /// * `body_json` - The parsed JSON body of the request
-    /// * `req_parts` - Mutable reference to the request parts containing headers and other metadata
+    /// * `req_parts` - Mutable reference to request parts for header modification
+    /// * `selected_node_id` - ID of the node selected to process this request
+    /// * `selected_stack_small_id` - ID of the stack allocated for this request
+    /// * `total_compute_units` - Total compute units required for this request
+    /// * `tx_digest` - Optional transaction digest if a new stack was created
+    /// * `user_id` - ID of the user making the request
+    /// * `endpoint` - API endpoint path being accessed
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing:
-    /// - `Ok(ProcessedRequest)`: Successfully processed request with node selection and authentication details
-    /// - `Err(AtomaProxyError)`: Appropriate HTTP error status if processing fails
+    /// Returns a `Result<Request<Body>>` containing the fully prepared request if successful.
     ///
     /// # Errors
     ///
-    /// Returns various status codes for different failure scenarios:
-    /// * `BAD_REQUEST` (400):
-    ///   - Invalid request model format
-    ///   - Failed to parse request body
-    /// * `UNAUTHORIZED` (401):
-    ///   - Authentication failure
-    /// * `NOT_FOUND` (404):
-    ///   - Invalid or unsupported endpoint
-    /// * `INTERNAL_SERVER_ERROR` (500):
-    ///   - State manager communication failures
+    /// Returns `AtomaProxyError` in the following cases:
+    /// * `InternalError` - Failed to:
+    ///   - Convert values to header format
+    ///   - Process selected stack
+    ///   - Set up required headers
+    /// * `InvalidBody` - Request body missing required "model" field
+    ///
+    /// # Headers Set
+    ///
+    /// The following headers are set on the request:
+    /// * `X-Signature` - Authentication signature for the node
+    /// * `X-Stack-Small-Id` - ID of the selected stack
+    /// * `Content-Length` - Updated body length
+    /// * `X-Tx-Digest` - (Optional) Transaction digest for new stacks
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// let processed = process_request(
-    ///     state,
-    ///     CHAT_COMPLETIONS_PATH,
-    ///     body_json,
-    ///     &mut req_parts
+    /// ```rust,no_run
+    /// let prepared_request = try_validate_stack_for_request(
+    ///     &state,
+    ///     &body_json,
+    ///     &mut req_parts,
+    ///     node_id,
+    ///     stack_id,
+    ///     compute_units,
+    ///     Some(tx_digest),
+    ///     user_id,
+    ///     "/v1/chat/completions"
     /// ).await?;
     /// ```
-    pub(crate) async fn process_request(
+    ///
+    /// # Request Metadata
+    ///
+    /// The function also sets up `RequestMetadataExtension` with:
+    /// * Node address and ID
+    /// * Compute units allocation
+    /// * Stack ID
+    /// * Endpoint path
+    /// * Model name
+    #[instrument(level = "info", skip_all, fields(
+        %endpoint,
+        %total_compute_units,
+        %user_id
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn try_validate_stack_for_request(
         state: &State<ProxyState>,
-        endpoint: &str,
         body_json: &Value,
         req_parts: &mut Parts,
-    ) -> Result<ProcessedRequest> {
-        match endpoint {
-            CHAT_COMPLETIONS_PATH | CONFIDENTIAL_CHAT_COMPLETIONS_PATH => {
-                let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
-                        message: format!(
-                            "Failed to parse body as chat completions request model: {}",
-                            e
-                        ),
-                        endpoint: endpoint.to_string(),
+        selected_node_id: i64,
+        selected_stack_small_id: i64,
+        total_compute_units: u64,
+        tx_digest: Option<TransactionDigest>,
+        user_id: i64,
+        endpoint: &str,
+    ) -> Result<Request<Body>> {
+        let ProcessedRequest {
+            node_address,
+            signature,
+        } = auth::process_selected_stack(
+            state,
+            &mut req_parts.headers,
+            body_json,
+            selected_node_id,
+            endpoint,
+        )
+        .await?;
+
+        let stack_small_id_header = HeaderValue::from_str(&selected_stack_small_id.to_string())
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to convert stack small id to header value: {}", e),
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+        let signature_header =
+            HeaderValue::from_str(&signature).map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to convert signature to header value: {}", e),
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+        let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to convert content length to header value: {}", e),
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+        req_parts
+            .headers
+            .insert(constants::SIGNATURE, signature_header);
+        req_parts
+            .headers
+            .insert(constants::STACK_SMALL_ID, stack_small_id_header);
+        req_parts
+            .headers
+            .insert(CONTENT_LENGTH, content_length_header);
+        if let Some(tx_digest) = tx_digest {
+            let tx_digest_header =
+                HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to convert tx digest to header value: {}", e),
+                        endpoint: req_parts.uri.path().to_string(),
                     }
                 })?;
-                authenticate_and_process(
-                    request_model,
-                    &state.0,
-                    req_parts.headers.clone(),
-                    body_json,
-                    endpoint == CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-                    endpoint,
-                )
-                .await
-            }
-            EMBEDDINGS_PATH | CONFIDENTIAL_EMBEDDINGS_PATH => {
-                let request_model = RequestModelEmbeddings::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
-                        message: format!("Failed to parse body as embeddings request model: {}", e),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
-                authenticate_and_process(
-                    request_model,
-                    &state.0,
-                    req_parts.headers.clone(),
-                    body_json,
-                    endpoint == CONFIDENTIAL_EMBEDDINGS_PATH,
-                    endpoint,
-                )
-                .await
-            }
-            IMAGE_GENERATIONS_PATH | CONFIDENTIAL_IMAGE_GENERATIONS_PATH => {
-                let request_model = RequestModelImageGenerations::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
-                        message: format!(
-                            "Failed to parse body as image generations request model: {}",
-                            e
-                        ),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
-                authenticate_and_process(
-                    request_model,
-                    &state.0,
-                    req_parts.headers.clone(),
-                    body_json,
-                    endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-                    endpoint,
-                )
-                .await
-            }
-            _ => Err(AtomaProxyError::NotFound {
-                message: format!("Invalid or unsupported endpoint: {}", endpoint),
-                endpoint: endpoint.to_string(),
-            }),
+            req_parts
+                .headers
+                .insert(constants::TX_DIGEST, tx_digest_header);
         }
+        let request_model =
+            body_json
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "{MODEL} not found".to_string(),
+                    endpoint: req_parts.uri.path().to_string(),
+                })?;
+
+        req_parts.extensions.insert(RequestMetadataExtension {
+            node_address,
+            node_id: selected_node_id,
+            num_compute_units: total_compute_units,
+            selected_stack_small_id,
+            endpoint: endpoint.to_string(),
+            model_name: request_model.to_string(),
+        });
+
+        // update headers
+        let req = Request::from_parts(req_parts.clone(), Body::from(body_json.to_string()));
+        Ok(req)
     }
 
     /// Verifies if a stack is valid for confidential compute operations.

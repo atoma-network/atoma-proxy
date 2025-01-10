@@ -20,6 +20,7 @@ use crate::server::{
     http_server::ProxyState,
     middleware::RequestMetadataExtension,
     types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
+    MODEL,
 };
 
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
@@ -36,9 +37,6 @@ pub const CONFIDENTIAL_EMBEDDINGS_PATH: &str = "/v1/confidential/embeddings";
 /// This endpoint follows the OpenAI API format for embeddings
 /// and is used to generate vector embeddings for input text.
 pub const EMBEDDINGS_PATH: &str = "/v1/embeddings";
-
-/// The model field in the request payload.
-const MODEL: &str = "model";
 
 /// The input field in the request payload.
 const INPUT: &str = "input";

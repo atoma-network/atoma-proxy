@@ -27,6 +27,9 @@ pub(crate) const DEFAULT_MAX_TOKENS: u64 = 4_096;
 /// The one million constant.
 pub(crate) const ONE_MILLION: u64 = 1_000_000;
 
+/// The model key
+pub(crate) const MODEL: &str = "model";
+
 /// Checks the authentication of the request.
 ///
 /// This function checks the authentication of the request by comparing the

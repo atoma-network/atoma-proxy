@@ -19,7 +19,7 @@ use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
 use super::{update_state_manager, RESPONSE_HASH_KEY};
-use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS};
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -37,9 +37,6 @@ pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 
 /// The interval for the keep-alive message in the SSE stream.
 const STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS: u64 = 15;
-
-/// The model field in the request payload.
-const MODEL: &str = "model";
 
 /// The messages field in the request payload.
 const MESSAGES: &str = "messages";
