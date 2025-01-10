@@ -715,6 +715,8 @@ pub(crate) mod auth {
                 tx_digest: None,
             })
         } else {
+            // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
+            // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
             if total_tokens > STACK_SIZE_TO_BUY as u64 {
                 return Err(AtomaProxyError::InvalidBody {
                     message: format!("Total tokens {} exceed the maximum stack size of {}", total_tokens, STACK_SIZE_TO_BUY),
