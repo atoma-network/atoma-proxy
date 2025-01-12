@@ -4,6 +4,7 @@ use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::verify_signature;
 use axum::http::HeaderMap;
 use axum::{extract::State, Json};
+use base64::engine::{general_purpose::STANDARD, Engine};
 use blake2::digest::consts::U32;
 use blake2::digest::generic_array::GenericArray;
 use blake2::{Blake2b, Digest};
@@ -202,7 +203,7 @@ pub async fn nodes_create(
 #[derive(Deserialize, Serialize, ToSchema)]
 pub struct NodesModelsRetrieveResponse {
     /// The public key for the selected node, base64 encoded
-    public_key: Vec<u8>,
+    public_key: String,
 
     /// The node small id for the selected node
     node_small_id: u64,
@@ -281,8 +282,9 @@ pub(crate) async fn nodes_models_retrieve(
                     message: "Stack small id not found for node public key".to_string(),
                     endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
                 })?;
+        let public_key = STANDARD.encode(node_public_key.public_key);
         Ok(Json(NodesModelsRetrieveResponse {
-            public_key: node_public_key.public_key,
+            public_key,
             node_small_id: node_public_key.node_small_id as u64,
             stack_entry_digest: None,
             stack_small_id: stack_small_id as u64,
@@ -390,8 +392,9 @@ pub(crate) async fn nodes_models_retrieve(
                 endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
             })?;
             if let Some(node_public_key) = node_public_key {
+                let public_key = STANDARD.encode(node_public_key.public_key);
                 Ok(Json(NodesModelsRetrieveResponse {
-                    public_key: node_public_key.public_key,
+                    public_key,
                     node_small_id: node_public_key.node_small_id as u64,
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
                     stack_small_id,
