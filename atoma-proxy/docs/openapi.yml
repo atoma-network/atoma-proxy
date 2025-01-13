@@ -1046,11 +1046,7 @@ components:
           description: The node small id for the selected node
           minimum: 0
         public_key:
-          type: array
-          items:
-            type: integer
-            format: int32
-            minimum: 0
+          type: string
           description: The public key for the selected node, base64 encoded
         stack_entry_digest:
           type:
