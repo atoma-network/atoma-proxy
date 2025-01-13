@@ -129,6 +129,50 @@ pub fn openapi_routes() -> Router {
         let spec =
             serde_yaml::to_string(&ApiDoc::openapi()).expect("Failed to serialize OpenAPI spec");
 
+        // Parse the YAML into a serde_yaml::Value for modification
+        let mut spec_value: serde_yaml::Value =
+            serde_yaml::from_str(&spec).expect("Failed to parse OpenAPI spec");
+
+        // Add x-speakeasy-sse-sentinel to the chat completions stream endpoint
+        if let serde_yaml::Value::Mapping(ref mut paths) = spec_value["paths"] {
+            if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
+                &serde_yaml::Value::String("/v1/chat/completions#stream".to_string()),
+            ) {
+                if let Some(serde_yaml::Value::Mapping(ref mut post)) =
+                    endpoint.get_mut(&serde_yaml::Value::String("post".to_string()))
+                {
+                    if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
+                        post.get_mut(&serde_yaml::Value::String("responses".to_string()))
+                    {
+                        if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
+                            responses.get_mut(&serde_yaml::Value::String("200".to_string()))
+                        {
+                            if let Some(serde_yaml::Value::Mapping(ref mut content)) = ok_response
+                                .get_mut(&serde_yaml::Value::String("content".to_string()))
+                            {
+                                if let Some(serde_yaml::Value::Mapping(ref mut event_stream)) =
+                                    content.get_mut(&serde_yaml::Value::String(
+                                        "text/event-stream".to_string(),
+                                    ))
+                                {
+                                    event_stream.insert(
+                                        serde_yaml::Value::String(
+                                            "x-speakeasy-sse-sentinel".to_string(),
+                                        ),
+                                        serde_yaml::Value::String("[DONE]".to_string()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert back to YAML string
+        let spec =
+            serde_yaml::to_string(&spec_value).expect("Failed to serialize modified OpenAPI spec");
+
         // Ensure the docs directory exists
         let docs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
         fs::create_dir_all(&docs_dir).expect("Failed to create docs directory");
