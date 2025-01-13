@@ -71,6 +71,7 @@ paths:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/ChatCompletionStreamResponse'
+              x-speakeasy-sse-sentinel: '[DONE]'
         '400':
           description: Bad request
         '401':
