@@ -355,6 +355,46 @@ paths:
                 $ref: '#/components/schemas/NodesCreateResponse'
         '500':
           description: Failed to register node public address
+  /v1/nodes/lock:
+    post:
+      tags:
+      - Nodes
+      summary: Create a node lock for confidential compute
+      description: |-
+        This endpoint attempts to find a suitable node and retrieve its public key for encryption
+        through a two-step process:
+
+        1. First, it tries to select an existing node with a public key directly.
+        2. If no node is immediately available, it falls back to finding the cheapest compatible node
+           and acquiring a new stack entry for it.
+
+        This endpoint is specifically designed for confidential compute scenarios where
+        requests need to be encrypted before being processed by nodes.
+
+        ## Errors
+          - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
+          - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
+      operationId: nodes_create_lock
+      requestBody:
+        description: The model to lock a node for
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodesCreateLockRequest'
+        required: true
+      responses:
+        '200':
+          description: Node DH public key requested successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesCreateLockResponse'
+        '500':
+          description: Failed to request node DH public key
+        '503':
+          description: No node found for model with confidential compute enabled for requested model
+      security:
+      - bearerAuth: []
 components:
   schemas:
     ChatCompletionChoice:

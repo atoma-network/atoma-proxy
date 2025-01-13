@@ -239,7 +239,7 @@ pub struct NodesCreateLockRequest {
 ///   - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
 #[utoipa::path(
     post,
-    path = "",
+    path = "/lock",
     security(
         ("bearerAuth"= [])
     ),
