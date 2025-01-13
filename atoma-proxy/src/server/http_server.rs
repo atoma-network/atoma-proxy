@@ -43,7 +43,7 @@ use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use super::handlers::nodes::{
-    nodes_create, nodes_models_retrieve, NODES_CREATE_PATH, NODES_MODELS_RETRIEVE_PATH,
+    nodes_create, nodes_create_lock, NODES_CREATE_LOCK_PATH, NODES_CREATE_PATH,
 };
 use super::middleware::{authenticate_middleware, confidential_compute_middleware};
 use super::AtomaServiceConfig;
@@ -184,7 +184,7 @@ pub fn create_router(state: ProxyState) -> Router {
         )
         .route(MODELS_PATH, get(models_list))
         .route(NODES_CREATE_PATH, post(nodes_create))
-        .route(NODES_MODELS_RETRIEVE_PATH, get(nodes_models_retrieve))
+        .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
         .with_state(state.clone())
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
