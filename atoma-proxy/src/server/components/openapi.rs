@@ -136,22 +136,22 @@ pub fn openapi_routes() -> Router {
         // Add x-speakeasy-sse-sentinel to the chat completions stream endpoint
         if let serde_yaml::Value::Mapping(ref mut paths) = spec_value["paths"] {
             if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
-                &serde_yaml::Value::String("/v1/chat/completions#stream".to_string()),
+                serde_yaml::Value::String("/v1/chat/completions#stream".to_string()),
             ) {
                 if let Some(serde_yaml::Value::Mapping(ref mut post)) =
-                    endpoint.get_mut(&serde_yaml::Value::String("post".to_string()))
+                    endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
                 {
                     if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
-                        post.get_mut(&serde_yaml::Value::String("responses".to_string()))
+                        post.get_mut(serde_yaml::Value::String("responses".to_string()))
                     {
                         if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
-                            responses.get_mut(&serde_yaml::Value::String("200".to_string()))
+                            responses.get_mut(serde_yaml::Value::String("200".to_string()))
                         {
                             if let Some(serde_yaml::Value::Mapping(ref mut content)) = ok_response
-                                .get_mut(&serde_yaml::Value::String("content".to_string()))
+                                .get_mut(serde_yaml::Value::String("content".to_string()))
                             {
                                 if let Some(serde_yaml::Value::Mapping(ref mut event_stream)) =
-                                    content.get_mut(&serde_yaml::Value::String(
+                                    content.get_mut(serde_yaml::Value::String(
                                         "text/event-stream".to_string(),
                                     ))
                                 {
