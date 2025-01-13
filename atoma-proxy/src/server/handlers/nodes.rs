@@ -21,7 +21,7 @@ use crate::server::{check_auth, middleware::STACK_SIZE_TO_BUY, ONE_MILLION};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
-pub const NODES_MODELS_RETRIEVE_PATH: &str = "/v1/nodes/models/:model";
+pub const NODES_CREATE_LOCK_PATH: &str = "/v1/nodes/lock";
 
 /// Size of the blake2b hash in bytes
 const BODY_HASH_SIZE: usize = 32;
@@ -34,7 +34,7 @@ const BODY_HASH_SIZE: usize = 32;
 pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
 
 #[derive(OpenApi)]
-#[openapi(paths(nodes_create, nodes_models_retrieve))]
+#[openapi(paths(nodes_create, nodes_create_lock))]
 /// OpenAPI documentation for the node public address registration endpoint.
 ///
 /// This struct is used to generate OpenAPI documentation for the node public address
@@ -201,7 +201,7 @@ pub async fn nodes_create(
 /// the request and send it back to the proxy. The proxy will then route this
 /// request to the selected node.
 #[derive(Deserialize, Serialize, ToSchema)]
-pub struct NodesModelsRetrieveResponse {
+pub struct NodesCreateLockResponse {
     /// The public key for the selected node, base64 encoded
     public_key: String,
 
@@ -215,7 +215,14 @@ pub struct NodesModelsRetrieveResponse {
     stack_small_id: u64,
 }
 
-/// Retrieve node for a given model
+/// Request body for creating a node lock
+#[derive(Deserialize, Serialize, ToSchema)]
+pub struct NodesCreateLockRequest {
+    /// The model to lock a node for
+    pub model: String,
+}
+
+/// Create a node lock for confidential compute
 ///
 /// This endpoint attempts to find a suitable node and retrieve its public key for encryption
 /// through a two-step process:
@@ -231,16 +238,14 @@ pub struct NodesModelsRetrieveResponse {
 ///   - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
 ///   - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
 #[utoipa::path(
-    get,
-    path = "/models/{model}",
+    post,
+    path = "/lock",
     security(
         ("bearerAuth"= [])
     ),
-    params(
-        ("model" = String, Path, description = "The name of the model to retrieve")
-    ),
+    request_body(content = NodesCreateLockRequest, description = "The model to lock a node for", content_type = "application/json"),
     responses(
-        (status = OK, description = "Node DH public key requested successfully", body = NodesModelsRetrieveResponse),
+        (status = OK, description = "Node DH public key requested successfully", body = NodesCreateLockResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to request node DH public key"),
         (status = SERVICE_UNAVAILABLE, description = "No node found for model with confidential compute enabled for requested model")
     )
@@ -248,30 +253,30 @@ pub struct NodesModelsRetrieveResponse {
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = NODES_MODELS_RETRIEVE_PATH)
+    fields(endpoint = NODES_CREATE_LOCK_PATH)
 )]
-pub(crate) async fn nodes_models_retrieve(
+pub(crate) async fn nodes_create_lock(
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    model: axum::extract::Path<String>,
-) -> Result<Json<NodesModelsRetrieveResponse>, AtomaProxyError> {
+    Json(payload): Json<NodesCreateLockRequest>,
+) -> Result<Json<NodesCreateLockResponse>, AtomaProxyError> {
     let (sender, receiver) = oneshot::channel();
     state
         .state_manager_sender
         .send(
             AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
-                model: model.clone(),
+                model: payload.model.clone(),
                 max_num_tokens: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
                 result_sender: sender,
             },
         )
         .map_err(|_| AtomaProxyError::InternalError {
             message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
-            endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+            endpoint: NODES_CREATE_LOCK_PATH.to_string(),
         })?;
     let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to receive node public key: {}", e),
-        endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
     })?;
 
     if let Some(node_public_key) = node_public_key {
@@ -280,10 +285,10 @@ pub(crate) async fn nodes_models_retrieve(
                 .stack_small_id
                 .ok_or_else(|| AtomaProxyError::InternalError {
                     message: "Stack small id not found for node public key".to_string(),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
         let public_key = STANDARD.encode(node_public_key.public_key);
-        Ok(Json(NodesModelsRetrieveResponse {
+        Ok(Json(NodesCreateLockResponse {
             public_key,
             node_small_id: node_public_key.node_small_id as u64,
             stack_entry_digest: None,
@@ -295,30 +300,30 @@ pub(crate) async fn nodes_models_retrieve(
         let user_id = check_auth(
             &state.state_manager_sender,
             &headers,
-            NODES_MODELS_RETRIEVE_PATH,
+            NODES_CREATE_LOCK_PATH,
         )
         .await?;
         let (sender, receiver) = oneshot::channel();
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                model: model.clone(),
+                model: payload.model.clone(),
                 is_confidential: true, // NOTE: This endpoint is only required for confidential compute
                 result_sender: sender,
             })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetCheapestNodeForModel event: {:?}", e),
-                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         let node = receiver
             .await
             .map_err(|_| AtomaProxyError::InternalError {
                 message: "Failed to receive GetCheapestNodeForModel result".to_string(),
-                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetCheapestNodeForModel result: {:?}", e),
-                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         if let Some(node) = node {
             let price_per_one_million_compute_units = node.price_per_one_million_compute_units;
@@ -335,17 +340,17 @@ pub(crate) async fn nodes_models_retrieve(
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send DeductFromUsdc event: {:?}", err),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             result_receiver
                 .await
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to receive DeductFromUsdc result: {:?}", e),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to deduct from usdc: {:?}", e),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
 
             let stack_entry_resp = state
@@ -360,7 +365,7 @@ pub(crate) async fn nodes_models_retrieve(
                 .await
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {:?}", e),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             // NOTE: The contract might select a different node than the one we used to extract
             // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
@@ -382,18 +387,18 @@ pub(crate) async fn nodes_models_retrieve(
                         "Failed to send GetNodePublicKeyForEncryption event: {:?}",
                         e
                     ),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
                 message: format!(
                     "Failed to receive GetNodePublicKeyForEncryption result: {:?}",
                     e
                 ),
-                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
             if let Some(node_public_key) = node_public_key {
                 let public_key = STANDARD.encode(node_public_key.public_key);
-                Ok(Json(NodesModelsRetrieveResponse {
+                Ok(Json(NodesCreateLockResponse {
                     public_key,
                     node_small_id: node_public_key.node_small_id as u64,
                     stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
@@ -402,16 +407,16 @@ pub(crate) async fn nodes_models_retrieve(
             } else {
                 Err(AtomaProxyError::InternalError {
                     message: format!("No node public key found for node {}", node.node_small_id),
-                    endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })
             }
         } else {
             Err(AtomaProxyError::ServiceUnavailable {
                 message: format!(
                     "No node found for model {} with confidential compute enabled",
-                    model.clone()
+                    payload.model
                 ),
-                endpoint: NODES_MODELS_RETRIEVE_PATH.to_string(),
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })
         }
     }

@@ -355,11 +355,11 @@ paths:
                 $ref: '#/components/schemas/NodesCreateResponse'
         '500':
           description: Failed to register node public address
-  /v1/nodes/models/{model}:
-    get:
+  /v1/nodes/lock:
+    post:
       tags:
       - Nodes
-      summary: Retrieve node for a given model
+      summary: Create a node lock for confidential compute
       description: |-
         This endpoint attempts to find a suitable node and retrieve its public key for encryption
         through a two-step process:
@@ -374,21 +374,21 @@ paths:
         ## Errors
           - `INTERNAL_SERVER_ERROR` - Communication errors or missing node public keys
           - `SERVICE_UNAVAILABLE` - No nodes available for confidential compute
-      operationId: nodes_models_retrieve
-      parameters:
-      - name: model
-        in: path
-        description: The name of the model to retrieve
+      operationId: nodes_create_lock
+      requestBody:
+        description: The model to lock a node for
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodesCreateLockRequest'
         required: true
-        schema:
-          type: string
       responses:
         '200':
           description: Node DH public key requested successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodesModelsRetrieveResponse'
+                $ref: '#/components/schemas/NodesCreateLockResponse'
         '500':
           description: Failed to request node DH public key
         '503':
@@ -1007,28 +1007,16 @@ components:
         public_address:
           type: string
           description: The public address of the node
-    NodesCreateRequest:
+    NodesCreateLockRequest:
       type: object
-      description: Represents the payload for the node public address registration request.
+      description: Request body for creating a node lock
       required:
-      - data
-      - signature
+      - model
       properties:
-        data:
-          $ref: '#/components/schemas/NodePublicAddressAssignment'
-          description: The data required to register a node's public address
-        signature:
+        model:
           type: string
-          description: The signature of the data base 64 encoded
-    NodesCreateResponse:
-      type: object
-      required:
-      - message
-      properties:
-        message:
-          type: string
-          description: The message of the response
-    NodesModelsRetrieveResponse:
+          description: The model to lock a node for
+    NodesCreateLockResponse:
       type: object
       description: |-
         The response body for selecting a node's public key for encryption
@@ -1058,6 +1046,27 @@ components:
           format: int64
           description: The stack small id to which an available stack entry was acquired, for the selected node
           minimum: 0
+    NodesCreateRequest:
+      type: object
+      description: Represents the payload for the node public address registration request.
+      required:
+      - data
+      - signature
+      properties:
+        data:
+          $ref: '#/components/schemas/NodePublicAddressAssignment'
+          description: The data required to register a node's public address
+        signature:
+          type: string
+          description: The signature of the data base 64 encoded
+    NodesCreateResponse:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          type: string
+          description: The message of the response
     Usage:
       type: object
       description: Represents usage statistics for a confidential compute request
