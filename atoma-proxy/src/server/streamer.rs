@@ -15,7 +15,8 @@ use tracing::{error, info, instrument};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
-use super::handlers::verify_response;
+use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
+use super::handlers::verify_response_hash_and_signature;
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -377,7 +378,8 @@ impl Stream for Streamer {
                     }
                 };
 
-                verify_response(&chunk).map_err(|e| {
+                let verify_hash = self.endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
+                verify_response_hash_and_signature(&chunk, verify_hash).map_err(|e| {
                     error!(
                         target = "atoma-service-streamer",
                         level = "error",

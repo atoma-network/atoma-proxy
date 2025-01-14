@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
+use base64::engine::{general_purpose::STANDARD, Engine};
+use blake2::Digest;
 use fastcrypto::{
     ed25519::{Ed25519PublicKey, Ed25519Signature},
     secp256k1::{Secp256k1PublicKey, Secp256k1Signature},
@@ -95,7 +97,10 @@ pub fn update_state_manager(
 /// - The payload format is invalid
 /// - The signature verification fails
 #[instrument(level = "debug", skip_all)]
-pub fn verify_response(payload: &serde_json::Value) -> Result<()> {
+pub fn verify_response_hash_and_signature(
+    payload: &serde_json::Value,
+    verify_hash: bool,
+) -> Result<()> {
     // Extract response hash and signature from payload
     let response_hash =
         payload[RESPONSE_HASH_KEY]
@@ -104,6 +109,13 @@ pub fn verify_response(payload: &serde_json::Value) -> Result<()> {
                 message: "Missing response_hash in payload".to_string(),
                 endpoint: "verify_signature".to_string(),
             })?;
+    let response_hash = STANDARD.decode(response_hash).unwrap();
+
+    if verify_hash {
+        verify_response_hash(&payload, &response_hash)?;
+    }
+
+    tracing::info!("FLAG: payload: {:?}", payload);
 
     let node_signature =
         payload[SIGNATURE_KEY]
@@ -130,32 +142,65 @@ pub fn verify_response(payload: &serde_json::Value) -> Result<()> {
 
     match signature.scheme() {
         SignatureScheme::ED25519 => {
-            let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).unwrap();
-            let signature = Ed25519Signature::from_bytes(signature.as_ref()).unwrap();
+            let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to create public key: {}", e),
+                    endpoint: "verify_signature".to_string(),
+                }
+            })?;
+            let signature =
+                Ed25519Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to create ed25519 signature: {}", e),
+                        endpoint: "verify_signature".to_string(),
+                    }
+                })?;
             public_key
-                .verify(response_hash.as_bytes(), &signature)
+                .verify(response_hash.as_slice(), &signature)
                 .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to verify signature: {}", e),
+                    message: format!("Failed to verify ed25519 signature: {}", e),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
         SignatureScheme::Secp256k1 => {
-            let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).unwrap();
-            let signature = Secp256k1Signature::from_bytes(signature.as_ref()).unwrap();
+            let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to create secp256k1 public key: {}", e),
+                    endpoint: "verify_signature".to_string(),
+                }
+            })?;
+            let signature =
+                Secp256k1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to create secp256k1 signature: {}", e),
+                        endpoint: "verify_signature".to_string(),
+                    }
+                })?;
             public_key
-                .verify(response_hash.as_bytes(), &signature)
+                .verify(response_hash.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
-                    message: "Failed to verify signature".to_string(),
+                    message: "Failed to verify secp256k1 signature".to_string(),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
         SignatureScheme::Secp256r1 => {
-            let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).unwrap();
-            let signature = Secp256r1Signature::from_bytes(signature.as_ref()).unwrap();
+            let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to create secp256r1 public key: {}", e),
+                    endpoint: "verify_signature".to_string(),
+                }
+            })?;
+            let signature =
+                Secp256r1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to create secp256r1 signature: {}", e),
+                        endpoint: "verify_signature".to_string(),
+                    }
+                })?;
             public_key
-                .verify(response_hash.as_bytes(), &signature)
+                .verify(response_hash.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
-                    message: "Failed to verify signature".to_string(),
+                    message: "Failed to verify secp256r1 signature".to_string(),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
@@ -167,5 +212,24 @@ pub fn verify_response(payload: &serde_json::Value) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+#[instrument(level = "debug", skip_all)]
+fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Result<()> {
+    let mut value_tmp = value.clone();
+    if let Some(obj) = value_tmp.as_object_mut() {
+        obj.remove(RESPONSE_HASH_KEY);
+        obj.remove(SIGNATURE_KEY);
+    }
+    let mut hasher = blake2::Blake2b::new();
+    hasher.update(value_tmp.to_string().as_bytes());
+    let blake2_hash: [u8; 32] = hasher.finalize().into();
+    if blake2_hash.as_slice() != response_hash {
+        return Err(AtomaProxyError::InternalError {
+            message: "Response hash does not match".to_string(),
+            endpoint: "verify_signature".to_string(),
+        });
+    }
     Ok(())
 }
