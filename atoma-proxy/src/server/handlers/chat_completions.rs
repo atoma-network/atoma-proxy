@@ -18,7 +18,7 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
-use super::{update_state_manager, RESPONSE_HASH_KEY};
+use super::{update_state_manager, verify_response, RESPONSE_HASH_KEY};
 use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
@@ -464,6 +464,8 @@ async fn handle_non_streaming_response(
         .and_then(|total_tokens| total_tokens.as_u64())
         .map(|n| n as i64)
         .unwrap_or(0);
+
+    verify_response(&response.0)?;
 
     state
         .state_manager_sender

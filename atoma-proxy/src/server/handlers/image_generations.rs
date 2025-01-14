@@ -16,6 +16,7 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
+use super::verify_response;
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
 
@@ -332,6 +333,8 @@ async fn handle_image_generation_response(
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
+
+    verify_response(&response.0)?;
 
     // Update the node throughput performance
     state

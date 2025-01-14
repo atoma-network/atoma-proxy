@@ -15,6 +15,8 @@ use tracing::{error, info, instrument};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
+use super::handlers::verify_response;
+
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
 
@@ -374,6 +376,16 @@ impl Stream for Streamer {
                         }
                     }
                 };
+
+                verify_response(&chunk).map_err(|e| {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error verifying response: {}",
+                        e
+                    );
+                    Error::new(format!("Error verifying and signing response: {}", e))
+                })?;
 
                 if self.start_decode.is_none() {
                     self.start_decode = Some(Instant::now());
