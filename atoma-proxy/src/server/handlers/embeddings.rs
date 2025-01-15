@@ -23,7 +23,10 @@ use crate::server::{
     MODEL,
 };
 
-use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
+use super::{
+    request_model::RequestModel, update_state_manager, verify_response_hash_and_signature,
+    RESPONSE_HASH_KEY,
+};
 use crate::server::Result;
 
 /// Path for the confidential embeddings endpoint.
@@ -361,6 +364,9 @@ async fn handle_embeddings_response(
                 message: format!("Failed to parse embeddings response: {:?}", err),
                 endpoint: endpoint.to_string(),
             })?;
+
+    let verify_hash = endpoint != CONFIDENTIAL_EMBEDDINGS_PATH;
+    verify_response_hash_and_signature(&response, verify_hash)?;
 
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
