@@ -107,24 +107,35 @@ pub async fn chat_completions_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    let is_streaming = payload
-        .get(STREAM)
-        .and_then(|stream| stream.as_bool())
-        .unwrap_or_default();
+    let endpoint = metadata.endpoint.clone();
+    tokio::spawn(async move {
+        // TODO: We should allow cancelling the request if the client disconnects
+        let is_streaming = payload
+            .get(STREAM)
+            .and_then(|stream| stream.as_bool())
+            .unwrap_or_default();
 
-    match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
-        Ok(response) => Ok(response),
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                metadata.selected_stack_small_id,
-                metadata.num_compute_units as i64,
-                0,
-                &metadata.endpoint,
-            )?;
-            Err(e)
+        match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    metadata.selected_stack_small_id,
+                    metadata.num_compute_units as i64,
+                    0,
+                    &metadata.endpoint,
+                )?;
+                Err(e)
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn image generation task: {:?}", e),
+        endpoint,
+    })?
 }
 
 /// Routes chat completion requests to either streaming or non-streaming handlers based on the request type.
@@ -333,24 +344,35 @@ pub async fn confidential_chat_completions_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    let is_streaming = payload
-        .get(STREAM)
-        .and_then(|stream| stream.as_bool())
-        .unwrap_or_default();
+    let endpoint = metadata.endpoint.clone();
+    tokio::spawn(async move {
+        // TODO: We should allow cancelling the request if the client disconnects
+        let is_streaming = payload
+            .get(STREAM)
+            .and_then(|stream| stream.as_bool())
+            .unwrap_or_default();
 
-    match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming).await {
-        Ok(response) => Ok(response),
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                metadata.selected_stack_small_id,
-                metadata.num_compute_units as i64,
-                0,
-                &metadata.endpoint,
-            )?;
-            Err(e)
+        match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    metadata.selected_stack_small_id,
+                    metadata.num_compute_units as i64,
+                    0,
+                    &metadata.endpoint,
+                )?;
+                Err(e)
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn image generation task: {:?}", e),
+        endpoint,
+    })?
 }
 
 #[utoipa::path(

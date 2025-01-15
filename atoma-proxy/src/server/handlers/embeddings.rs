@@ -158,37 +158,46 @@ pub async fn embeddings_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    let RequestMetadataExtension {
-        node_address,
-        node_id,
-        num_compute_units: num_input_compute_units,
-        ..
-    } = metadata;
-    match handle_embeddings_response(
-        &state,
-        node_address,
-        node_id,
-        headers,
-        payload,
-        num_input_compute_units as i64,
-        metadata.endpoint.clone(),
-        metadata.model_name,
-        metadata.selected_stack_small_id,
-    )
-    .await
-    {
-        Ok(response) => Ok(Json(response).into_response()),
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                metadata.selected_stack_small_id,
-                num_input_compute_units as i64,
-                0,
-                &metadata.endpoint,
-            )?;
-            Err(e)
+    let endpoint = metadata.endpoint.clone();
+    tokio::spawn(async move {
+        // TODO: We should allow cancelling the request if the client disconnects
+        let RequestMetadataExtension {
+            node_address,
+            node_id,
+            num_compute_units: num_input_compute_units,
+            ..
+        } = metadata;
+        match handle_embeddings_response(
+            &state,
+            node_address,
+            node_id,
+            headers,
+            payload,
+            num_input_compute_units as i64,
+            metadata.endpoint.clone(),
+            metadata.model_name,
+            metadata.selected_stack_small_id,
+        )
+        .await
+        {
+            Ok(response) => Ok(Json(response).into_response()),
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    metadata.selected_stack_small_id,
+                    num_input_compute_units as i64,
+                    0,
+                    &metadata.endpoint,
+                )?;
+                Err(e)
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn image generation task: {:?}", e),
+        endpoint,
+    })?
 }
 
 /// Atoma's confidential embeddings OpenAPI documentation.
@@ -237,55 +246,64 @@ pub async fn confidential_embeddings_create(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
-    let RequestMetadataExtension {
-        node_address,
-        node_id,
-        num_compute_units: num_input_compute_units,
-        ..
-    } = metadata;
-    match handle_embeddings_response(
-        &state,
-        node_address,
-        node_id,
-        headers,
-        payload,
-        num_input_compute_units as i64,
-        metadata.endpoint.clone(),
-        metadata.model_name,
-        metadata.selected_stack_small_id,
-    )
+    let endpoint = metadata.endpoint.clone();
+    tokio::spawn(async move {
+        // TODO: We should allow cancelling the request if the client disconnects
+        let RequestMetadataExtension {
+            node_address,
+            node_id,
+            num_compute_units: num_input_compute_units,
+            ..
+        } = metadata;
+        match handle_embeddings_response(
+            &state,
+            node_address,
+            node_id,
+            headers,
+            payload,
+            num_input_compute_units as i64,
+            metadata.endpoint.clone(),
+            metadata.model_name,
+            metadata.selected_stack_small_id,
+        )
+        .await
+        {
+            Ok(response) => {
+                // NOTE: In this case, we can safely assume that the response is a well-formed JSON object
+                // with a "total_tokens" field, which correctly specifies the number of total tokens
+                // processed by the node, as the latter is running within a TEE.
+                let total_tokens = response
+                    .get("usage")
+                    .and_then(|usage| usage.get("total_tokens"))
+                    .and_then(|total_tokens| total_tokens.as_u64())
+                    .map(|n| n as i64)
+                    .unwrap_or(0);
+                update_state_manager(
+                    &state.state_manager_sender,
+                    metadata.selected_stack_small_id,
+                    num_input_compute_units as i64,
+                    total_tokens,
+                    &metadata.endpoint,
+                )?;
+                Ok(Json(response).into_response())
+            }
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    metadata.selected_stack_small_id,
+                    num_input_compute_units as i64,
+                    0,
+                    &metadata.endpoint,
+                )?;
+                Err(e)
+            }
+        }
+    })
     .await
-    {
-        Ok(response) => {
-            // NOTE: In this case, we can safely assume that the response is a well-formed JSON object
-            // with a "total_tokens" field, which correctly specifies the number of total tokens
-            // processed by the node, as the latter is running within a TEE.
-            let total_tokens = response
-                .get("usage")
-                .and_then(|usage| usage.get("total_tokens"))
-                .and_then(|total_tokens| total_tokens.as_u64())
-                .map(|n| n as i64)
-                .unwrap_or(0);
-            update_state_manager(
-                &state.state_manager_sender,
-                metadata.selected_stack_small_id,
-                num_input_compute_units as i64,
-                total_tokens,
-                &metadata.endpoint,
-            )?;
-            Ok(Json(response).into_response())
-        }
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                metadata.selected_stack_small_id,
-                num_input_compute_units as i64,
-                0,
-                &metadata.endpoint,
-            )?;
-            Err(e)
-        }
-    }
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn image generation task: {:?}", e),
+        endpoint,
+    })?
 }
 
 /// Handles the response processing for embeddings requests by forwarding them to AI nodes and managing performance metrics.
