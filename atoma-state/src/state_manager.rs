@@ -4151,11 +4151,14 @@ impl AtomaState {
     /// - The database query fails to execute (that could mean the balance is not available)
     #[instrument(level = "trace", skip(self))]
     pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
-        sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1")
+        let result = sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
             .bind(user_id)
             .bind(balance)
             .execute(&self.db)
             .await?;
+        if result.rows_affected() != 1 {
+            return Err(AtomaStateManagerError::InsufficientBalance);
+        }
         Ok(())
     }
 
@@ -4220,6 +4223,8 @@ pub enum AtomaStateManagerError {
     FailedToRetrieveCollateral(String),
     #[error("Failed to retrieve fmspc: `{0}`")]
     FailedToRetrieveFmspc(String),
+    #[error("Insufficient balance")]
+    InsufficientBalance,
 }
 
 #[cfg(test)]
