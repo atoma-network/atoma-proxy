@@ -136,6 +136,32 @@ paths:
           description: Internal server error
       security:
       - bearerAuth: []
+  /v1/confidential/chat/completions#stream:
+    post:
+      tags:
+      - Confidential Chat
+      operationId: confidential_chat_completions_create_stream
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
+        required: true
+      responses:
+        '200':
+          description: Chat completions
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ConfidentialComputeStreamResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+      security:
+      - bearerAuth: []
   /v1/confidential/embeddings:
     post:
       tags:
@@ -743,6 +769,15 @@ components:
           - type: 'null'
           - $ref: '#/components/schemas/Usage'
             description: Usage statistics for the request
+    ConfidentialComputeStreamResponse:
+      type: object
+      description: Represents a response from a confidential compute request
+      required:
+      - data
+      properties:
+        data:
+          $ref: '#/components/schemas/ConfidentialComputeResponse'
+          description: The stream of chat completion chunks.
     CreateChatCompletionRequest:
       allOf:
       - $ref: '#/components/schemas/ChatCompletionRequest'
@@ -1128,6 +1163,8 @@ x-speakeasy-name-override:
   methodNameOverride: create_stream
 - operationId: confidential_chat_completions_create
   methodNameOverride: create
+- operationId: confidential_chat_completions_create_stream
+  methodNameOverride: create_stream
 - operationId: embeddings_create
   methodNameOverride: create
 - operationId: confidential_embeddings_create

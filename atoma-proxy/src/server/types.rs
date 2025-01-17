@@ -59,6 +59,13 @@ pub struct ConfidentialComputeResponse {
     pub usage: Option<Usage>,
 }
 
+/// Represents a response from a confidential compute request
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct ConfidentialComputeStreamResponse {
+    /// The stream of chat completion chunks.
+    pub data: ConfidentialComputeResponse,
+}
+
 /// Represents usage statistics for a confidential compute request
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct Usage {

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::server::types::ConfidentialComputeResponse;
+use crate::server::types::{ConfidentialComputeResponse, ConfidentialComputeStreamResponse};
 use crate::server::{
     error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
     streamer::Streamer, types::ConfidentialComputeRequest,
@@ -240,7 +240,7 @@ pub async fn chat_completions_create_stream(
     // This endpoint exists only for OpenAPI documentation
     // Actual streaming is handled by chat_completions_create
     Err(AtomaProxyError::NotImplemented {
-        message: "Streaming is not implemented".to_string(),
+        message: "This is a mock endpoint for OpenAPI documentation".to_string(),
         endpoint: CHAT_COMPLETIONS_PATH.to_string(),
     })
 }
@@ -268,7 +268,10 @@ pub async fn chat_completions_create_stream(
 /// * `ChatCompletionChunkDelta` - Incremental updates in streaming responses
 #[derive(OpenApi)]
 #[openapi(
-    paths(confidential_chat_completions_create),
+    paths(
+        confidential_chat_completions_create,
+        confidential_chat_completions_create_stream
+    ),
     components(schemas(ConfidentialComputeRequest))
 )]
 pub(crate) struct ConfidentialChatCompletionsOpenApi;
@@ -348,6 +351,37 @@ pub async fn confidential_chat_completions_create(
             Err(e)
         }
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "#stream",
+    security(
+        ("bearerAuth" = [])
+    ),
+    request_body = ConfidentialComputeRequest,
+    responses(
+        (status = OK, description = "Chat completions", content(
+            (ConfidentialComputeStreamResponse = "text/event-stream")
+        )),
+        (status = BAD_REQUEST, description = "Bad request"),
+        (status = UNAUTHORIZED, description = "Unauthorized"),
+        (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
+    )
+)]
+#[allow(dead_code)]
+pub async fn confidential_chat_completions_create_stream(
+    Extension(_metadata): Extension<RequestMetadataExtension>,
+    State(_state): State<ProxyState>,
+    _headers: HeaderMap,
+    Json(_payload): Json<ConfidentialComputeStreamResponse>,
+) -> Result<Response<Body>> {
+    // This endpoint exists only for OpenAPI documentation
+    // Actual streaming is handled by chat_completions_create
+    Err(AtomaProxyError::NotImplemented {
+        message: "This is a mock endpoint for OpenAPI documentation".to_string(),
+        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+    })
 }
 
 /// Handles non-streaming chat completion requests by processing them through the inference service.
