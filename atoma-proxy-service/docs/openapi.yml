@@ -659,6 +659,10 @@ components:
       required:
       - transaction_digest
       properties:
+        proof_signature:
+          type:
+          - string
+          - 'null'
         transaction_digest:
           type: string
   securitySchemes:

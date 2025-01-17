@@ -559,7 +559,12 @@ impl Auth {
     /// * If the user is not found
     /// * If the user balance is not updated
     #[instrument(level = "info", skip(self))]
-    pub async fn usdc_payment(&self, jwt: &str, transaction_digest: &str) -> Result<()> {
+    pub async fn usdc_payment(
+        &self,
+        jwt: &str,
+        transaction_digest: &str,
+        proof_signature: Option<String>,
+    ) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
 
         let (result_sender, result_receiver) = oneshot::channel();
@@ -615,18 +620,26 @@ impl Auth {
             .get_wallet_address()
             .map_err(AuthError::SuiError)?;
         if receiver == own_address {
-            let (result_sender, result_receiver) = oneshot::channel();
-            self.state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::ConfirmUser {
-                    sui_address: sender.to_string(),
-                    user_id: claims.user_id,
-                    result_sender,
-                })?;
-            let is_their_wallet = result_receiver.await??;
+            match proof_signature {
+                Some(_signature) => {
+                    // TODO: Implement the logic for the proof zklogin signature
+                }
+                None => {
+                    let (result_sender, result_receiver) = oneshot::channel();
+                    self.state_manager_sender
+                        .send(AtomaAtomaStateManagerEvent::ConfirmUser {
+                            sui_address: sender.to_string(),
+                            user_id: claims.user_id,
+                            result_sender,
+                        })?;
+                    let is_their_wallet = result_receiver.await??;
 
-            if !is_their_wallet {
-                return Err(AuthError::PaymentNotForThisUser);
+                    if !is_their_wallet {
+                        return Err(AuthError::PaymentNotForThisUser);
+                    }
+                }
             }
+
             // We are the receiver and we know the sender
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::TopUpBalance {

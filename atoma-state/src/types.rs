@@ -52,6 +52,7 @@ pub struct ProofRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct UsdcPaymentRequest {
     pub transaction_digest: String,
+    pub proof_signature: Option<String>,
 }
 
 /// Represents a computed units processed response

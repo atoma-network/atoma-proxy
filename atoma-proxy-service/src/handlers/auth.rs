@@ -472,7 +472,7 @@ pub(crate) async fn usdc_payment(
 
     proxy_service_state
         .auth
-        .usdc_payment(jwt, &body.transaction_digest)
+        .usdc_payment(jwt, &body.transaction_digest, body.proof_signature.clone())
         .await
         .map_err(|e| {
             error!("Failed to usdc payment request: {:?}", e);
