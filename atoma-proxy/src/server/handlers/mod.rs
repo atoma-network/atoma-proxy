@@ -115,8 +115,6 @@ pub fn verify_response_hash_and_signature(
         verify_response_hash(&payload, &response_hash)?;
     }
 
-    tracing::info!("FLAG: payload: {:?}", payload);
-
     let node_signature =
         payload[SIGNATURE_KEY]
             .as_str()
