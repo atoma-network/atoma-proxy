@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod google;
 mod sui;
 
 pub use auth::{Auth, AuthError};

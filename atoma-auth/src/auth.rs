@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
 use atoma_utils::hashing::blake2b_hash;
@@ -29,7 +29,10 @@ use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
 
-use crate::{AtomaAuthConfig, Sui};
+use crate::{
+    google::{self, fetch_google_public_keys},
+    AtomaAuthConfig, Sui,
+};
 
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
@@ -59,6 +62,8 @@ pub enum AuthError {
     AtomaStateManagerError(#[from] AtomaStateManagerError),
     #[error("Refresh token is not valid")]
     InvalidRefreshToken,
+    #[error("Reqwest error: {0}")]
+    ReqwestError(#[from] reqwest::Error),
     #[error("User already registered")]
     UserAlreadyRegistered,
     #[error("Password not valid or user not found")]
@@ -85,6 +90,8 @@ pub enum AuthError {
     SenderOrReceiverNotFound,
     #[error("The payment is not for this user")]
     PaymentNotForThisUser,
+    #[error("Google error: {0}")]
+    GoogleError(#[from] crate::google::GoogleError),
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -101,22 +108,29 @@ pub struct Auth {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// The sui client
     sui: Arc<RwLock<Sui>>,
+    /// GooglePublicKeys
+    google_public_keys: HashMap<String, DecodingKey>,
+    /// Google client id
+    google_client_id: String,
 }
 
 impl Auth {
     /// Constructor
-    pub fn new(
+    pub async fn new(
         config: AtomaAuthConfig,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         sui: Arc<RwLock<Sui>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let google_public_keys = fetch_google_public_keys().await?;
+        Ok(Self {
             secret_key: config.secret_key,
             access_token_lifetime: config.access_token_lifetime,
             refresh_token_lifetime: config.refresh_token_lifetime,
             state_manager_sender,
             sui,
-        }
+            google_public_keys,
+            google_client_id: config.google_client_id,
+        })
     }
 
     /// Generate a new refresh token
@@ -308,6 +322,36 @@ impl Auth {
             .map(|user_id| user_id as u64)
             .ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
         let refresh_token = self.generate_refresh_token(user_id as i64).await?;
+        let access_token = self.generate_access_token(&refresh_token).await?;
+        Ok((refresh_token, access_token))
+    }
+
+    /// Check the google oauth token
+    /// This method will check the google oauth token and generate a new refresh and access token
+    /// The method will check if the email is present in the claims and store the user in the DB
+    /// The method will generate a new refresh and access token
+    #[instrument(level = "info", skip(self))]
+    pub async fn check_google_id_token(&self, id_token: &str) -> Result<(String, String)> {
+        let claims = google::verify_google_id_token(
+            id_token,
+            &self.google_client_id,
+            &self.google_public_keys,
+        )?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        let email = match claims.email {
+            Some(email) => email,
+            None => {
+                return Err(google::GoogleError::EmailNotFound)?;
+            }
+        };
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::OAuth {
+                username: email,
+                result_sender,
+            })?;
+        let user_id = result_receiver.await??;
+        let refresh_token = self.generate_refresh_token(user_id).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
     }
@@ -719,12 +763,15 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     }
 
     async fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
-        let config = AtomaAuthConfig::new("secret".to_string(), 1, 1);
+        let config =
+            AtomaAuthConfig::new("secret".to_string(), 1, 1, "google_client_id".to_string());
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
         let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
         let sui = crate::Sui::new(&sui_config).await.unwrap();
-        let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)));
+        let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)))
+            .await
+            .unwrap();
         (auth, state_manager_receiver)
     }
 

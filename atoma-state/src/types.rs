@@ -551,6 +551,12 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
     },
+    /// Retrieves the user ID by oauth username
+    OAuth {
+        /// The username of the user
+        username: String,
+        result_sender: oneshot::Sender<Result<i64>>,
+    },
     /// Checks if a refresh token is valid for a user
     IsRefreshTokenValid {
         /// The user ID
@@ -634,6 +640,17 @@ pub enum AtomaAtomaStateManagerEvent {
     /// Acknowledges a USDC payment. Fails if the digest has already been acknowledged.
     InsertNewUsdcPaymentDigest {
         digest: String,
+        result_sender: oneshot::Sender<Result<()>>,
+    },
+    /// Retrieves the salt of a user
+    GetSalt {
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
+    },
+    /// Sets the salt of a user
+    SetSalt {
+        user_id: i64,
+        salt: String,
         result_sender: oneshot::Sender<Result<()>>,
     },
 }

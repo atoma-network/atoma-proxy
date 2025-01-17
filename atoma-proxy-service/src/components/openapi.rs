@@ -8,11 +8,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     handlers::{
         auth::{
-            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSuiAddress,
-            GetUserProfile, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress,
-            UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH,
-            GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH, LOGIN_PATH, REGISTER_PATH,
-            REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
+            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSalt, GetSuiAddress,
+            GetUserProfile, GoogleOAuth, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi,
+            UpdateSuiAddress, UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH,
+            GET_BALANCE_PATH, GET_SALT_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH,
+            GOOGLE_OAUTH_PATH, LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH,
+            UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
@@ -43,10 +44,12 @@ pub fn openapi_router() -> Router {
             (path = UPDATE_SUI_ADDRESS_PATH, api = UpdateSuiAddress, tags = ["Auth"]),
             (path = USDC_PAYMENT_PATH, api = UsdcPayment, tags = ["Auth"]),
             (path = GET_SUI_ADDRESS_PATH, api = GetSuiAddress, tags = ["Auth"]),
+            (path = GOOGLE_OAUTH_PATH, api = GoogleOAuth, tags = ["Auth"]),
             (path = GET_CURRENT_STACKS_PATH, api = GetCurrentStacksOpenApi, tags = ["Stacks"]),
             (path = GET_ALL_STACKS_FOR_USER_PATH, api = GetStacksByUserId, tags = ["Stacks"]),
             (path = GET_BALANCE_PATH, api = GetBalance, tags = ["Auth"]),
             (path = GET_USER_PROFILE_PATH, api = GetUserProfile, tags = ["Auth"]),
+            (path = GET_SALT_PATH, api = GetSalt, tags = ["Auth"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),
             (path = LATENCY_PATH, api = GetLatency, tags = ["Stats"]),
