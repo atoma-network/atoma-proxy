@@ -14,6 +14,7 @@ use fastcrypto::{
     secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
     traits::{ToFromBytes, VerifyingKey},
 };
+use fastcrypto_zkp::zk_login_utils::Bn254FrElement;
 use flume::Sender;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
@@ -21,10 +22,11 @@ use serde::{Deserialize, Serialize};
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
 use sui_sdk::types::{
     base_types::SuiAddress,
-    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
+    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature, ZkLoginPublicIdentifier},
     object::Owner,
     TypeTag,
 };
+use sui_sdk_types::{SimpleSignature, UserSignature};
 use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
@@ -540,6 +542,72 @@ impl Auth {
         Ok(())
     }
 
+    async fn get_zk_address(zk_login_signature: &str, tx_digest: &str) -> Result<String> {
+        let user_signature = UserSignature::from_base64(zk_login_signature)?;
+        if let UserSignature::ZkLogin(zk_login_authenticator) = user_signature {
+            // The message is the transaction digest that we claim is ours
+            let intent_msg = IntentMessage::new(
+                Intent::personal_message(),
+                PersonalMessage {
+                    message: tx_digest.as_bytes().to_vec(),
+                },
+            );
+
+            let intent_bcs = bcs::to_bytes(&intent_msg).unwrap();
+            let message_hash = blake2b_hash(&intent_bcs);
+            // First verify that the signature is valid
+            match zk_login_authenticator.signature {
+                SimpleSignature::Ed25519 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Ed25519Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+                SimpleSignature::Secp256k1 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Secp256k1Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+                SimpleSignature::Secp256r1 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Secp256r1Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+            };
+            // Now that we know the signature is valid, lets get the address from the signature
+            let address_seed =
+                Bn254FrElement::from_str(&zk_login_authenticator.inputs.address_seed.to_string())
+                    .map_err(|e| {
+                    AuthError::FailedToParseSignature(format!(
+                        "Failed to parse address seed: {}",
+                        e
+                    ))
+                })?;
+            let public_id =
+                ZkLoginPublicIdentifier::new(google::ISS, &address_seed).map_err(|e| {
+                    AuthError::FailedToParseSignature(format!(
+                        "Failed to parse public identifier: {}",
+                        e
+                    ))
+                })?;
+            let public_key = PublicKey::ZkLogin(public_id);
+            let sui_address = SuiAddress::from(&public_key);
+            Ok(sui_address.to_string())
+        } else {
+            Err(AuthError::FailedToParseSignature(
+                "Not a zk_login signature".to_string(),
+            ))
+        }
+    }
+
     /// Updates the balance of the user
     ///
     /// # Arguments
@@ -621,8 +689,12 @@ impl Auth {
             .map_err(AuthError::SuiError)?;
         if receiver == own_address {
             match proof_signature {
-                Some(_signature) => {
-                    // TODO: Implement the logic for the proof zklogin signature
+                Some(signature) => {
+                    if sender.to_string()
+                        != Self::get_zk_address(&signature, transaction_digest).await?
+                    {
+                        return Err(AuthError::PaymentNotForThisUser);
+                    }
                 }
                 None => {
                     let (result_sender, result_receiver) = oneshot::channel();

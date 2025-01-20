@@ -576,6 +576,7 @@ dependencies = [
  "chrono",
  "config",
  "fastcrypto 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fastcrypto-zkp",
  "flume",
  "hex",
  "jsonwebtoken",
@@ -588,6 +589,7 @@ dependencies = [
  "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.39.1)",
  "sui-keys",
  "sui-sdk",
+ "sui-sdk-types 0.0.2",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -7754,7 +7756,7 @@ dependencies = [
  "serde_with 3.11.0",
  "serde_yaml 0.8.26",
  "sui-protocol-config",
- "sui-sdk-types",
+ "sui-sdk-types 0.0.1",
  "sui-types",
  "tap",
  "thiserror 1.0.69",
@@ -7810,6 +7812,25 @@ dependencies = [
  "hex",
  "roaring",
  "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_with 3.11.0",
+ "winnow",
+]
+
+[[package]]
+name = "sui-sdk-types"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2ab6e861ea730d82a40b5d47f7a669cc46ebae76ec012fc1532fc029efad4c8"
+dependencies = [
+ "base64ct",
+ "bcs",
+ "bnum",
+ "bs58 0.5.1",
+ "hex",
+ "roaring",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7917,7 +7938,7 @@ dependencies = [
  "sui-enum-compat-util",
  "sui-macros",
  "sui-protocol-config",
- "sui-sdk-types",
+ "sui-sdk-types 0.0.1",
  "tap",
  "thiserror 1.0.69",
  "tonic",

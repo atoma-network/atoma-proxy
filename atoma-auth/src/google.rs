@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+pub const ISS: &str = "https://accounts.google.com";
+
 /// Claims struct for Google ID tokens
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -122,7 +124,7 @@ pub fn verify_google_id_token(
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_audience(&[audience]);
     let mut issuers = HashSet::new();
-    issuers.insert("https://accounts.google.com".to_string());
+    issuers.insert(ISS.to_string());
     validation.iss = Some(issuers);
 
     // Verify the token
