@@ -9,6 +9,7 @@ atoma-p2p = { workspace = true }
 atoma-sui = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
+dcap-qvl = { workspace = true }
 flume = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -16,8 +17,9 @@ sqlx = { workspace = true, features = ["chrono", "runtime-tokio-native-tls", "sq
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
-utoipa.workspace = true
+utoipa = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
 serial_test = { workspace = true }
+uuid = { workspace = true }

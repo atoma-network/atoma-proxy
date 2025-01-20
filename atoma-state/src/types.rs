@@ -9,21 +9,49 @@ use utoipa::ToSchema;
 
 use crate::state_manager::Result;
 
+/// Request payload for revoking an API token
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RevokeApiTokenRequest {
+    /// The API token to be revoked
     pub api_token: String,
 }
 
+/// Request payload for user authentication
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AuthRequest {
+    /// The user's unique identifier
     pub username: String,
+    /// The user's password
     pub password: String,
 }
 
+/// Response returned after successful authentication
+///
+/// Contains both an access token and a refresh token for implementing token-based authentication:
+/// - The access token is used to authenticate API requests
+/// - The refresh token is used to obtain new access tokens when they expire
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct AuthResponse {
+    /// JWT token used to authenticate API requests
     pub access_token: String,
+    /// Long-lived token used to obtain new access tokens
     pub refresh_token: String,
+}
+
+/// Request payload for updating the sui address for the user.
+///
+/// Contains the signature of the user to prove ownership of the sui address.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ProofRequest {
+    pub signature: String,
+}
+
+/// Request payload for acknowledging a usdc payment.
+///
+/// Contains the transaction digest of the payment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct UsdcPaymentRequest {
+    pub transaction_digest: String,
 }
 
 /// Represents a computed units processed response
@@ -49,6 +77,14 @@ pub struct ComputedUnitsProcessedResponse {
     pub time: f64,
 }
 
+/// Represents a user profile
+/// This struct is used to represent the response for the get_user_profile endpoint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct UserProfile {
+    /// Username of the user
+    pub username: String,
+}
+
 /// Represents a latency response
 /// This struct is used to represent the response for the get_latency endpoint.
 /// The timestamp of the latency measurement. We measure the latency on hourly basis. So the timestamp is the hour for which it is measured.
@@ -65,6 +101,21 @@ pub struct LatencyResponse {
     /// Total number of requests in that hour
     pub requests: i64,
 }
+
+/// Represents a stats stacks response
+/// This struct is used to represent the response for the get_stats_stacks endpoint.
+/// The timestamp of the stats stacks measurement. We measure the stats stacks on hourly basis. So the timestamp is the hour for which it is measured.
+/// The number of compute units is the total number of compute units in the system. The settled number of compute units is the total number of settled compute units in the system.
+///
+/// E.g. you have new stack for 10 compute units and stack settled with 5 settled compute units during the hour.
+/// The number of compute units will be 10 and the settled number of compute units will be 5.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct StatsStackResponse {
+    pub timestamp: DateTime<Utc>,
+    pub num_compute_units: i64,
+    pub settled_num_compute_units: i64,
+}
+
 /// Represents a task in the system
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Task {
@@ -109,10 +160,21 @@ impl From<TaskRegisteredEvent> for Task {
 pub struct CheapestNode {
     /// Unique small integer identifier for the task
     pub task_small_id: i64,
-    /// Price per compute unit for the task that is offered by some node
-    pub price_per_compute_unit: i64,
+    /// Price per one million compute units for the task that is offered by some node
+    pub price_per_one_million_compute_units: i64,
     /// Maximum number of compute units for the task that is offered by the cheapest node
     pub max_num_compute_units: i64,
+    /// Unique small integer identifier for the node
+    pub node_small_id: i64,
+}
+
+/// Response for getting the node distribution
+/// This struct is used to represent the response for the get_node_distribution endpoint.
+/// The country is the country of the node and the count is the number of nodes in that country.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct NodeDistribution {
+    pub country: Option<String>,
+    pub count: i64,
 }
 
 /// Represents a stack of compute units for a specific task
@@ -130,8 +192,8 @@ pub struct Stack {
     pub selected_node_id: i64,
     /// Total number of compute units in this stack
     pub num_compute_units: i64,
-    /// Price of the stack (likely in smallest currency unit)
-    pub price: i64,
+    /// Price per one million compute units for the stack (likely in smallest currency unit)
+    pub price_per_one_million_compute_units: i64,
     /// Number of compute units already processed
     pub already_computed_units: i64,
     /// Indicates whether the stack is currently in the settle period
@@ -152,7 +214,7 @@ impl From<StackCreatedEvent> for Stack {
             task_small_id: event.task_small_id.inner as i64,
             selected_node_id: event.selected_node_id.inner as i64,
             num_compute_units: event.num_compute_units as i64,
-            price: event.price as i64,
+            price_per_one_million_compute_units: event.price_per_one_million_compute_units as i64,
             already_computed_units: 0,
             in_settle_period: false,
             total_hash: vec![],
@@ -257,11 +319,24 @@ pub struct NodeSubscription {
     /// Unique small integer identifier for the task
     pub task_small_id: i64,
     /// Price per compute unit for the subscription
-    pub price_per_compute_unit: i64,
+    pub price_per_one_million_compute_units: i64,
     /// Maximum number of compute units for the subscription
     pub max_num_compute_units: i64,
     /// Indicates whether the subscription is valid
     pub valid: bool,
+}
+
+/// Represents a node's Diffie-Hellman public key so that a client
+/// can encrypt a message and the selected node can decrypt it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct NodePublicKey {
+    /// Unique small integer identifier for the node
+    pub node_small_id: i64,
+    /// Public key of the node
+    pub public_key: Vec<u8>,
+    /// The stack small id that is associated with the selected node
+    #[sqlx(default)]
+    pub stack_small_id: Option<i64>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {
@@ -292,100 +367,273 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Oneshot channel to send the result back to the sender channel
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
+    /// Retrieves all stacks associated with a specific model that meet compute unit requirements
     GetStacksForModel {
+        /// The name/identifier of the model to query stacks for
         model: String,
+        /// The minimum number of available compute units required
         free_compute_units: i64,
-        result_sender: oneshot::Sender<Result<Vec<Stack>>>,
+        /// The user id of the stacks to filter by
+        user_id: i64,
+        /// Indicates whether the stacks are associated with confidential compute or not
+        is_confidential: bool,
+        /// Channel to send back the list of matching stacks
+        /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
+        result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
+    /// Verifies if a stack is valid for confidential compute request
+    VerifyStackForConfidentialComputeRequest {
+        /// Unique small integer identifier for the stack   
+        stack_small_id: i64,
+
+        /// Available compute units for the stack
+        available_compute_units: i64,
+
+        /// Channel to send back the result
+        /// Returns Ok(bool) with true if the stack is valid or false if it is not
+        result_sender: oneshot::Sender<Result<bool>>,
+    },
+    /// Locks compute units for a stack
+    LockComputeUnitsForStack {
+        /// Unique small integer identifier for the stack
+        stack_small_id: i64,
+        /// Available compute units for the stack
+        available_compute_units: i64,
+        /// Channel to send back the result
+        /// Returns Ok(()) if the stack is valid or an error if it is not
+        result_sender: oneshot::Sender<Result<()>>,
+    },
+    /// Retrieves all tasks associated with a specific model
     GetTasksForModel {
+        /// The name/identifier of the model to query tasks for
         model: String,
+        /// Channel to send back the list of matching tasks
+        /// Returns Ok(Vec<Task>) with matching tasks or an error if the query fails
         result_sender: oneshot::Sender<Result<Vec<Task>>>,
     },
+    /// Retrieves the cheapest node for a specific model
     GetCheapestNodeForModel {
+        /// The name/identifier of the model to query the cheapest node for
         model: String,
+        /// Indicates whether the stacks are associated with confidential compute or not
+        is_confidential: bool,
+        /// Channel to send back the cheapest node
+        /// Returns Ok(Option<CheapestNode>) with the cheapest node or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<CheapestNode>>>,
     },
+    GetNodePublicUrlAndSmallId {
+        /// Unique small integer identifier for the stack
+        stack_small_id: i64,
+        /// Channel to send back the public url and small id
+        /// Returns Ok(Option<(String, i64)>) with the public url and small id or an error if the query fails
+        result_sender: oneshot::Sender<Result<(Option<String>, i64)>>,
+    },
+    /// Selects a node's public key for encryption
+    SelectNodePublicKeyForEncryption {
+        /// The name/identifier of the model to query the cheapest node for
+        model: String,
+        /// The maxinum number of tokens to be processed
+        max_num_tokens: i64,
+        /// Channel to send back the public key
+        /// Returns Ok(Option<NodePublicKey>) with the public key or an error if the query fails
+        result_sender: oneshot::Sender<Option<NodePublicKey>>,
+    },
+    SelectNodePublicKeyForEncryptionForNode {
+        /// Unique small integer identifier for the node
+        node_small_id: i64,
+        /// Channel to send back the public key
+        /// Returns Ok(Option<NodePublicKey>) with the public key or an error if the query fails
+        result_sender: oneshot::Sender<Option<NodePublicKey>>,
+    },
+    /// Upserts a node's public address
     UpsertNodePublicAddress {
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Public address of the node
         public_address: String,
+        country: String,
     },
+    /// Retrieves a node's public address
     GetNodePublicAddress {
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+
+        /// Channel to send back the public address
+        /// Returns Ok(Option<String>) with the public address or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
+    /// Retrieves a node's Sui address
     GetNodeSuiAddress {
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Channel to send back the Sui address
+        /// Returns Ok(Option<String>) with the Sui address or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
+    /// Records statistics about a new stack in the database
     NewStackAcquired {
+        /// The event that triggered the stack creation
         event: StackCreatedEvent,
+        /// Number of compute units already processed
         already_computed_units: i64,
+        /// Timestamp of the transaction that created the stack
+        transaction_timestamp: DateTime<Utc>,
+        /// User id of the stack owner (referencing local user table)
+        user_id: i64,
     },
+    /// Records statistics about a node's throughput performance
     UpdateNodeThroughputPerformance {
+        /// Timestamp of the transaction that created the stack
         timestamp: DateTime<Utc>,
+        /// The name/identifier of the model
         model_name: String,
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Number of input tokens
         input_tokens: i64,
+        /// Number of output tokens
         output_tokens: i64,
+        /// Time taken to process the tokens
         time: f64,
     },
+    /// Records statistics about a node's prefill performance
     UpdateNodePrefillPerformance {
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Number of tokens
         tokens: i64,
+        /// Time taken to process the tokens
         time: f64,
     },
+    /// Records statistics about a node's decode performance
     UpdateNodeDecodePerformance {
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Number of tokens
         tokens: i64,
+        /// Time taken to process the tokens
         time: f64,
     },
+    /// Records statistics about a node's latency performance
     UpdateNodeLatencyPerformance {
+        /// Timestamp of the transaction that created the stack
         timestamp: DateTime<Utc>,
+        /// Unique small integer identifier for the node
         node_small_id: i64,
+        /// Latency in seconds
         latency: f64,
     },
+    /// Retrieves the X25519 public key for a selected node
     GetSelectedNodeX25519PublicKey {
+        /// Unique small integer identifier for the node
         selected_node_id: i64,
+        /// Channel to send back the X25519 public key
+        /// Returns Ok(Option<Vec<u8>>) with the public key or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
+    /// Registers a new user with a password
     RegisterUserWithPassword {
+        /// The username of the user
         username: String,
+        /// The password of the user
         password: String,
+        /// Channel to send back the user ID
+        /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
     },
+    /// Retrieves the user ID by username and password
     GetUserIdByUsernamePassword {
+        /// The username of the user
         username: String,
+        /// The password of the user
         password: String,
+        /// Channel to send back the user ID
+        /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
     },
+    /// Checks if a refresh token is valid for a user
     IsRefreshTokenValid {
+        /// The user ID
         user_id: i64,
+        /// The hash of the refresh token
         refresh_token_hash: String,
+        /// Channel to send back the result
+        /// Returns Ok(bool) with true if the refresh token is valid or false if it is not
         result_sender: oneshot::Sender<Result<bool>>,
     },
+    /// Stores a refresh token for a user
     StoreRefreshToken {
+        /// The user ID
         user_id: i64,
+        /// The hash of the refresh token
         refresh_token_hash: String,
     },
+    /// Revokes a refresh token for a user
     RevokeRefreshToken {
+        /// The user ID
         user_id: i64,
+        /// The hash of the refresh token
         refresh_token_hash: String,
     },
+    /// Checks if an API token is valid for a user
     IsApiTokenValid {
-        user_id: i64,
+        /// The API token
         api_token: String,
+        /// Channel to send back the result
+        /// Returns Ok(bool) with true if the API token is valid or false if it is not
+        result_sender: oneshot::Sender<Result<i64>>,
+    },
+    /// Revokes an API token for a user
+    RevokeApiToken {
+        /// The user ID
+        user_id: i64,
+        /// The API token
+        api_token: String,
+    },
+    /// Stores a new API token for a user
+    StoreNewApiToken {
+        /// The user ID
+        user_id: i64,
+        /// The API token
+        api_token: String,
+    },
+    /// Retrieves all API tokens for a user
+    GetApiTokensForUser {
+        /// The user ID
+        user_id: i64,
+        /// Channel to send back the list of API tokens
+        /// Returns Ok(Vec<String>) with the list of API tokens or an error if the query fails
+        result_sender: oneshot::Sender<Result<Vec<String>>>,
+    },
+    /// Stores the sui_address with proven ownership
+    UpdateSuiAddress {
+        /// The user ID
+        user_id: i64,
+        /// Proven Sui address
+        sui_address: String,
+    },
+    /// Retrieves the sui_address for a user
+    GetSuiAddress {
+        user_id: i64,
+        result_sender: oneshot::Sender<Result<Option<String>>>,
+    },
+    /// Retrieves the user ID by Sui address
+    ConfirmUser {
+        sui_address: String,
+        user_id: i64,
         result_sender: oneshot::Sender<Result<bool>>,
     },
-    RevokeApiToken {
+    /// Updates the balance of a user
+    TopUpBalance { user_id: i64, amount: i64 },
+    /// Withdraws the balance of a user
+    DeductFromUsdc {
         user_id: i64,
-        api_token: String,
+        amount: i64,
+        result_sender: oneshot::Sender<Result<()>>,
     },
-    StoreNewApiToken {
-        user_id: i64,
-        api_token: String,
-    },
-    GetApiTokensForUser {
-        user_id: i64,
-        result_sender: oneshot::Sender<Result<Vec<String>>>,
+    /// Acknowledges a USDC payment. Fails if the digest has already been acknowledged.
+    InsertNewUsdcPaymentDigest {
+        digest: String,
+        result_sender: oneshot::Sender<Result<()>>,
     },
 }

@@ -18,6 +18,7 @@ base64 = { workspace = true }
 blake2.workspace = true
 clap.workspace = true
 config.workspace = true
+fastcrypto.workspace = true
 flume.workspace = true
 futures = { workspace = true }
 hf-hub = { workspace = true }
@@ -29,13 +30,16 @@ serde_yaml = { workspace = true }
 sqlx.workspace = true
 sui-keys.workspace = true
 sui-sdk.workspace = true
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing-appender.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "json", "time"] }
+tracing-subscriber = { workspace = true, features = [
+    "env-filter",
+    "json",
+    "time",
+] }
 tracing.workspace = true
 tokenizers.workspace = true
 tower = { workspace = true }
-utoipa = { workspace = true, features = ["axum_extras"] }
+utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
-x25519-dalek = { workspace = true, features = ["static_secrets"] }
-zeroize = { workspace = true }

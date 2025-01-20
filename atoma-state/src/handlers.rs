@@ -1,16 +1,18 @@
 use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::{
-    AtomaEvent, NewStackSettlementAttestationEvent, NodePublicKeyCommittmentEvent,
-    NodeRegisteredEvent, NodeSubscribedToTaskEvent, NodeSubscriptionUpdatedEvent,
-    NodeUnsubscribedFromTaskEvent, StackAttestationDisputeEvent, StackCreatedEvent,
-    StackSettlementTicketClaimedEvent, StackSettlementTicketEvent, StackTrySettleEvent,
-    TaskDeprecationEvent, TaskRegisteredEvent,
+    AtomaEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
+    NodePublicKeyCommittmentEvent, NodeRegisteredEvent, NodeSubscribedToTaskEvent,
+    NodeSubscriptionUpdatedEvent, NodeUnsubscribedFromTaskEvent, StackAttestationDisputeEvent,
+    StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent,
+    StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
+use chrono::{DateTime, Utc};
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
 use crate::{
     state_manager::Result,
+    timestamp_to_datetime_or_now,
     types::{AtomaAtomaStateManagerEvent, Stack},
     AtomaStateManager, AtomaStateManagerError,
 };
@@ -34,9 +36,13 @@ pub async fn handle_atoma_event(
         AtomaEvent::NodeUnsubscribedFromTaskEvent(event) => {
             handle_node_task_unsubscription_event(state_manager, event).await
         }
-        AtomaEvent::StackCreatedEvent(event) => {
-            // NOTE: Don't handle creation here. It's handled when the stack is created right away.
-            info!("Stack created event: {:?}", event);
+        AtomaEvent::StackCreatedEvent((event, timestamp)) => {
+            handle_create_stack_stats(
+                state_manager,
+                event,
+                timestamp_to_datetime_or_now(timestamp),
+            )
+            .await?;
             Ok(())
         }
         AtomaEvent::StackCreateAndUpdateEvent(event) => {
@@ -44,8 +50,13 @@ pub async fn handle_atoma_event(
             info!("Stack creates and update event: {:?}", event);
             Ok(())
         }
-        AtomaEvent::StackTrySettleEvent(event) => {
-            handle_stack_try_settle_event(state_manager, event).await
+        AtomaEvent::StackTrySettleEvent((event, timestamp)) => {
+            handle_stack_try_settle_event(
+                state_manager,
+                event,
+                timestamp_to_datetime_or_now(timestamp),
+            )
+            .await
         }
         AtomaEvent::StackSettlementTicketEvent(event) => {
             handle_stack_settlement_ticket_event(state_manager, event).await
@@ -60,8 +71,7 @@ pub async fn handle_atoma_event(
             handle_new_stack_settlement_attestation_event(state_manager, event).await
         }
         AtomaEvent::NewKeyRotationEvent(event) => {
-            info!("New key rotation event: {:?}", event);
-            Ok(())
+            handle_new_key_rotation_event(state_manager, event).await
         }
         AtomaEvent::NodePublicKeyCommittmentEvent(event) => {
             handle_node_key_rotation_event(state_manager, event).await
@@ -326,7 +336,7 @@ pub(crate) async fn handle_task_deprecation_event(
 /// # Behavior
 ///
 /// The function performs the following steps:
-/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_compute_unit`, and `max_num_compute_units` from the event.
+/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `subscribe_node_to_task` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_node_task_subscription_event(
@@ -340,14 +350,14 @@ pub(crate) async fn handle_node_task_subscription_event(
     );
     let node_small_id = event.node_small_id.inner as i64;
     let task_small_id = event.task_small_id.inner as i64;
-    let price_per_compute_unit = event.price_per_compute_unit as i64;
+    let price_per_one_million_compute_units = event.price_per_one_million_compute_units as i64;
     let max_num_compute_units = event.max_num_compute_units as i64;
     state_manager
         .state
         .subscribe_node_to_task(
             node_small_id,
             task_small_id,
-            price_per_compute_unit,
+            price_per_one_million_compute_units,
             max_num_compute_units,
         )
         .await?;
@@ -377,7 +387,7 @@ pub(crate) async fn handle_node_task_subscription_event(
 /// # Behavior
 ///
 /// The function performs the following steps:
-/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_compute_unit`, and `max_num_compute_units` from the event.
+/// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `update_node_subscription` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_node_task_subscription_updated_event(
@@ -391,14 +401,14 @@ pub(crate) async fn handle_node_task_subscription_updated_event(
     );
     let node_small_id = event.node_small_id.inner as i64;
     let task_small_id = event.task_small_id.inner as i64;
-    let price_per_compute_unit = event.price_per_compute_unit as i64;
+    let price_per_one_million_compute_units = event.price_per_one_million_compute_units as i64;
     let max_num_compute_units = event.max_num_compute_units as i64;
     state_manager
         .state
         .update_node_subscription(
             node_small_id,
             task_small_id,
-            price_per_compute_unit,
+            price_per_one_million_compute_units,
             max_num_compute_units,
         )
         .await?;
@@ -460,6 +470,7 @@ pub(crate) async fn handle_node_task_unsubscription_event(
 /// * `state_manager` - A reference to the `AtomaStateManager` for database operations.
 /// * `event` - A `StackCreatedEvent` containing the details of the stack creation event.
 /// * `node_small_ids` - A slice of `u64` values representing the small IDs of the current nodes.
+/// * `acquired_timestamp` - The timestamp of the event.
 ///
 /// # Returns
 ///
@@ -482,6 +493,8 @@ pub(crate) async fn handle_stack_created_event(
     state_manager: &AtomaStateManager,
     event: StackCreatedEvent,
     already_computed_units: i64,
+    user_id: i64,
+    acquired_timestamp: DateTime<Utc>,
 ) -> Result<()> {
     let node_small_id = event.selected_node_id.inner;
     trace!(
@@ -491,7 +504,44 @@ pub(crate) async fn handle_stack_created_event(
     );
     let mut stack: Stack = event.into();
     stack.already_computed_units = already_computed_units;
-    state_manager.state.insert_new_stack(stack).await?;
+    state_manager
+        .state
+        .insert_new_stack(stack, user_id, acquired_timestamp)
+        .await?;
+    Ok(())
+}
+
+/// Handles create stack for stats.
+///
+/// This function processes a stack created event by parsing the event data,
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` for database operations.
+/// * `event` - A `StackCreatedEvent` containing the details of the stack creation event.
+/// * `timestamp` - The timestamp of the event.
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the event was processed successfully, or an error if something went wrong.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The event data cannot be deserialized into a `StackCreatedEvent`.
+/// * The database operation to insert the new stack fails.
+///
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_create_stack_stats(
+    state_manager: &AtomaStateManager,
+    event: StackCreatedEvent,
+    timestamp: DateTime<Utc>,
+) -> Result<()> {
+    let stack = event.into();
+    state_manager
+        .state
+        .new_stats_stack(stack, timestamp)
+        .await?;
     Ok(())
 }
 
@@ -524,6 +574,7 @@ pub(crate) async fn handle_stack_created_event(
 pub(crate) async fn handle_stack_try_settle_event(
     state_manager: &AtomaStateManager,
     event: StackTrySettleEvent,
+    timestamp: DateTime<Utc>,
 ) -> Result<()> {
     trace!(
         target = "atoma-state-handlers",
@@ -533,7 +584,7 @@ pub(crate) async fn handle_stack_try_settle_event(
     let stack_settlement_ticket = event.into();
     state_manager
         .state
-        .insert_new_stack_settlement_ticket(stack_settlement_ticket)
+        .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
         .await?;
     Ok(())
 }
@@ -852,7 +903,9 @@ pub(crate) async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::GetStacksForModel {
             model,
             free_compute_units,
+            user_id,
             result_sender,
+            is_confidential,
         } => {
             trace!(
                 target = "atoma-state-handlers",
@@ -861,12 +914,12 @@ pub(crate) async fn handle_state_manager_event(
                 model,
                 free_compute_units
             );
-            let stacks = state_manager
+            let stack = state_manager
                 .state
-                .get_stacks_for_model(&model, free_compute_units)
+                .get_stacks_for_model(&model, free_compute_units, user_id, is_confidential)
                 .await;
             result_sender
-                .send(stacks)
+                .send(stack)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::GetTasksForModel {
@@ -886,6 +939,7 @@ pub(crate) async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
             model,
+            is_confidential,
             result_sender,
         } => {
             trace!(
@@ -896,25 +950,80 @@ pub(crate) async fn handle_state_manager_event(
             );
             let node = state_manager
                 .state
-                .get_cheapest_node_for_model(&model)
+                .get_cheapest_node_for_model(&model, is_confidential)
                 .await;
             result_sender
                 .send(node)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::LockComputeUnitsForStack {
+            stack_small_id,
+            available_compute_units,
+            result_sender,
+        } => {
+            let is_locked = state_manager
+                .state
+                .lock_compute_units(stack_small_id, available_compute_units)
+                .await;
+            result_sender
+                .send(is_locked)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
+            model,
+            max_num_tokens,
+            result_sender,
+        } => {
+            let node = state_manager
+                .state
+                .select_node_public_key_for_encryption(&model, max_num_tokens)
+                .await?;
+            result_sender
+                .send(node)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryptionForNode {
+            node_small_id,
+            result_sender,
+        } => {
+            let node = state_manager
+                .state
+                .select_node_public_key_for_encryption_for_node(node_small_id)
+                .await?;
+            result_sender
+                .send(node)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::VerifyStackForConfidentialComputeRequest {
+            stack_small_id,
+            available_compute_units,
+            result_sender,
+        } => {
+            let is_valid = state_manager
+                .state
+                .verify_stack_for_confidential_compute_request(
+                    stack_small_id,
+                    available_compute_units,
+                )
+                .await;
+            result_sender
+                .send(is_valid)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
         AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {
             node_small_id,
             public_address,
+            country,
         } => {
             trace!(
                 target = "atoma-state-handlers",
                 event = "handle-state-manager-event",
-                "Upserting public address for node with id: {}",
+                "Upserting public address/country for node with id: {}",
                 node_small_id
             );
             state_manager
                 .state
-                .update_node_public_address(node_small_id, public_address)
+                .update_node_public_address(node_small_id, public_address, country)
                 .await?;
         }
         AtomaAtomaStateManagerEvent::GetNodePublicAddress {
@@ -933,6 +1042,18 @@ pub(crate) async fn handle_state_manager_event(
                 .await;
             result_sender
                 .send(public_address)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetNodePublicUrlAndSmallId {
+            stack_small_id,
+            result_sender,
+        } => {
+            let result = state_manager
+                .state
+                .get_node_public_url_and_small_id(stack_small_id)
+                .await;
+            result_sender
+                .send(result)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::GetNodeSuiAddress {
@@ -956,8 +1077,17 @@ pub(crate) async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::NewStackAcquired {
             event,
             already_computed_units,
+            transaction_timestamp,
+            user_id,
         } => {
-            handle_stack_created_event(state_manager, event, already_computed_units).await?;
+            handle_stack_created_event(
+                state_manager,
+                event,
+                already_computed_units,
+                user_id,
+                transaction_timestamp,
+            )
+            .await?;
         }
         AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
             timestamp,
@@ -1084,16 +1214,12 @@ pub(crate) async fn handle_state_manager_event(
                 .await?;
         }
         AtomaAtomaStateManagerEvent::IsApiTokenValid {
-            user_id,
             api_token,
             result_sender,
         } => {
-            let is_valid = state_manager
-                .state
-                .is_api_token_valid(user_id, &api_token)
-                .await;
+            let user_id = state_manager.state.is_api_token_valid(&api_token).await;
             result_sender
-                .send(is_valid)
+                .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::StoreNewApiToken { user_id, api_token } => {
@@ -1117,7 +1243,110 @@ pub(crate) async fn handle_state_manager_event(
                 .send(api_tokens)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::UpdateSuiAddress {
+            user_id,
+            sui_address,
+        } => {
+            state_manager
+                .state
+                .update_sui_address(user_id, sui_address)
+                .await?;
+        }
+        AtomaAtomaStateManagerEvent::GetSuiAddress {
+            user_id,
+            result_sender,
+        } => {
+            let sui_address = state_manager.state.get_sui_address(user_id).await;
+            result_sender
+                .send(sui_address)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::ConfirmUser {
+            sui_address,
+            user_id,
+            result_sender,
+        } => {
+            let confirmation = state_manager.state.confirm_user(sui_address, user_id).await;
+            result_sender
+                .send(confirmation)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::TopUpBalance { user_id, amount } => {
+            state_manager.state.top_up_balance(user_id, amount).await?;
+        }
+        AtomaAtomaStateManagerEvent::DeductFromUsdc {
+            user_id,
+            amount,
+            result_sender,
+        } => {
+            let success = state_manager.state.deduct_from_usdc(user_id, amount).await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::InsertNewUsdcPaymentDigest {
+            digest,
+            result_sender,
+        } => {
+            let success = state_manager
+                .state
+                .insert_new_usdc_payment_digest(digest)
+                .await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
     }
+    Ok(())
+}
+
+/// Handles a new key rotation event by updating the key rotation state in the database.
+///
+/// This function processes a key rotation event that occurs when the system performs a periodic
+/// key rotation. It extracts the epoch and key rotation counter from the event and updates
+/// the corresponding values in the state database.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` for database operations
+/// * `event` - A `NewKeyRotationEvent` containing:
+///   * `epoch` - The epoch number when the key rotation occurred
+///   * `key_rotation_counter` - The counter tracking the number of key rotations
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the key rotation was processed successfully, or an error if something went wrong
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The database operation to update the key rotation state fails
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+/// use atoma_sui::events::NewKeyRotationEvent;
+///
+/// async fn rotate_key(state_manager: &AtomaStateManager, event: NewKeyRotationEvent) {
+///     if let Err(e) = handle_new_key_rotation_event(state_manager, event).await {
+///         eprintln!("Failed to handle key rotation: {}", e);
+///     }
+/// }
+/// ```
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_new_key_rotation_event(
+    state_manager: &AtomaStateManager,
+    event: NewKeyRotationEvent,
+) -> Result<()> {
+    let NewKeyRotationEvent {
+        epoch,
+        key_rotation_counter,
+    } = event;
+    state_manager
+        .state
+        .insert_new_key_rotation(epoch as i64, key_rotation_counter as i64)
+        .await?;
     Ok(())
 }
 
@@ -1166,17 +1395,24 @@ pub(crate) async fn handle_node_key_rotation_event(
     info!("Node key rotation event: {:?}", event);
     let NodePublicKeyCommittmentEvent {
         epoch,
+        key_rotation_counter,
         node_id,
         new_public_key,
         tee_remote_attestation_bytes,
     } = event;
+    let is_valid =
+        utils::verify_quote_v4_attestation(&tee_remote_attestation_bytes, &new_public_key)
+            .await
+            .is_ok();
     state_manager
         .state
         .update_node_public_key(
             node_id.inner as i64,
             epoch as i64,
+            key_rotation_counter as i64,
             new_public_key,
             tee_remote_attestation_bytes,
+            is_valid,
         )
         .await?;
     Ok(())
@@ -1322,4 +1558,108 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
         .verify_node_small_id_ownership(node_small_id, sui_address)
         .await?;
     Ok(())
+}
+
+mod utils {
+    use super::*;
+
+    use dcap_qvl::collateral::get_collateral;
+    use dcap_qvl::quote::{Quote, Report};
+    use dcap_qvl::verify::verify;
+    use std::time::Duration;
+
+    /// The timeout to use for quote verification.
+    const TIMEOUT: Duration = Duration::from_secs(10);
+
+    /// The TCB update mode to use for quote verification.
+    const TCB_UPDATE_MODE: &str = "early";
+
+    /// Verifies a TEE (Trusted Execution Environment) remote attestation quote using Intel's DCAP Quote Verification Library.
+    ///
+    /// This function performs verification of a Quote V4 attestation by:
+    /// 1. Retrieving collateral data from Intel's Provisioning Certificate Caching Service (PCCS)
+    /// 2. Verifying the quote against the collateral using the current timestamp
+    ///
+    /// # Arguments
+    ///
+    /// * `tee_remote_attestation_bytes` - A byte slice containing the TEE remote attestation quote data
+    /// * `new_public_key` - A byte slice containing the public key to be verified (currently unused in verification)
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Ok(()) if verification succeeds, or an error if verification fails
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error in the following cases:
+    /// * If collateral retrieval from PCCS fails
+    /// * If the system time cannot be determined
+    /// * If quote verification fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use your_crate::verify_quote_v4_attestation;
+    ///
+    /// async fn verify_attestation() {
+    ///     let quote_data = vec![/* quote data */];
+    ///     let public_key = vec![/* public key data */];
+    ///     
+    ///     match verify_quote_v4_attestation(&quote_data, &public_key).await {
+    ///         Ok(()) => println!("Attestation verified successfully"),
+    ///         Err(e) => eprintln!("Attestation verification failed: {:?}", e),
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// * Uses Intel's PCCS service at a hardcoded URL with a 10-second timeout
+    /// * The `new_public_key` parameter is currently passed through but not used in the verification process
+    /// * This function is specifically for Quote V4 format attestations
+    pub(crate) async fn verify_quote_v4_attestation(
+        quote_bytes: &[u8],
+        new_public_key: &[u8],
+    ) -> Result<()> {
+        let quote = Quote::parse(quote_bytes)
+            .map_err(|e| AtomaStateManagerError::FailedToParseQuote(format!("{e:?}")))?;
+        let fmspc = quote
+            .fmspc()
+            .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
+        let certification_tcb_url = format!(
+            "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc={:?}&update={TCB_UPDATE_MODE}",
+            fmspc
+        );
+        let collateral = get_collateral(&certification_tcb_url, quote_bytes, TIMEOUT)
+            .await
+            .map_err(|e| AtomaStateManagerError::FailedToRetrieveCollateral(format!("{e:?}")))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| AtomaStateManagerError::UnixTimeWentBackwards(e.to_string()))?
+            .as_secs();
+        match quote.report {
+            Report::SgxEnclave(_) => {
+                return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                    "Report SGX type not supported".to_string(),
+                ));
+            }
+            Report::TD10(report) => {
+                if report.report_data != new_public_key {
+                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                        "Report TD10 data does not match new public key".to_string(),
+                    ));
+                }
+            }
+            Report::TD15(report) => {
+                if report.base.report_data != new_public_key {
+                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                        "Report TD15 data does not match new public key".to_string(),
+                    ));
+                }
+            }
+        }
+        verify(quote_bytes, &collateral, now)
+            .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
+        Ok(())
+    }
 }

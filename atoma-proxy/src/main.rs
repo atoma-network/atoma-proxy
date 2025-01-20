@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use atoma_auth::{AtomaAuthConfig, Auth};
+use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_p2p::{AtomaP2pConfig, AtomaP2pNode};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
@@ -11,10 +11,14 @@ use clap::Parser;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use server::{start_server, AtomaServiceConfig};
-use sui::Sui;
 use tokenizers::Tokenizer;
-use tokio::{net::TcpListener, sync::watch, try_join};
+use tokio::{
+    net::TcpListener,
+    sync::{watch, RwLock},
+    try_join,
+};
 use tracing::{error, instrument};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{
     non_blocking,
     rolling::{RollingFileAppender, Rotation},
@@ -27,7 +31,6 @@ use tracing_subscriber::{
 };
 
 mod server;
-mod sui;
 
 /// The directory where the logs are stored.
 const LOGS: &str = "./logs";
@@ -77,12 +80,16 @@ impl Config {
 }
 
 /// Configure logging with JSON formatting, file output, and console output
-fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<()> {
+fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
+    // Create logs directory if it doesn't exist
+    std::fs::create_dir_all(&log_dir).context("Failed to create logs directory")?;
+
     // Set up file appender with rotation
     let file_appender = RollingFileAppender::new(Rotation::DAILY, log_dir, LOG_FILE);
 
-    // Create a non-blocking writer
-    let (non_blocking_appender, _guard) = non_blocking(file_appender);
+    // Create non-blocking writers
+    let (non_blocking_appender, file_guard) = non_blocking(file_appender);
+    let (non_blocking_stdout, stdout_guard) = non_blocking(std::io::stdout());
 
     // Create JSON formatter for file output
     let file_layer = fmt::layer()
@@ -104,11 +111,12 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<()> {
         .with_thread_ids(true)
         .with_line_number(true)
         .with_file(true)
-        .with_span_events(FmtSpan::ENTER);
+        .with_span_events(FmtSpan::ENTER)
+        .with_writer(non_blocking_stdout);
 
     // Create filter from environment variable or default to info
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,atoma_node_service=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("info,atoma_proxy=info"));
 
     // Combine layers with filter
     Registry::default()
@@ -117,14 +125,22 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<()> {
         .with(file_layer)
         .init();
 
-    Ok(())
+    // Return both guards so they can be stored in main
+    Ok((file_guard, stdout_guard))
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    setup_logging(LOGS).context("Failed to setup logging")?;
+    // Store both guards to keep logging active for the duration of the program
+    let (_file_guard, _stdout_guard) = setup_logging(LOGS).context("Failed to setup logging")?;
+
+    tracing::info!("Starting Atoma Proxy Service...");
+
     let args = Args::parse();
+    tracing::info!("Loading configuration from: {}", args.config_path);
+
     let config = Config::load(args.config_path).await;
+    tracing::info!("Configuration loaded successfully");
 
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
     let (event_subscriber_sender, event_subscriber_receiver) = flume::unbounded();
@@ -133,7 +149,9 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
-    let auth = Auth::new(config.auth, state_manager_sender.clone());
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
+
+    let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui));
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
@@ -144,7 +162,7 @@ async fn main() -> Result<()> {
         shutdown_receiver.clone(),
     );
 
-    let sui = Sui::new(&config.sui).await?;
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
 
     // Initialize the `AtomaStateManager` service
     let state_manager = AtomaStateManager::new_from_url(
@@ -152,6 +170,7 @@ async fn main() -> Result<()> {
         event_subscriber_receiver,
         state_manager_receiver,
         atoma_p2p_receiver,
+        sui.write().await.get_wallet_address()?.to_string(),
     )
     .await?;
 
@@ -167,6 +186,18 @@ async fn main() -> Result<()> {
         &config.service.hf_token,
     )
     .await?;
+
+    let models_with_modalities = config
+        .service
+        .models
+        .iter()
+        .zip(config.service.modalities.iter())
+        .map(|(model, modalities)| {
+            let modalities = modalities.clone();
+            (model.clone(), modalities)
+        })
+        .collect();
+
     let server_handle = spawn_with_shutdown(
         start_server(
             config.service,
@@ -185,6 +216,7 @@ async fn main() -> Result<()> {
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
         auth,
+        models_with_modalities,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

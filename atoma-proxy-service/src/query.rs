@@ -11,3 +11,9 @@ pub struct LatencyQuery {
 pub struct ComputeUnitsProcessedQuery {
     pub hours: usize,
 }
+
+/// A query params for stats for stacks requests. Since the stats are on hourly basis. It will return last `StatsStackQuery::hours` hours of stacks stats.
+#[derive(Deserialize)]
+pub struct StatsStackQuery {
+    pub hours: usize,
+}

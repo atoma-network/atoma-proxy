@@ -4,11 +4,145 @@ info:
   description: ''
   license:
     name: Apache-2.0
+    identifier: Apache-2.0
   version: 0.1.0
 servers:
 - url: http://localhost:8081
   description: Local server
 paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Health check endpoint for the proxy service.
+      description: |-
+        # Returns
+        * `StatusCode::OK` - Always returns OK
+      operationId: health
+      responses:
+        '200':
+          description: Service is healthy
+        '500':
+          description: Service is unhealthy
+  /generate_api_token:
+    get:
+      tags:
+      - Auth
+      summary: Generates an API token for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<String>>` - A JSON response containing the generated API token
+      operationId: generate_api_token
+      responses:
+        '200':
+          description: Generates an API token for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to generate api token
+      security:
+      - bearerAuth: []
+  /revoke_api_token:
+    post:
+      tags:
+      - Auth
+      summary: Revokes an API token for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+        * `body` - The request body containing the API token to revoke
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: revoke_api_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeApiTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: Revokes an API token for the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeApiTokenRequest'
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to revoke api token
+      security:
+      - bearerAuth: []
+  /register:
+    post:
+      tags:
+      - Auth
+      summary: Registers a new user with the proxy service.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `body` - The request body containing the username and password of the new user
+
+        # Returns
+
+        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
+      operationId: register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+        required: true
+      responses:
+        '200':
+          description: Registers a new user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthRequest'
+        '500':
+          description: Failed to register user
+  /login:
+    post:
+      tags:
+      - Auth
+      summary: Logs in a user with the proxy service.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `body` - The request body containing the username and password of the user
+
+        # Returns
+
+        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+        required: true
+      responses:
+        '200':
+          description: Logs in a user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthRequest'
+        '500':
+          description: Failed to login user
   /api_tokens:
     get:
       tags:
@@ -32,6 +166,211 @@ paths:
           description: Failed to get all api tokens
       security:
       - bearerAuth: []
+  /update_sui_address:
+    post:
+      tags:
+      - Auth
+      summary: Updates the sui address for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+        * `body` - The request body containing the signature of the proof of address
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: update_sui_address
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofRequest'
+        required: true
+      responses:
+        '200':
+          description: Proof of address request
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to proof of address request
+      security:
+      - bearerAuth: []
+  /usdc_payment:
+    post:
+      tags:
+      - Auth
+      summary: OpenAPI documentation for the usdc_payment endpoint.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+        * `body` - The request body containing the transaction digest
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: usdc_payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsdcPaymentRequest'
+        required: true
+      responses:
+        '200':
+          description: USDC payment request
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to usdc payment request
+      security:
+      - bearerAuth: []
+  /get_sui_address:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the sui address for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Option<String>>>` - A JSON response containing the sui address
+      operationId: get_sui_address
+      responses:
+        '200':
+          description: Retrieves the sui address for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get sui address
+      security:
+      - bearerAuth: []
+  /current_stacks:
+    get:
+      tags:
+      - Stacks
+      summary: Retrieves all stacks that are not settled.
+      description: |-
+        # Arguments
+        * `proxy_service_state` - The shared state containing the state manager
+
+        # Returns
+        * `Result<Json<Vec<Stack>>>` - A JSON response containing a list of stacks
+          - `Ok(Json<Vec<Stack>>)` - Successfully retrieved stacks
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve stacks from state manager
+      operationId: get_current_stacks
+      responses:
+        '200':
+          description: Retrieves all stacks that are not settled
+        '500':
+          description: Failed to get all stacks
+  /all_stacks:
+    get:
+      tags:
+      - Stacks
+      summary: Retrieves all stacks for the user based on the access token.
+      description: |-
+        # Arguments
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+        * `Result<Json<Vec<Stack>>>` - A JSON response containing a list of stacks
+          - `Ok(Json<Vec<Stack>>)` - Successfully retrieved stacks
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve stacks from state manager
+
+        # Example Response
+        Returns a JSON array of Stack objects for the specified user
+      operationId: get_all_stacks_for_user
+      responses:
+        '200':
+          description: Retrieves all stacks for the user
+        '500':
+          description: Failed to get user stack
+      security:
+      - bearerAuth: []
+  /balance:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the balance for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<i64>>` - A JSON response containing the balance
+      operationId: get_balance
+      responses:
+        '200':
+          description: Retrieves the balance for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get balance
+      security:
+      - bearerAuth: []
+  /user_profile:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the user profile for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the user profile
+
+        # Errors
+
+        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+      operationId: get_user_profile
+      responses:
+        '200':
+          description: Retrieves the user profile for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get user profile
+      security:
+      - bearerAuth: []
+  /tasks:
+    get:
+      tags:
+      - Tasks
+      summary: Retrieves all tasks from the state manager.
+      description: |-
+        # Arguments
+        * `proxy_service_state` - The shared state containing the state manager
+
+        # Returns
+        * `Result<Json<Vec<Task>>>` - A JSON response containing a list of tasks
+          - `Ok(Json<Vec<Task>>)` - Successfully retrieved tasks
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve tasks from state manager
+
+        # Example Response
+        Returns a JSON array of Task objects representing all tasks in the system
+      operationId: get_all_tasks
+      responses:
+        '200':
+          description: Retrieves all tasks
+        '500':
+          description: Failed to get all tasks
   /compute_units_processed:
     get:
       tags:
@@ -72,44 +411,6 @@ paths:
               schema: {}
         '500':
           description: Failed to get performance
-  /generate_api_token:
-    get:
-      tags:
-      - Auth
-      summary: Generates an API token for the user.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `headers` - The headers of the request
-
-        # Returns
-
-        * `Result<Json<String>>` - A JSON response containing the generated API token
-      operationId: generate_api_token
-      responses:
-        '200':
-          description: Generates an API token for the user
-        '401':
-          description: Unauthorized request
-        '500':
-          description: Failed to generate api token
-      security:
-      - bearerAuth: []
-  /health:
-    get:
-      tags:
-      - Health
-      summary: Health check endpoint for the proxy service.
-      description: |-
-        # Returns
-        * `StatusCode::OK` - Always returns OK
-      operationId: health
-      responses:
-        '200':
-          description: Service is healthy
-        '500':
-          description: Service is unhealthy
   /latency:
     get:
       tags:
@@ -152,120 +453,44 @@ paths:
               schema: {}
         '500':
           description: Failed to get performance
-  /login:
-    post:
-      tags:
-      - Auth
-      summary: Logs in a user with the proxy service.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the user
-
-        # Returns
-
-        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
-      operationId: login
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthRequest'
-        required: true
-      responses:
-        '200':
-          description: Logs in a user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthRequest'
-        '500':
-          description: Failed to login user
-  /register:
-    post:
-      tags:
-      - Auth
-      summary: Registers a new user with the proxy service.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the new user
-
-        # Returns
-
-        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
-      operationId: register
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthRequest'
-        required: true
-      responses:
-        '200':
-          description: Registers a new user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthRequest'
-        '500':
-          description: Failed to register user
-  /revoke_api_token:
-    post:
-      tags:
-      - Auth
-      summary: Revokes an API token for the user.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `headers` - The headers of the request
-        * `body` - The request body containing the API token to revoke
-
-        # Returns
-
-        * `Result<Json<()>>` - A JSON response indicating the success of the operation
-      operationId: revoke_api_token
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RevokeApiTokenRequest'
-        required: true
-      responses:
-        '200':
-          description: Revokes an API token for the user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RevokeApiTokenRequest'
-        '401':
-          description: Unauthorized request
-        '500':
-          description: Failed to revoke api token
-      security:
-      - bearerAuth: []
-  /stacks:
+  /get_stats_stacks:
     get:
       tags:
-      - Stacks
-      summary: Retrieves all stacks that are not settled.
+      - Stats
+      summary: Get all stacks.
       description: |-
         # Arguments
+
         * `proxy_service_state` - The shared state containing the state manager
 
         # Returns
-        * `Result<Json<Vec<Stack>>>` - A JSON response containing a list of stacks
-          - `Ok(Json<Vec<Stack>>)` - Successfully retrieved stacks
-          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve stacks from state manager
-      operationId: get_current_stacks
+
+        * `Result<Json<Vec<LatencyResponse>>` - A JSON response containing a list of latency performance
+          - `Ok(Json<Vec<LatencyResponse>>)` - Successfully retrieved latency performance
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve latency performance from state manager
+
+        # Example Response
+
+        Returns a JSON array of LatencyResponse objects for the specified hours
+        ```json
+        [
+          {
+             timestamp: "2024-03-21T12:00:00Z",
+             latency: 123,
+             requests: 2,
+             time: 45
+          }
+        ]
+        ```
+      operationId: get_stats_stacks
       responses:
         '200':
-          description: Retrieves all stacks that are not settled
+          description: Retrieves all latency performance
+          content:
+            application/json:
+              schema: {}
         '500':
-          description: Failed to get all stacks
+          description: Failed to get performance
   /subscriptions:
     get:
       tags:
@@ -298,46 +523,87 @@ paths:
           description: Retrieves all subscriptions for all nodes
         '500':
           description: Failed to get nodes subscriptions
-  /tasks:
+  /get_nodes_distribution:
     get:
       tags:
-      - Tasks
-      summary: Retrieves all tasks from the state manager.
+      - Stats
+      summary: Get nodes distribution.
       description: |-
         # Arguments
+
         * `proxy_service_state` - The shared state containing the state manager
 
         # Returns
-        * `Result<Json<Vec<Task>>>` - A JSON response containing a list of tasks
-          - `Ok(Json<Vec<Task>>)` - Successfully retrieved tasks
-          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve tasks from state manager
+
+        * `Result<Json<Vec<NodeDistribution>>` - A JSON response containing a list of nodes distribution
+         - `Ok(Json<Vec<NodeDistribution>>)` - Successfully retrieved nodes distribution
+        - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve nodes distribution from state manager
 
         # Example Response
-        Returns a JSON array of Task objects representing all tasks in the system
-      operationId: get_all_tasks
+
+        Returns a JSON array of nodes distribution
+        ```json
+        [
+         {
+          "country": "US",
+          "count": 2
+         }
+        ]
+        ```
+      operationId: get_nodes_distribution
       responses:
         '200':
-          description: Retrieves all tasks
+          description: Retrieves nodes distribution
+          content:
+            application/json:
+              schema: {}
         '500':
-          description: Failed to get all tasks
+          description: Failed to get node distribution
 components:
   schemas:
     AuthRequest:
       type: object
+      description: Request payload for user authentication
       required:
       - username
       - password
       properties:
         password:
           type: string
+          description: The user's password
         username:
+          type: string
+          description: The user's unique identifier
+    ProofRequest:
+      type: object
+      description: |-
+        Request payload for updating the sui address for the user.
+
+        Contains the signature of the user to prove ownership of the sui address.
+      required:
+      - signature
+      properties:
+        signature:
           type: string
     RevokeApiTokenRequest:
       type: object
+      description: Request payload for revoking an API token
       required:
       - api_token
       properties:
         api_token:
+          type: string
+          description: The API token to be revoked
+    UsdcPaymentRequest:
+      type: object
+      description: |-
+        Request payload for acknowledging a usdc payment.
+
+        Contains the transaction digest of the payment.
+      required:
+      - transaction_digest
+      properties:
+        transaction_digest:
           type: string
   securitySchemes:
     bearerAuth:

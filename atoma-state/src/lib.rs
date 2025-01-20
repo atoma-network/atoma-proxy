@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod state_manager;
 pub mod types;
 
+use chrono::{DateTime, Utc};
 pub use config::AtomaStateManagerConfig;
 pub use sqlx::PgPool;
 use sqlx::Postgres;
@@ -49,4 +50,11 @@ pub(crate) fn build_query_with_in<'a, T: sqlx::Type<Postgres> + sqlx::Encode<'a,
     }
 
     builder
+}
+
+/// Converts a timestamp to a `DateTime<Utc>` or the current time if the timestamp is `None`.
+pub fn timestamp_to_datetime_or_now(timestamp_ms: Option<u64>) -> DateTime<Utc> {
+    timestamp_ms
+        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
+        .unwrap_or_else(Utc::now)
 }

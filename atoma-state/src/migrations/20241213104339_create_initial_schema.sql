@@ -17,14 +17,18 @@ CREATE TABLE IF NOT EXISTS nodes (
     node_id TEXT NOT NULL,
     sui_address TEXT NOT NULL,
     public_address TEXT,
+<<<<<<< HEAD
     timestamp BIGINT
+=======
+    country TEXT
+>>>>>>> main
 );
 
 -- Create node_subscriptions table
 CREATE TABLE IF NOT EXISTS node_subscriptions (
     task_small_id BIGINT NOT NULL,
     node_small_id BIGINT NOT NULL,
-    price_per_compute_unit BIGINT NOT NULL,
+    price_per_one_million_compute_units BIGINT NOT NULL,
     max_num_compute_units BIGINT NOT NULL,
     valid BOOLEAN NOT NULL,
     PRIMARY KEY (task_small_id, node_small_id),
@@ -34,6 +38,27 @@ CREATE TABLE IF NOT EXISTS node_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_node_subscriptions_task_small_id_node_small_id ON node_subscriptions (task_small_id, node_small_id);
 
+-- Create users and auth tables
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(64) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash VARCHAR(255) UNIQUE NOT NULL,
+    user_id BIGINT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    token VARCHAR(255) UNIQUE NOT NULL,
+    user_id BIGINT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
 -- Create stacks table
 CREATE TABLE IF NOT EXISTS stacks (
     stack_small_id BIGINT PRIMARY KEY,
@@ -42,12 +67,14 @@ CREATE TABLE IF NOT EXISTS stacks (
     task_small_id BIGINT NOT NULL,
     selected_node_id BIGINT NOT NULL,
     num_compute_units BIGINT NOT NULL,
-    price BIGINT NOT NULL,
+    price_per_one_million_compute_units BIGINT NOT NULL,
     already_computed_units BIGINT NOT NULL,
     in_settle_period BOOLEAN NOT NULL,
     total_hash BYTEA NOT NULL,
     num_total_messages BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
     FOREIGN KEY (task_small_id) REFERENCES tasks (task_small_id),
+    FOREIGN KEY (user_id) REFERENCES users (id),
     FOREIGN KEY (selected_node_id, task_small_id) REFERENCES node_subscriptions (node_small_id, task_small_id)
 );
 
@@ -123,30 +150,11 @@ CREATE TABLE IF NOT EXISTS node_latency_performance (
 CREATE TABLE IF NOT EXISTS node_public_keys (
     node_small_id BIGINT PRIMARY KEY,
     epoch BIGINT NOT NULL,
+    key_rotation_counter BIGINT NOT NULL,
     public_key BYTEA NOT NULL,
     tee_remote_attestation_bytes BYTEA NOT NULL,
+    is_valid BOOLEAN NOT NULL,
     FOREIGN KEY (node_small_id) REFERENCES nodes (node_small_id)
-);
-
--- Create users and auth tables
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(64) NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-    id BIGSERIAL PRIMARY KEY,
-    token_hash VARCHAR(255) UNIQUE NOT NULL,
-    user_id BIGINT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users (id)
-);
-
-CREATE TABLE IF NOT EXISTS api_tokens (
-    id BIGSERIAL PRIMARY KEY,
-    token VARCHAR(255) UNIQUE NOT NULL,
-    user_id BIGINT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
 -- Create stats tables
@@ -172,3 +180,13 @@ CREATE TABLE IF NOT EXISTS stats_latency (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stats_latency ON stats_latency (timestamp);
+
+-- Create stats_stacks table
+CREATE TABLE IF NOT EXISTS stats_stacks (
+    timestamp TIMESTAMPTZ PRIMARY KEY NOT NULL,
+    num_compute_units BIGINT NOT NULL DEFAULT 0,
+    settled_num_compute_units BIGINT NOT NULL DEFAULT 0,
+    CHECK (date_part('minute', timestamp) = 0 AND date_part('second', timestamp) = 0 AND date_part('milliseconds', timestamp) = 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stats_stacks ON stats_stacks (timestamp);

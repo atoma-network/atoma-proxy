@@ -10,12 +10,14 @@ atoma-auth.workspace = true
 atoma-state.workspace = true
 atoma-sui.workspace = true
 axum.workspace = true
+chrono.workspace = true
 config.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
+sui-sdk.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tower-http = { version = "0.6.2", features = ["cors"] }
-tracing.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
 tracing-subscriber.workspace = true
+tracing.workspace = true
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }

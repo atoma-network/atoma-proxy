@@ -1,25 +1,24 @@
 use std::time::Instant;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use atoma_utils::constants;
 use axum::body::Body;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
+use base64::engine::{general_purpose::STANDARD, Engine};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tracing::{error, instrument};
-use utoipa::OpenApi;
-use x25519_dalek::PublicKey;
+use tracing::instrument;
+use utoipa::{OpenApi, ToSchema};
 
-use crate::server::{
-    handlers::{extract_node_encryption_metadata, handle_confidential_compute_decryption_response},
-    http_server::ProxyState,
-    middleware::{NodeEncryptionMetadata, RequestMetadataExtension},
-};
+use crate::server::error::AtomaProxyError;
+use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
+use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
-use super::request_model::RequestModel;
+use super::verify_response_hash_and_signature;
+use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
+use crate::server::{Result, MODEL};
 
 /// Path for the confidential image generations endpoint.
 ///
@@ -31,9 +30,6 @@ pub const CONFIDENTIAL_IMAGE_GENERATIONS_PATH: &str = "/v1/confidential/images/g
 ///
 /// This endpoint follows the OpenAI API format for image generations
 pub const IMAGE_GENERATIONS_PATH: &str = "/v1/images/generations";
-
-/// The model field in the request payload.
-const MODEL: &str = "model";
 
 /// The n field in the request payload.
 const N: &str = "n";
@@ -57,23 +53,37 @@ pub struct RequestModelImageGenerations {
 
 /// OpenAPI documentation for the image generations endpoint.
 #[derive(OpenApi)]
-#[openapi(paths(image_generations_handler))]
+#[openapi(
+    paths(image_generations_create),
+    components(schemas(CreateImageRequest, CreateImageResponse, ImageData))
+)]
 pub(crate) struct ImageGenerationsOpenApi;
 
 impl RequestModel for RequestModelImageGenerations {
-    fn new(request: &Value) -> Result<Self, StatusCode> {
-        let model = request
-            .get(MODEL)
-            .and_then(|m| m.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+    fn new(request: &Value) -> Result<Self> {
+        let model =
+            request
+                .get(MODEL)
+                .and_then(|m| m.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Model field   is required".to_string(),
+                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+                })?;
         let n = request
             .get(N)
             .and_then(|n| n.as_u64())
-            .ok_or(StatusCode::BAD_REQUEST)?;
-        let size = request
-            .get(SIZE)
-            .and_then(|s| s.as_str())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+            .ok_or(AtomaProxyError::InvalidBody {
+                message: "N field is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            })?;
+        let size =
+            request
+                .get(SIZE)
+                .and_then(|s| s.as_str())
+                .ok_or(AtomaProxyError::InvalidBody {
+                    message: "Size field is required".to_string(),
+                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+                })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -82,11 +92,11 @@ impl RequestModel for RequestModelImageGenerations {
         })
     }
 
-    fn get_model(&self) -> Result<String, StatusCode> {
+    fn get_model(&self) -> Result<String> {
         Ok(self.model.clone())
     }
 
-    fn get_compute_units_estimate(&self, _state: &ProxyState) -> Result<u64, StatusCode> {
+    fn get_compute_units_estimate(&self, _state: &ProxyState) -> Result<u64> {
         // Parse dimensions from size string (e.g., "1024x1024")
         let dimensions: Vec<u64> = self
             .size
@@ -95,8 +105,10 @@ impl RequestModel for RequestModelImageGenerations {
             .collect();
 
         if dimensions.len() != 2 {
-            error!("Invalid size format: {}", self.size);
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(AtomaProxyError::InvalidBody {
+                message: format!("Invalid size format: {}", self.size),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            });
         }
 
         let width = dimensions[0];
@@ -107,38 +119,24 @@ impl RequestModel for RequestModelImageGenerations {
     }
 }
 
-/// Create image generation
+/// Create image
 ///
 /// This endpoint processes requests to generate images using AI models by forwarding them
 /// to the appropriate AI node. The request metadata and compute units have already been
 /// validated by middleware before reaching this handler.
 ///
-/// # Arguments
-/// * `metadata` - Extension containing pre-processed request metadata (node address, compute units, etc.)
-/// * `state` - Application state containing configuration and shared resources
-/// * `headers` - HTTP headers from the incoming request
-/// * `payload` - JSON payload containing image generation parameters
-///
-/// # Returns
-/// * `Result<Response<Body>, StatusCode>` - The processed response from the AI node or an error status
-///
-/// # Errors
+/// ## Errors
 /// * Returns various status codes based on the underlying `handle_image_generation_response`:
 ///   - `INTERNAL_SERVER_ERROR` - If there's an error communicating with the AI node
-///
-/// # Example Payload
-/// ```json
-/// {
-///     "model": "stable-diffusion-v1-5",
-///     "n": 1,
-///     "size": "1024x1024"
-/// }
-/// ```
 #[utoipa::path(
     post,
     path = "",
+    request_body = CreateImageRequest,
+    security(
+        ("bearerAuth" = [])
+    ),
     responses(
-        (status = OK, description = "Image generations", body = Value),
+        (status = OK, description = "Image generations", body = CreateImageResponse),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
         (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
@@ -147,30 +145,113 @@ impl RequestModel for RequestModelImageGenerations {
 #[instrument(
     level = "info",
     skip_all,
-    fields(
-        endpoint = metadata.endpoint,
-        payload = ?payload,
-    )
+    fields(endpoint = metadata.endpoint)
 )]
-pub async fn image_generations_handler(
+pub async fn image_generations_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
     Json(payload): Json<Value>,
-) -> Result<Response<Body>, StatusCode> {
-    handle_image_generation_response(
-        state,
+) -> Result<Response<Body>> {
+    match handle_image_generation_response(
+        &state,
         metadata.node_address,
         metadata.node_id,
         headers,
         payload,
         metadata.num_compute_units as i64,
-        metadata.endpoint,
-        metadata.salt,
-        metadata.node_x25519_public_key,
+        metadata.endpoint.clone(),
         metadata.model_name,
+        metadata.selected_stack_small_id,
     )
     .await
+    {
+        Ok(response) => Ok(response.into_response()),
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
+}
+
+/// OpenAPI documentation for the image generations endpoint.
+#[derive(OpenApi)]
+#[openapi(
+    paths(confidential_image_generations_create),
+    components(schemas(ConfidentialComputeRequest))
+)]
+pub(crate) struct ConfidentialImageGenerationsOpenApi;
+
+/// Create confidential image
+///
+/// This handler processes image generation requests in a confidential manner, providing additional
+/// encryption and security measures for sensitive data processing. It supports both streaming and
+/// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
+/// for full private AI compute.
+#[utoipa::path(
+    post,
+    path = "",
+    request_body = ConfidentialComputeRequest,
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Image generations", body = ConfidentialComputeResponse),
+        (status = BAD_REQUEST, description = "Bad request"),
+        (status = UNAUTHORIZED, description = "Unauthorized"),
+        (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
+    )
+)]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(endpoint = metadata.endpoint)
+)]
+pub async fn confidential_image_generations_create(
+    Extension(metadata): Extension<RequestMetadataExtension>,
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Json(payload): Json<ConfidentialComputeRequest>,
+) -> Result<Response<Body>> {
+    let payload = serde_json::to_value(payload).map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to serialize payload: {}", e),
+        endpoint: metadata.endpoint.clone(),
+    })?;
+    match handle_image_generation_response(
+        &state,
+        metadata.node_address,
+        metadata.node_id,
+        headers,
+        payload,
+        metadata.num_compute_units as i64,
+        metadata.endpoint.clone(),
+        metadata.model_name,
+        metadata.selected_stack_small_id,
+    )
+    .await
+    {
+        Ok(response) => {
+            // NOTE: At this point, we do not need to update the stack num compute units,
+            // because the image generation response was correctly generated by a TEE node.
+            Ok(response.into_response())
+        }
+        Err(e) => {
+            update_state_manager(
+                &state.state_manager_sender,
+                metadata.selected_stack_small_id,
+                metadata.num_compute_units as i64,
+                0,
+                &metadata.endpoint,
+            )?;
+            Err(e)
+        }
+    }
 }
 
 /// Handles the response processing for image generation requests.
@@ -192,7 +273,7 @@ pub async fn image_generations_handler(
 /// * `_estimated_total_tokens` - Estimated computational cost (currently unused)
 ///
 /// # Returns
-/// * `Result<Response<Body>, StatusCode>` - The processed response from the AI node or an error status
+/// * `Result<Response<Body>, AtomaProxyError>` - The processed response from the AI node or an error status
 ///
 /// # Errors
 /// * Returns `INTERNAL_SERVER_ERROR` (500) if:
@@ -213,17 +294,16 @@ pub async fn image_generations_handler(
 )]
 #[allow(clippy::too_many_arguments)]
 async fn handle_image_generation_response(
-    state: ProxyState,
+    state: &ProxyState,
     node_address: String,
     selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     total_tokens: i64,
     endpoint: String,
-    salt: Option<[u8; constants::SALT_SIZE]>,
-    node_x25519_public_key: Option<PublicKey>,
     model_name: String,
-) -> Result<Response<Body>, StatusCode> {
+    stack_small_id: i64,
+) -> Result<Response<Body>> {
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
@@ -233,28 +313,29 @@ async fn handle_image_generation_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| {
-            error!("Failed to send image generation request: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to send image generation request: {:?}", err),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    if !response.status().is_success() {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned error: {}", response.status()),
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    let response = response
         .json::<Value>()
         .await
-        .map_err(|err| {
-            error!("Failed to parse image generation response: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse image generation response: {:?}", err),
+            endpoint: endpoint.to_string(),
         })
         .map(Json)?;
 
-    let response = if let (Some(node_x25519_public_key), Some(salt)) =
-        (node_x25519_public_key, salt)
-    {
-        let shared_secret = state.compute_shared_secret(&node_x25519_public_key);
-        let NodeEncryptionMetadata { ciphertext, nonce } =
-            extract_node_encryption_metadata(response.0)?;
-        handle_confidential_compute_decryption_response(shared_secret, &ciphertext, &salt, &nonce)?
-    } else {
-        response.0
-    };
+    let verify_hash = endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
+    verify_response_hash_and_signature(&response.0, verify_hash)?;
 
     // Update the node throughput performance
     state
@@ -269,10 +350,86 @@ async fn handle_image_generation_response(
                 time: time.elapsed().as_secs_f64(),
             },
         )
-        .map_err(|err| {
-            error!("Failed to update node throughput performance: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to update node throughput performance: {:?}", err),
+            endpoint: endpoint.to_string(),
         })?;
 
-    Ok(Json(response).into_response())
+    let total_hash = response
+        .get(RESPONSE_HASH_KEY)
+        .and_then(|hash| hash.as_str())
+        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
+            message: format!(
+                "Error converting response hash to array, received array of length {}",
+                e.len()
+            ),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    state
+        .state_manager_sender
+        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+            stack_small_id,
+            total_hash,
+        })
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Error updating stack total hash: {}", err),
+            endpoint: endpoint.to_string(),
+        })?;
+
+    Ok(response.into_response())
+}
+
+/// Request body for image generation
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateImageRequest {
+    /// A text description of the desired image(s). The maximum length is 1000 characters.
+    pub prompt: String,
+
+    /// The model to use for image generation.
+    pub model: String,
+
+    /// The number of images to generate. Defaults to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
+
+    /// The quality of the image that will be generated.
+    /// `hd` creates images with finer details and greater consistency across the image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<String>,
+
+    /// The format in which the generated images are returned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<String>,
+
+    /// The size of the generated images.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+
+    /// The style of the generated images.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+
+    /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+
+//TODO: Add support for b64_json format
+/// Response format for image generation
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateImageResponse {
+    pub created: i64,
+    pub data: Vec<ImageData>,
+}
+
+/// Individual image data in the response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ImageData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revised_prompt: Option<String>,
+    pub url: String,
 }

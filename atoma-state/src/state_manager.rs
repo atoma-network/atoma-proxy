@@ -2,7 +2,8 @@ use crate::build_query_with_in;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeSubscription, Stack, StackAttestationDispute, StackSettlementTicket, Task,
+    NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
+    StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
 use atoma_p2p::AtomaP2pEvent;
@@ -33,6 +34,8 @@ pub struct AtomaStateManager {
     pub state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
     /// Atoma p2p event receiver
     pub p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
+    /// Sui address
+    pub sui_address: String,
 }
 
 impl AtomaStateManager {
@@ -42,12 +45,14 @@ impl AtomaStateManager {
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
         state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
         p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
+        sui_address: String,
     ) -> Self {
         Self {
             state: AtomaState::new(db),
             event_subscriber_receiver,
             state_manager_receiver,
             p2p_event_receiver,
+            sui_address,
         }
     }
 
@@ -60,6 +65,7 @@ impl AtomaStateManager {
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
         state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
         p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
+        sui_address: String,
     ) -> Result<Self> {
         let db = PgPool::connect(database_url).await?;
         // run migrations
@@ -69,6 +75,7 @@ impl AtomaStateManager {
             event_subscriber_receiver,
             state_manager_receiver,
             p2p_event_receiver,
+            sui_address,
         })
     }
 
@@ -107,10 +114,15 @@ impl AtomaStateManager {
                 atoma_event = self.event_subscriber_receiver.recv_async() => {
                     match atoma_event {
                         Ok(atoma_event) => {
+                            tracing::trace!(
+                                target = "atoma-state-manager",
+                                event = "event_subscriber_receiver",
+                                "Event received from event subscriber receiver"
+                            );
                             if let Err(e) = handle_atoma_event(atoma_event, &self).await {
                                 tracing::error!(
                                     target = "atoma-state-manager",
-                                    event = "atoma_event_error",
+                                    event = "event_subscriber_receiver_error",
                                     error = %e,
                                     "Error handling Atoma event"
                                 );
@@ -134,7 +146,7 @@ impl AtomaStateManager {
                             if let Err(e) = handle_state_manager_event(&self, state_manager_event).await {
                                 tracing::error!(
                                     target = "atoma-state-manager",
-                                    event = "state_manager_event_error",
+                                    event = "state_manager_receiver_error",
                                     error = %e,
                                     "Error handling state manager event"
                                 );
@@ -267,30 +279,61 @@ impl AtomaState {
     ///
     /// This function will return an error if the database query fails.
     #[instrument(level = "trace", skip_all, fields(%model, %free_units))]
-    pub async fn get_stacks_for_model(&self, model: &str, free_units: i64) -> Result<Vec<Stack>> {
+    pub async fn get_stacks_for_model(
+        &self,
+        model: &str,
+        free_units: i64,
+        user_id: i64,
+        is_confidential: bool,
+    ) -> Result<Option<Stack>> {
         // TODO: filter also by security level and other constraints
-        let tasks = sqlx::query(
-            "WITH selected_stack AS (
+        let mut query = String::from(
+            r#"
+            WITH selected_stack AS (
                 SELECT stacks.stack_small_id
                 FROM stacks
-                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id"#,
+        );
+
+        if is_confidential {
+            query.push_str(r#"
+                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.node_small_id"#);
+        }
+
+        query.push_str(
+            r#"
                 WHERE tasks.model_name = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND stacks.user_id = $3"#,
+        );
+
+        if is_confidential {
+            query.push_str(
+                r#"
+                AND tasks.security_level = 1
+                AND node_public_keys.is_valid = true"#,
+            );
+        }
+
+        query.push_str(
+            r#"
                 LIMIT 1
             )
             UPDATE stacks
             SET already_computed_units = already_computed_units + $2
             WHERE stack_small_id IN (SELECT stack_small_id FROM selected_stack)
-            RETURNING stacks.*",
-        )
-        .bind(model)
-        .bind(free_units)
-        .fetch_all(&self.db)
-        .await?;
-        tasks
-            .into_iter()
-            .map(|task| Stack::from_row(&task).map_err(AtomaStateManagerError::from))
-            .collect()
+            RETURNING stacks.*"#,
+        );
+
+        let stack = sqlx::query(&query)
+            .bind(model)
+            .bind(free_units)
+            .bind(user_id)
+            .fetch_optional(&self.db)
+            .await?
+            .map(|stack| Stack::from_row(&stack).map_err(AtomaStateManagerError::from))
+            .transpose()?;
+        Ok(stack)
     }
 
     /// Get tasks for model.
@@ -324,47 +367,291 @@ impl AtomaState {
             .collect()
     }
 
-    /// Get node settings for model with the cheapest price (based on the current node subscription).
+    /// Gets the node with the cheapest price per one million compute units for a given model.
     ///
-    /// This method fetches the task from the database that is associated with
-    /// the given model through the `tasks` table and has the cheapest price per compute unit.
-    /// The price is determined based on the node subscription for the task.
+    /// This method queries the database to find the node subscription with the lowest price per one million compute units
+    /// that matches the specified model and confidentiality requirements. It joins the tasks, node_subscriptions,
+    /// and (optionally) node_public_keys tables to find valid subscriptions.
     ///
     /// # Arguments
     ///
-    /// * `model` - The model name for the task.
+    /// * `model` - The name of the model to search for (e.g., "gpt-4", "llama-2")
+    /// * `is_confidential` - Whether to only return nodes that support confidential computing
     ///
     /// # Returns
     ///
-    /// - `Result<Option<CheapestNode>>>`: A result containing either:
-    ///  - `Ok(Some<CheapestNode>)`: A `CheapestNode` object representing the node setting with the cheapest price.
-    ///  - `Ok(None)`: If no task is found for the given model.
-    ///  - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    /// Returns a `Result` containing:
+    /// - `Ok(Some(CheapestNode))` - If a valid node subscription is found
+    /// - `Ok(None)` - If no valid node subscription exists for the model
+    /// - `Err(AtomaStateManagerError)` - If a database error occurs
     ///
-    /// # Errors
+    /// The returned `CheapestNode` contains:
+    /// - The task's small ID
+    /// - The price per one million compute units
+    /// - The maximum number of compute units supported
     ///
-    /// This function will return an error if the database query fails.
+    /// # Security
+    ///
+    /// When `is_confidential` is true, this method:
+    /// - Only returns nodes that have valid public keys
+    /// - Only considers tasks with security level 2
+    /// - Requires nodes to be registered in the node_public_keys table
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use atoma_state::AtomaState;
+    /// # use sqlx::PgPool;
+    ///
+    /// async fn find_cheapest_node(state: &AtomaState) -> anyhow::Result<()> {
+    ///     // Find cheapest non-confidential node for GPT-4
+    ///     let regular_node = state.get_cheapest_node_for_model("gpt-4", false).await?;
+    ///     
+    ///     // Find cheapest confidential node for GPT-4
+    ///     let confidential_node = state.get_cheapest_node_for_model("gpt-4", true).await?;
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
     #[instrument(level = "trace", skip_all, fields(%model))]
-    pub async fn get_cheapest_node_for_model(&self, model: &str) -> Result<Option<CheapestNode>> {
-        let node_settings = sqlx::query(
-            "SELECT tasks.task_small_id, price_per_compute_unit, max_num_compute_units 
-            FROM (SELECT * 
-                  FROM tasks 
-                  WHERE is_deprecated=false
-                    AND model_name = $1) AS tasks 
-            JOIN (SELECT * 
-                  FROM node_subscriptions
-                  WHERE valid = true) AS node_subscriptions 
-            ON tasks.task_small_id=node_subscriptions.task_small_id 
-            ORDER BY node_subscriptions.price_per_compute_unit 
-            LIMIT 1",
-        )
-        .bind(model)
-        .bind(false)
-        .fetch_optional(&self.db)
-        .await?;
+    pub async fn get_cheapest_node_for_model(
+        &self,
+        model: &str,
+        is_confidential: bool,
+    ) -> Result<Option<CheapestNode>> {
+        // TODO: benchmark this query performance
+        let mut query = String::from(
+            r#"
+            WITH latest_rotation AS (
+                SELECT key_rotation_counter 
+                FROM key_rotations 
+                ORDER BY key_rotation_counter DESC 
+                LIMIT 1
+            )
+            SELECT tasks.task_small_id, node_subscriptions.price_per_one_million_compute_units, 
+                node_subscriptions.max_num_compute_units, node_subscriptions.node_small_id
+            FROM tasks
+            INNER JOIN node_subscriptions ON tasks.task_small_id = node_subscriptions.task_small_id"#,
+        );
+
+        if is_confidential {
+            query.push_str(r#"
+            INNER JOIN node_public_keys ON node_public_keys.node_small_id = node_subscriptions.node_small_id
+            INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter"#);
+        }
+
+        query.push_str(
+            r#"
+            WHERE tasks.is_deprecated = false
+            AND tasks.model_name = $1
+            AND node_subscriptions.valid = true"#,
+        );
+
+        if is_confidential {
+            query.push_str(
+                r#"
+            AND tasks.security_level = 1
+            AND node_public_keys.is_valid = true"#,
+            );
+        }
+
+        query.push_str(
+            r#"
+            ORDER BY node_subscriptions.price_per_one_million_compute_units 
+            LIMIT 1"#,
+        );
+
+        let node_settings = sqlx::query(&query)
+            .bind(model)
+            .fetch_optional(&self.db)
+            .await?;
         Ok(node_settings
             .map(|node_settings| CheapestNode::from_row(&node_settings))
+            .transpose()?)
+    }
+
+    /// Selects a node's public key for encryption based on model requirements and compute capacity.
+    ///
+    /// This method queries the database to find the cheapest valid node that:
+    /// 1. Has a valid public key for encryption
+    /// 2. Has an associated stack with sufficient remaining compute capacity
+    /// 3. Supports the specified model with security level 1 (confidential computing)
+    ///
+    /// The nodes are ordered by each stac's price per one million compute units, so the most cost-effective stack meeting
+    /// all requirements will be selected.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The name of the model requiring encryption (e.g., "gpt-4", "llama-2")
+    /// * `max_num_tokens` - The maximum number of compute units/tokens needed for the task
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing:
+    /// - `Ok(Some(NodePublicKey))` - If a suitable node is found, returns its public key and ID
+    /// - `Ok(None)` - If no suitable node is found
+    /// - `Err(AtomaStateManagerError)` - If a database error occurs
+    ///
+    /// # Database Query Details
+    ///
+    /// The method joins three tables:
+    /// - `node_public_keys`: For encryption key information
+    /// - `stacks`: For compute capacity and pricing
+    /// - `tasks`: For model and security level verification
+    ///
+    /// The results are filtered to ensure:
+    /// - The stack supports the requested model
+    /// - The task requires security level 1 (confidential computing)
+    /// - The stack has sufficient remaining compute units
+    /// - The node's public key is valid
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use atoma_state::AtomaState;
+    /// # use sqlx::PgPool;
+    ///
+    /// async fn encrypt_for_node(state: &AtomaState) -> anyhow::Result<()> {
+    ///     // Find a node that can handle GPT-4 requests with up to1000 tokens
+    ///     let node_key = state.select_node_public_key_for_encryption("gpt-4", 1000).await?;
+    ///     
+    ///     if let Some(node_key) = node_key {
+    ///         // Use the node's public key for encryption
+    ///         // ...
+    ///     }
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%model, %max_num_tokens))]
+    pub async fn select_node_public_key_for_encryption(
+        &self,
+        model: &str,
+        max_num_tokens: i64,
+    ) -> Result<Option<NodePublicKey>> {
+        let node = sqlx::query(
+            r#"
+            SELECT node_public_keys.public_key as public_key, node_public_keys.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
+                FROM node_public_keys
+                INNER JOIN stacks ON stacks.selected_node_id = node_public_keys.node_small_id
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+                WHERE tasks.model_name = $1
+                AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
+                AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND node_public_keys.is_valid = true
+                ORDER BY stacks.price_per_one_million_compute_units ASC
+                LIMIT 1
+            "#,
+        )
+        .bind(model)
+        .bind(max_num_tokens)
+        .fetch_optional(&self.db)
+        .await?;
+        node.map(|node| NodePublicKey::from_row(&node).map_err(AtomaStateManagerError::from))
+            .transpose()
+    }
+
+    /// Verifies if a stack is valid for confidential compute requests.
+    ///
+    /// This method checks if:
+    /// 1. The stack exists and has enough available compute units
+    /// 2. The associated node has a valid public key for confidential computing
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique identifier of the stack to verify
+    /// * `available_compute_units` - The number of compute units needed
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result containing either:
+    ///   - `Ok(true)` if the stack is valid for confidential computing
+    ///   - `Ok(false)` if the stack is invalid or has insufficient compute units
+    ///   - `Err(AtomaStateManagerError)` if there's a database error
+    #[instrument(level = "trace", skip_all, fields(%stack_small_id, %available_compute_units))]
+    pub async fn verify_stack_for_confidential_compute_request(
+        &self,
+        stack_small_id: i64,
+        available_compute_units: i64,
+    ) -> Result<bool> {
+        let result = sqlx::query_scalar::<_, bool>(
+            r#"
+            WITH latest_rotation AS (
+                SELECT key_rotation_counter 
+                FROM key_rotations 
+                ORDER BY key_rotation_counter DESC 
+                LIMIT 1
+            )
+            SELECT EXISTS (
+                SELECT 1 
+                FROM stacks
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.selected_node_id
+                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter
+                WHERE stacks.stack_small_id = $1
+                AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND tasks.security_level = 1
+                AND tasks.is_deprecated = false
+                AND node_public_keys.is_valid = true
+                AND stacks.in_settle_period = false
+            )"#,
+        )
+        .bind(stack_small_id)
+        .bind(available_compute_units)
+        .fetch_one(&self.db)
+        .await?;
+
+        Ok(result)
+    }
+
+    /// Retrieves a node's public key for encryption by its node ID.
+    ///
+    /// This method queries the database to find the public key associated with a specific node.
+    /// Unlike `select_node_public_key_for_encryption`, this method looks up the key directly by
+    /// node ID without considering model requirements or compute capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique identifier of the node whose public key is being requested
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing:
+    /// - `Ok(Some(NodePublicKey))` - If a valid public key is found for the node
+    /// - `Ok(None)` - If no public key exists for the specified node
+    /// - `Err(AtomaStateManagerError)` - If a database error occurs
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use atoma_state::AtomaState;
+    /// # use sqlx::PgPool;
+    ///
+    /// async fn get_node_key(state: &AtomaState) -> anyhow::Result<()> {
+    ///     let node_id = 123;
+    ///     let node_key = state.select_node_public_key_for_encryption_for_node(node_id).await?;
+    ///     
+    ///     if let Some(key) = node_key {
+    ///         // Use the node's public key for encryption
+    ///         // ...
+    ///     }
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%node_small_id))]
+    pub async fn select_node_public_key_for_encryption_for_node(
+        &self,
+        node_small_id: i64,
+    ) -> Result<Option<NodePublicKey>> {
+        let node_public_key =
+            sqlx::query(r#"SELECT node_small_id, public_key FROM node_public_keys WHERE node_small_id = $1 and is_valid = true"#)
+                .bind(node_small_id)
+                .fetch_optional(&self.db)
+                .await?;
+        Ok(node_public_key
+            .map(|node_public_key| NodePublicKey::from_row(&node_public_key))
             .transpose()?)
     }
 
@@ -656,6 +943,83 @@ impl AtomaState {
             .collect()
     }
 
+    /// Get stacks created/settled for the last `last_hours` hours.
+    ///
+    /// This method fetches the stacks created/settled for the last `last_hours` hours from the `stats_stacks` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `last_hours` - The number of hours to fetch the stacks stats.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<StatsStackResponse>>`: A result containing either:
+    ///   - `Ok(Vec<StatsStackResponse>)`: The stacks stats for the last `last_hours` hours.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_current_stacks(state_manager: &AtomaStateManager) -> Result<Vec<StatsStackResponse>, AtomaStateManagerError> {
+    ///    state_manager.get_stats_stacks(5).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_stats_stacks(&self, last_hours: usize) -> Result<Vec<StatsStackResponse>> {
+        let timestamp = Utc::now();
+        let start_timestamp = timestamp
+            .checked_sub_signed(chrono::Duration::hours(last_hours as i64))
+            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
+        let stats_stacks =
+            sqlx::query("SELECT * FROM stats_stacks WHERE timestamp >= $1 ORDER BY timestamp ASC")
+                .bind(start_timestamp)
+                .fetch_all(&self.db)
+                .await?;
+        stats_stacks
+            .into_iter()
+            .map(|stack| StatsStackResponse::from_row(&stack).map_err(AtomaStateManagerError::from))
+            .collect()
+    }
+
+    /// Get the distribution of nodes by country.
+    /// This method fetches the distribution of nodes by country from the `nodes` table.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<NodeDistribution>>`: A result containing either:
+    ///  - `Ok(Vec<NodeDistribution>)`: The distribution of nodes by country.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_nodes_distribution(state_manager: &AtomaStateManager) -> Result<Vec<NodeDistribution>, AtomaStateManagerError> {
+    ///    state_manager.get_nodes_distribution().await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_nodes_distribution(&self) -> Result<Vec<NodeDistribution>> {
+        let nodes_distribution = sqlx::query(
+            "SELECT country, COUNT(*) AS count FROM nodes GROUP BY country ORDER BY count DESC",
+        )
+        .fetch_all(&self.db)
+        .await?;
+        nodes_distribution
+            .into_iter()
+            .map(|node| NodeDistribution::from_row(&node).map_err(AtomaStateManagerError::from))
+            .collect()
+    }
+
     /// Register user with password.
     ///
     /// This method inserts a new entry into the `users` table to register a new user. In case the user already exists, it returns None.
@@ -742,17 +1106,17 @@ impl AtomaState {
         Ok(count > 0)
     }
 
-    /// Subscribes a node to a task with a specified price per compute unit.
+    /// Subscribes a node to a task with a specified price per one million compute units.
     ///
     /// This method inserts a new entry into the `node_subscriptions` table to
     /// establish a subscription relationship between a node and a task, along
-    /// with the specified price per compute unit for the subscription.
+    /// with the specified price per one million compute units for the subscription.
     ///
     /// # Arguments
     ///
     /// * `node_small_id` - The unique identifier of the node to be subscribed.
     /// * `task_small_id` - The unique identifier of the task to which the node is subscribing.
-    /// * `price_per_compute_unit` - The price per compute unit for the subscription.
+    /// * `price_per_one_million_compute_units` - The price per compute unit for the subscription.
     ///
     /// # Returns
     ///
@@ -769,8 +1133,8 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn subscribe_node_to_task(state_manager: &AtomaStateManager, node_small_id: i64, task_small_id: i64, price_per_compute_unit: i64) -> Result<(), AtomaStateManagerError> {
-    ///     state_manager.subscribe_node_to_task(node_small_id, task_small_id, price_per_compute_unit).await
+    /// async fn subscribe_node_to_task(state_manager: &AtomaStateManager, node_small_id: i64, task_small_id: i64, price_per_one_million_compute_units: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.subscribe_node_to_task(node_small_id, task_small_id, price_per_one_million_compute_units).await
     /// }
     /// ```
     #[instrument(
@@ -779,7 +1143,7 @@ impl AtomaState {
         fields(
             %node_small_id,
             %task_small_id,
-            %price_per_compute_unit,
+            %price_per_one_million_compute_units,
             %max_num_compute_units
         )
     )]
@@ -787,17 +1151,17 @@ impl AtomaState {
         &self,
         node_small_id: i64,
         task_small_id: i64,
-        price_per_compute_unit: i64,
+        price_per_one_million_compute_units: i64,
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_subscriptions 
-                (node_small_id, task_small_id, price_per_compute_unit, max_num_compute_units, valid) 
+                (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid) 
                 VALUES ($1, $2, $3, $4, TRUE)",
         )
             .bind(node_small_id)
             .bind(task_small_id)
-            .bind(price_per_compute_unit)
+            .bind(price_per_one_million_compute_units)
             .bind(max_num_compute_units)
             .execute(&self.db)
             .await?;
@@ -854,14 +1218,14 @@ impl AtomaState {
     /// Updates an existing node subscription to a task with new price and compute unit values.
     ///
     /// This method updates an entry in the `node_subscriptions` table, modifying the
-    /// price per compute unit and the maximum number of compute units for an existing
+    /// price per one million compute units and the maximum number of compute units for an existing
     /// subscription between a node and a task.
     ///
     /// # Arguments
     ///
     /// * `node_small_id` - The unique identifier of the subscribed node.
     /// * `task_small_id` - The unique identifier of the task to which the node is subscribed.
-    /// * `price_per_compute_unit` - The new price per compute unit for the subscription.
+    /// * `price_per_one_million_compute_units` - The new price per compute unit for the subscription.
     /// * `max_num_compute_units` - The new maximum number of compute units for the subscription.
     ///
     /// # Returns
@@ -889,7 +1253,7 @@ impl AtomaState {
         fields(
             %node_small_id,
             %task_small_id,
-            %price_per_compute_unit,
+            %price_per_one_million_compute_units,
             %max_num_compute_units
         )
     )]
@@ -897,13 +1261,13 @@ impl AtomaState {
         &self,
         node_small_id: i64,
         task_small_id: i64,
-        price_per_compute_unit: i64,
+        price_per_one_million_compute_units: i64,
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE node_subscriptions SET price_per_compute_unit = $1, max_num_compute_units = $2 WHERE node_small_id = $3 AND task_small_id = $4",
+            "UPDATE node_subscriptions SET price_per_one_million_compute_units = $1, max_num_compute_units = $2 WHERE node_small_id = $3 AND task_small_id = $4",
         )
-            .bind(price_per_compute_unit)
+            .bind(price_per_one_million_compute_units)
             .bind(max_num_compute_units)
             .bind(node_small_id)
             .bind(task_small_id)
@@ -1147,6 +1511,55 @@ impl AtomaState {
             .collect()
     }
 
+    /// Retrieves all stacks associated with a specific user ID.
+    ///
+    /// This method fetches all stack records from the `stacks` table that are associated
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user whose stacks should be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<Stack>>`: A result containing either:
+    ///  - `Ok(Vec<Stack>)`: A vector of `Stack` objects associated with the given user ID.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database rows into `Stack` objects.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, Stack};
+    ///
+    /// async fn get_user_stacks(state_manager: &AtomaStateManager, user_id: i64) -> Result<Vec<Stack>, AtomaStateManagerError> {
+    ///    state_manager.get_stacks_by_user_id(user_id).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%user_id)
+    )]
+    pub async fn get_stacks_by_user_id(&self, user_id: i64) -> Result<Vec<(Stack, DateTime<Utc>)>> {
+        let stacks = sqlx::query("SELECT * FROM stacks WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&self.db)
+            .await?;
+        stacks
+            .into_iter()
+            .map(|row| {
+                Stack::from_row(&row)
+                    .map_err(AtomaStateManagerError::from)
+                    .map(|stack| (stack, row.get("acquired_timestamp")))
+            })
+            .collect()
+    }
+
     /// Retrieves stacks that are almost filled beyond a specified fraction threshold.
     ///
     /// This method fetches all stacks from the database where:
@@ -1303,6 +1716,69 @@ impl AtomaState {
         Ok(maybe_stack)
     }
 
+    /// Locks (reserves) a specified number of compute units for a stack.
+    ///
+    /// This method atomically updates the `already_computed_units` field in the `stacks` table
+    /// by adding the specified number of compute units to the current value. This effectively
+    /// "locks" these compute units for use by preventing other processes from using the same units.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique small identifier of the stack to lock compute units for.
+    /// * `available_compute_units` - The number of compute units to lock/reserve.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The specified stack is not found (`AtomaStateManagerError::StackNotFound`).
+    /// - The specified stack does not have enough compute units to lock.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn lock_units(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let stack_small_id = 1;
+    ///     let units_to_lock = 100;
+    ///     
+    ///     state_manager.lock_compute_units_for_stack(stack_small_id, units_to_lock).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",    
+        skip_all,
+        fields(
+            %stack_small_id,
+            %available_compute_units
+        )
+    )]
+    pub async fn lock_compute_units(
+        &self,
+        stack_small_id: i64,
+        available_compute_units: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE stacks 
+            SET already_computed_units = already_computed_units + $1 
+            WHERE stack_small_id = $2 
+            AND already_computed_units + $1 <= num_compute_units",
+        )
+        .bind(available_compute_units)
+        .bind(stack_small_id)
+        .execute(&self.db)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(AtomaStateManagerError::StackNotFound);
+        }
+        Ok(())
+    }
+
     /// Inserts a new stack into the database.
     ///
     /// This method inserts a new entry into the `stacks` table with the provided stack details.
@@ -1338,13 +1814,18 @@ impl AtomaState {
             task_small_id = %stack.task_small_id,
             selected_node_id = %stack.selected_node_id,
             num_compute_units = %stack.num_compute_units,
-            price = %stack.price)
-    )]
-    pub async fn insert_new_stack(&self, stack: Stack) -> Result<()> {
+            price = %stack.price_per_one_million_compute_units)
+        )]
+    pub async fn insert_new_stack(
+        &self,
+        stack: Stack,
+        user_id: i64,
+        acquired_timestamp: DateTime<Utc>,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks 
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price, already_computed_units, in_settle_period, total_hash, num_total_messages) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
@@ -1352,11 +1833,13 @@ impl AtomaState {
             .bind(stack.task_small_id)
             .bind(stack.selected_node_id)
             .bind(stack.num_compute_units)
-            .bind(stack.price)
+            .bind(stack.price_per_one_million_compute_units)
             .bind(stack.already_computed_units)
             .bind(stack.in_settle_period)
             .bind(stack.total_hash)
             .bind(stack.num_total_messages)
+            .bind(user_id)
+            .bind(acquired_timestamp)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -1604,6 +2087,7 @@ impl AtomaState {
     pub async fn insert_new_stack_settlement_ticket(
         &self,
         stack_settlement_ticket: StackSettlementTicket,
+        timestamp: DateTime<Utc>,
     ) -> Result<()> {
         let mut tx = self.db.begin().await?;
         sqlx::query(
@@ -1636,11 +2120,22 @@ impl AtomaState {
         .execute(&mut *tx)
         .await?;
 
+        let timestamp = timestamp
+            .with_second(0)
+            .and_then(|t| t.with_minute(0))
+            .and_then(|t| t.with_nanosecond(0))
+            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         // Also update the stack to set in_settle_period to true
-        sqlx::query("UPDATE stacks SET in_settle_period = true WHERE stack_small_id = $1")
-            .bind(stack_settlement_ticket.stack_small_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT into stats_stacks (timestamp,settled_num_compute_units) VALUES ($1,$2)
+             ON CONFLICT (timestamp) 
+             DO UPDATE SET 
+                settled_num_compute_units = stats_stacks.settled_num_compute_units + EXCLUDED.settled_num_compute_units"
+        )
+        .bind(timestamp)
+        .bind(stack_settlement_ticket.num_claimed_compute_units)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -2286,6 +2781,7 @@ impl AtomaState {
     ///
     /// * `small_id` - The unique small identifier of the node.
     /// * `address` - The public address of the node.
+    /// * `country` - The country of the node.
     ///
     /// # Returns
     ///
@@ -2301,15 +2797,21 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn update_address(state_manager: &AtomaStateManager, small_id: i64, address: String) -> Result<(), AtomaStateManagerError> {
-    ///    state_manager.update_node_public_address(small_id, address).await
+    /// async fn update_address(state_manager: &AtomaStateManager, small_id: i64, address: String, country:String) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_node_public_address(small_id, address, country).await
     /// }
     /// ```
     #[instrument(level = "trace", skip_all, fields(%small_id, %address))]
-    pub async fn update_node_public_address(&self, small_id: i64, address: String) -> Result<()> {
-        sqlx::query("UPDATE nodes SET public_address = $2 WHERE node_small_id = $1")
+    pub async fn update_node_public_address(
+        &self,
+        small_id: i64,
+        address: String,
+        country: String,
+    ) -> Result<()> {
+        sqlx::query("UPDATE nodes SET public_address = $2, country = $3 WHERE node_small_id = $1")
             .bind(small_id)
             .bind(address)
+            .bind(country)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -2352,6 +2854,65 @@ impl AtomaState {
                 .fetch_optional(&self.db)
                 .await?;
         Ok(address)
+    }
+
+    /// Retrieves the public address and small ID of the node associated with a specific stack.
+    ///
+    /// This method performs a JOIN between the `stacks` and `nodes` tables to fetch the node's
+    /// public address and small ID based on the stack's selected node.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique small identifier of the stack.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(Option<String>, i64)>`: A result containing either:
+    ///   - `Ok((Option<String>, i64))`: A tuple containing:
+    ///     - The node's public address (if set) or None
+    ///     - The node's small ID
+    ///   - `Err(AtomaStateManagerError)`: An error if:
+    ///     - The database query fails
+    ///     - The specified stack is not found
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - The specified stack does not exist (`AtomaStateManagerError::StackNotFound`)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_node_info(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let stack_small_id = 1;
+    ///     let (public_address, node_small_id) = state_manager
+    ///         .get_node_public_url_and_small_id(stack_small_id)
+    ///         .await?;
+    ///     
+    ///     println!("Node {} has public address: {:?}", node_small_id, public_address);
+    ///     Ok(())
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%stack_small_id))]
+    pub async fn get_node_public_url_and_small_id(
+        &self,
+        stack_small_id: i64,
+    ) -> Result<(Option<String>, i64)> {
+        let result = sqlx::query_as::<_, (Option<String>, i64)>(
+            "SELECT n.public_address, n.node_small_id 
+             FROM stacks s
+             JOIN nodes n ON s.selected_node_id = n.node_small_id 
+             WHERE s.stack_small_id = $1",
+        )
+        .bind(stack_small_id)
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or(AtomaStateManagerError::StackNotFound)?;
+
+        Ok(result)
     }
 
     /// Retrieves the sui address of a node from the database.
@@ -2606,6 +3167,65 @@ impl AtomaState {
         Ok(())
     }
 
+    /// Records or updates a key rotation event for a specific epoch in the database.
+    ///
+    /// This method tracks cryptographic key rotation events by maintaining a counter for each epoch.
+    /// It uses an "upsert" operation, meaning it will either:
+    /// - Insert a new record if no rotation exists for the given epoch
+    /// - Update the existing record if a rotation was already recorded for that epoch
+    ///
+    /// # Arguments
+    ///
+    /// * `epoch` - The epoch number when the key rotation occurred
+    /// * `key_rotation_counter` - The cumulative number of key rotations that have occurred
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError))
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's a connection issue with the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn rotate_keys(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let current_epoch = 100;
+    ///     let rotation_counter = 5;
+    ///     
+    ///     state_manager.insert_new_key_rotation(current_epoch, rotation_counter).await
+    /// }
+    /// ```
+    ///
+    /// # Security Considerations
+    ///
+    /// This method is part of the system's cryptographic key management infrastructure and helps:
+    /// - Maintain an audit trail of key rotation events
+    /// - Verify compliance with key rotation policies
+    /// - Track the frequency of key rotations per epoch
+    #[instrument(level = "trace", skip_all, fields(%epoch, %key_rotation_counter))]
+    pub async fn insert_new_key_rotation(
+        &self,
+        epoch: i64,
+        key_rotation_counter: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO key_rotations (epoch, key_rotation_counter) VALUES ($1, $2)
+            ON CONFLICT (epoch)
+            DO UPDATE SET key_rotation_counter = EXCLUDED.key_rotation_counter",
+        )
+        .bind(epoch)
+        .bind(key_rotation_counter)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
     /// Updates or inserts a node's public key and associated information in the database.
     ///
     /// This method updates the `node_public_keys` table with new information for a specific node. If an entry
@@ -2655,20 +3275,26 @@ impl AtomaState {
         &self,
         node_id: i64,
         epoch: i64,
+        key_rotation_counter: i64,
         new_public_key: Vec<u8>,
         tee_remote_attestation_bytes: Vec<u8>,
+        is_valid: bool,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_public_keys (node_small_id, epoch, public_key, tee_remote_attestation_bytes) VALUES ($1, $2, $3, $4)
+            "INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (node_small_id)
                 DO UPDATE SET epoch = $2, 
-                              public_key = $3, 
-                              tee_remote_attestation_bytes = $4",
+                              key_rotation_counter = $3,
+                              public_key = $4, 
+                              tee_remote_attestation_bytes = $5,
+                              is_valid = $6",
         )
         .bind(node_id)
         .bind(epoch)
+        .bind(key_rotation_counter)
         .bind(new_public_key)
         .bind(tee_remote_attestation_bytes)
+        .bind(is_valid)
         .execute(&self.db)
         .await?;
         Ok(())
@@ -3078,16 +3704,13 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn is_api_token_valid(&self, user_id: i64, api_token: &str) -> Result<bool> {
-        let is_valid = sqlx::query(
-            "SELECT EXISTS(SELECT 1 FROM api_tokens WHERE user_id = $1 AND token = $2)",
-        )
-        .bind(user_id)
-        .bind(api_token)
-        .fetch_one(&self.db)
-        .await?;
+    pub async fn is_api_token_valid(&self, api_token: &str) -> Result<i64> {
+        let is_valid = sqlx::query("SELECT user_id FROM api_tokens WHERE token = $1")
+            .bind(api_token)
+            .fetch_one(&self.db)
+            .await?;
 
-        Ok(is_valid.get::<bool, _>(0))
+        Ok(is_valid.get::<i64, _>(0))
     }
 
     /// Stores a new api token for a user.
@@ -3211,6 +3834,83 @@ impl AtomaState {
                     .map_err(AtomaStateManagerError::from)
             })
             .collect()
+    }
+
+    /// Get balance for a user.
+    ///
+    /// This method fetches the balance for a user from the `balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<i64>`: A result containing either:
+    ///   - `Ok(i64)`: The balance for the user.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_balance(state_manager: &AtomaStateManager, user_id: i64) -> Result<i64, AtomaStateManagerError> {
+    ///     state_manager.get_balance_for_user(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
+        let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+
+        Ok(balance.get::<i64, _>("usdc_balance"))
+    }
+
+    /// Get the user profile by user_id.
+    ///
+    /// This method fetches the user profile by user_id from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<UserProfile>`: A result containing either:
+    ///   - `Ok(UserProfile)`: The user profile for the user_id.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_profile(state_manager: &AtomaStateManager, user_id: i64) -> Result<UserProfile, AtomaStateManagerError> {
+    ///     state_manager.get_user_profile(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_user_profile(&self, user_id: i64) -> Result<UserProfile> {
+        let user = sqlx::query("SELECT username FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+
+        UserProfile::from_row(&user).map_err(AtomaStateManagerError::from)
     }
 
     /// Get latency performance for the last `last_hours` hours.
@@ -3368,6 +4068,281 @@ impl AtomaState {
         .await?;
         Ok(())
     }
+
+    /// Records statistics about a new stack in the database.
+    ///
+    /// This method inserts or updates hourly statistics about stack compute units in the `stats_stacks` table.
+    /// The timestamp is rounded down to the nearest hour, and if an entry already exists for that hour,
+    /// the compute units are added to the existing total.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack` - The `Stack` object containing information about the new stack.
+    /// * `timestamp` - The timestamp when the stack was created.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The timestamp cannot be normalized to an hour boundary.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, Stack};
+    /// use chrono::{DateTime, Utc};
+    ///
+    /// async fn record_stack_stats(state_manager: &AtomaStateManager, stack: Stack) -> Result<(), AtomaStateManagerError> {
+    ///     let timestamp = Utc::now();
+    ///     state_manager.new_stats_stack(stack, timestamp).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn new_stats_stack(&self, stack: Stack, timestamp: DateTime<Utc>) -> Result<()> {
+        let timestamp = timestamp
+            .with_second(0)
+            .and_then(|t| t.with_minute(0))
+            .and_then(|t| t.with_nanosecond(0))
+            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
+        sqlx::query(
+            "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
+                 ON CONFLICT (timestamp) 
+                 DO UPDATE SET 
+                    num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",
+        )
+        .bind(timestamp)
+        .bind(stack.num_compute_units)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Updates the sui address for the user.
+    ///
+    /// This method updates the `sui_address` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `sui_address` - The SUI address to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn store_sui_address(state_manager: &AtomaStateManager, user_id: i64, sui_address: String) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.store_sui_address(user_id, sui_address).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn update_sui_address(&self, user_id: i64, sui_address: String) -> Result<()> {
+        sqlx::query("UPDATE users SET sui_address = $1 WHERE id = $2")
+            .bind(sui_address)
+            .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieves the SUI address for the user.
+    ///
+    /// This method retrieves the SUI address for the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///  - `Ok(Some(String))`: The SUI address of the user.
+    /// - `Ok(None)`: If the user is not found.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_sui_address(state_manager: &AtomaStateManager, user_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
+    ///    state_manager.get_sui_address(user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_sui_address(&self, user_id: i64) -> Result<Option<String>> {
+        let sui_address =
+            sqlx::query_scalar::<_, Option<String>>("SELECT sui_address FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.db)
+                .await?;
+
+        Ok(sui_address.flatten())
+    }
+
+    /// Confirms that the user is associated with the wallet.
+    ///
+    /// This method confirms that users has this wallet associated with them.
+    ///
+    /// # Arguments
+    ///
+    /// * `sui_address` - The sui_address of the user.
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result containing either:
+    /// - `Ok(true)`: If the user is associated with the wallet.
+    /// - `Ok(false)`: If the user is not associated with the wallet.
+    /// - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn confirm_user(state_manager: &AtomaStateManager, sui_address: String, user_id: i64) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.confirm_user(sui_address, user_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn confirm_user(&self, sui_address: String, user_id: i64) -> Result<bool> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE sui_address = $1 and id = $2)",
+        )
+        .bind(sui_address)
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await?;
+        Ok(exists)
+    }
+
+    /// Update the balance for the user.
+    ///
+    /// This method updates the `balance` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The new balance to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_balance(state_manager: &AtomaStateManager, user_id: i64, balance: i64) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.update_balance(user_id, balance).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn top_up_balance(&self, user_id: i64, balance: i64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO balance (user_id, usdc_balance) 
+                         VALUES ($1, $2) 
+                         ON CONFLICT (user_id) 
+                         DO UPDATE SET 
+                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance",
+        )
+        .bind(user_id)
+        .bind(balance)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Deduct from the usdc balance for the user.
+    ///
+    /// This method withdraws the balance from the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `balance` - The balance to withdraw from the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute (that could mean the balance is not available)
+    #[instrument(level = "trace", skip(self))]
+    pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
+        let result = sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
+            .bind(user_id)
+            .bind(balance)
+            .execute(&self.db)
+            .await?;
+        if result.rows_affected() != 1 {
+            return Err(AtomaStateManagerError::InsufficientBalance);
+        }
+        Ok(())
+    }
+
+    /// Insert a new usdc payment digest.
+    ///
+    /// This method inserts a new usdc payment digest into the `usdc_payment_digests` table. It fails if the digest already exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `digest` - The digest to insert.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute. Including if the digest already exists.
+    #[instrument(level = "trace", skip(self))]
+    pub async fn insert_new_usdc_payment_digest(&self, digest: String) -> Result<()> {
+        sqlx::query("INSERT INTO usdc_payment_digests (digest) VALUES ($1)")
+            .bind(digest)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -3398,11 +4373,24 @@ pub enum AtomaStateManagerError {
     NodeNotFound,
     #[error("Node small id ownership verification failed")]
     NodeSmallIdOwnershipVerificationFailed,
+    #[error("Failed to verify quote: `{0}`")]
+    FailedToVerifyQuote(String),
+    #[error("Failed to parse quote: `{0}`")]
+    FailedToParseQuote(String),
+    #[error("Unix time went backwards: `{0}`")]
+    UnixTimeWentBackwards(String),
+    #[error("Failed to retrieve collateral: `{0}`")]
+    FailedToRetrieveCollateral(String),
+    #[error("Failed to retrieve fmspc: `{0}`")]
+    FailedToRetrieveFmspc(String),
+    #[error("Insufficient balance")]
+    InsufficientBalance,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
 
@@ -3419,9 +4407,12 @@ mod tests {
                 tasks,
                 node_subscriptions,
                 stacks,
+                nodes,
                 stack_settlement_tickets,
                 stack_attestation_disputes,
-                nodes
+                node_public_keys,
+                users,
+                key_rotations
             CASCADE",
         )
         .execute(db)
@@ -3568,6 +4559,151 @@ mod tests {
         .expect("Failed to fetch node public URL")
     }
 
+    /// Helper function to create a test task
+    async fn create_test_task(
+        pool: &sqlx::PgPool,
+        task_small_id: i64,
+        model_name: &str,
+        security_level: i32,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            "INSERT INTO tasks (task_small_id, task_id, role, model_name, is_deprecated, valid_until_epoch, security_level, minimum_reputation_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+        )
+        .bind(task_small_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind(1)
+        .bind(model_name)
+        .bind(false)
+        .bind(1000i64)
+        .bind(security_level)
+        .bind(0i64)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Helper function to create a test key rotation
+    async fn create_key_rotation(
+        pool: &sqlx::PgPool,
+        epoch: i64,
+        key_rotation_counter: i64,
+    ) -> sqlx::Result<()> {
+        sqlx::query("INSERT INTO key_rotations (epoch, key_rotation_counter) VALUES ($1, $2)")
+            .bind(epoch)
+            .bind(key_rotation_counter)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Helper function to create a test node subscription
+    async fn create_test_node_subscription(
+        pool: &sqlx::PgPool,
+        node_small_id: i64,
+        task_small_id: i64,
+        price: i64,
+        max_units: i64,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid)
+             VALUES ($1, $2, $3, $4, $5)"
+        )
+        .bind(node_small_id)
+        .bind(task_small_id)
+        .bind(price)
+        .bind(max_units)
+        .bind(true)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn create_test_node(pool: &sqlx::PgPool, node_small_id: i64) -> sqlx::Result<()> {
+        sqlx::query(
+            "INSERT INTO nodes (node_small_id, sui_address, public_address, country) VALUES ($1, $2, $3, $4)"
+        )
+        .bind(node_small_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind("test_public_address")
+        .bind("test_country")
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Helper function to create a test node public key
+    async fn create_test_node_public_key(
+        pool: &sqlx::PgPool,
+        node_small_id: i64,
+        is_valid: bool,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            "INSERT INTO node_public_keys (node_small_id, public_key, is_valid, epoch, key_rotation_counter, tee_remote_attestation_bytes)
+             VALUES ($1, $2, $3, $4, $5, $6)"
+        )
+        .bind(node_small_id)
+        .bind(vec![0u8; 32]) // dummy public key
+        .bind(is_valid)
+        .bind(1i64)
+        .bind(1i64)
+        .bind(vec![0u8; 32]) // dummy attestation bytes
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Helper function to create a test stack
+    async fn create_test_stack(
+        pool: &sqlx::PgPool,
+        task_small_id: i64,
+        stack_small_id: i64,
+        node_small_id: i64,
+        price: i64,
+        num_compute_units: i64,
+        user_id: i64,
+    ) -> sqlx::Result<()> {
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind(format!("test_user_{}", user_id)) // Create unique username
+            .bind("test_password_hash") // Default password hash
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "INSERT INTO stacks (
+                stack_small_id,
+                owner,
+                stack_id,
+                task_small_id,
+                selected_node_id,
+                num_compute_units,
+                price_per_one_million_compute_units,
+                already_computed_units,
+                in_settle_period,
+                total_hash,
+                num_total_messages,
+                user_id,
+                acquired_timestamp
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        )
+        .bind(stack_small_id)
+        .bind("test_owner") // Default test owner
+        .bind(Uuid::new_v4().to_string()) // Generate unique stack_id
+        .bind(task_small_id)
+        .bind(node_small_id)
+        .bind(num_compute_units)
+        .bind(price)
+        .bind(0i64) // Default already_computed_units
+        .bind(false) // Default in_settle_period
+        .bind(vec![0u8; 32]) // Default total_hash (32 bytes of zeros)
+        .bind(0i64) // Default num_total_messages
+        .bind(user_id)
+        .bind(chrono::Utc::now()) // Acquired timestamp
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_register_node_public_url_success() {
@@ -3623,6 +4759,35 @@ mod tests {
             .expect("Node should exist");
         assert_eq!(stored_data.0, new_url);
         assert_eq!(stored_data.1, new_timestamp);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_basic() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test data
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+            .await
+            .unwrap();
+
+        // Test basic functionality
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", false)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let node = result.unwrap();
+        assert_eq!(node.task_small_id, 1);
+        assert_eq!(node.price_per_one_million_compute_units, 100);
+        assert_eq!(node.max_num_compute_units, 1000);
+        assert_eq!(node.node_small_id, 1);
     }
 
     #[tokio::test]
@@ -3688,6 +4853,46 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn test_get_cheapest_node_multiple_prices() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test data with multiple nodes at different prices
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+        create_test_node(&state.db, 2).await.unwrap();
+        create_test_node_subscription(&state.db, 2, 1, 50, 1000)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 2, 2, 50, 1000, 2)
+            .await
+            .unwrap();
+        create_test_node(&state.db, 3).await.unwrap();
+        create_test_node_subscription(&state.db, 3, 1, 150, 1000)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 3, 3, 150, 1000, 3)
+            .await
+            .unwrap();
+        // Should return the cheapest node
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", false)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let node = result.unwrap();
+        assert_eq!(node.price_per_one_million_compute_units, 50);
+        assert_eq!(node.node_small_id, 2);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn test_register_node_public_url_concurrent_updates() {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
@@ -3731,6 +4936,261 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn test_get_cheapest_node_confidential() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test data for confidential computing
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_key_rotation(&state.db, 1, 1).await.unwrap();
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_node_public_key(&state.db, 1, true)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+            .await
+            .unwrap();
+        // Test confidential computing requirements
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", true)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let node = result.unwrap();
+        assert_eq!(node.task_small_id, 1);
+        assert_eq!(node.node_small_id, 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_invalid_public_key() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test data with invalid public key
+        create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_node_public_key(&state.db, 1, false)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+            .await
+            .unwrap();
+
+        // Should return None when public key is invalid
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", true)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_deprecated_task() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create deprecated task
+        sqlx::query(
+            "INSERT INTO tasks (task_small_id, task_id, role, model_name, is_deprecated, valid_until_epoch, security_level, minimum_reputation_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+        )
+        .bind(1i64)
+        .bind(Uuid::new_v4().to_string())
+        .bind(1)
+        .bind("gpt-4")
+        .bind(true) // is_deprecated = true
+        .bind(1000i64)
+        .bind(1i32)
+        .bind(0i64)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+            .await
+            .unwrap();
+        // Should return None for deprecated task
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", false)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_invalid_subscription() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test data with invalid subscription
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_node(&state.db, 1).await.unwrap();
+
+        // Create invalid subscription (valid = false)
+        sqlx::query(
+            "INSERT INTO node_subscriptions (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid)
+             VALUES ($1, $2, $3, $4, $5)"
+        )
+        .bind(1i64)
+        .bind(1i64)
+        .bind(100i64)
+        .bind(1000i64)
+        .bind(false)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+
+        // Should return None for invalid subscription
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", false)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_nonexistent_model() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Test with non-existent model
+        let result = state
+            .get_cheapest_node_for_model("nonexistent-model", false)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_cheapest_node_mixed_security_levels() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create tasks with different security levels
+        create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
+        create_test_task(&state.db, 2, "gpt-4", 1).await.unwrap();
+        create_key_rotation(&state.db, 1, 1).await.unwrap();
+
+        create_test_node(&state.db, 1).await.unwrap();
+        create_test_node(&state.db, 2).await.unwrap();
+
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000)
+            .await
+            .unwrap();
+        create_test_node_subscription(&state.db, 2, 2, 50, 1000)
+            .await
+            .unwrap();
+        create_test_node_public_key(&state.db, 2, true)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+        create_test_stack(&state.db, 1, 2, 1, 50, 1000, 2)
+            .await
+            .unwrap();
+
+        // Test non-confidential query (should return cheapest regardless of security level)
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", false)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let node = result.unwrap();
+        assert_eq!(node.price_per_one_million_compute_units, 50);
+
+        // Test confidential query (should only return security level 2)
+        let result = state
+            .get_cheapest_node_for_model("gpt-4", true)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let node = result.unwrap();
+        assert_eq!(node.task_small_id, 2);
+    }
+
+    async fn setup_test_environment() -> Result<AtomaState> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create base task with security level 2 (confidential)
+        create_test_task(&state.db, 1, "gpt-4", 1).await?;
+
+        Ok(state)
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_basic_selection() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        // Setup single valid node
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 1, true).await?;
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().node_small_id, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_price_based_selection() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        // Setup nodes with different prices
+        for (node_id, price) in [(1, 200), (2, 100), (3, 300)] {
+            create_test_node(&state.db, node_id).await?;
+            create_test_node_subscription(&state.db, node_id, 1, price, 1000).await?;
+            create_test_node_public_key(&state.db, node_id, true).await?;
+            create_test_stack(&state.db, 1, node_id, node_id, price, 1000, node_id)
+                .await
+                .unwrap();
+        }
+
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().node_small_id,
+            2,
+            "Should select cheapest node"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn test_register_node_public_url_invalid_inputs() {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
@@ -3756,5 +5216,519 @@ mod tests {
             .register_node_public_url(4, "https://test.com".to_string(), -1)
             .await;
         assert!(result.is_ok(), "Negative timestamp should be allowed");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_compute_capacity_requirements() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        // Setup nodes with different compute capacities
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 1, 100, 500).await?; // Insufficient capacity
+        create_test_node_public_key(&state.db, 1, true).await?;
+        create_test_stack(&state.db, 1, 1, 1, 100, 500, 1)
+            .await
+            .unwrap();
+
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+        assert!(
+            result.is_none(),
+            "Should not select node with insufficient capacity"
+        );
+
+        // Add node with sufficient capacity
+        create_test_node(&state.db, 2).await?;
+        create_test_node_subscription(&state.db, 2, 1, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 2, true).await?;
+        create_test_stack(&state.db, 1, 2, 2, 100, 1000, 2)
+            .await
+            .unwrap();
+
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+        assert_eq!(
+            result.unwrap().node_small_id,
+            2,
+            "Should select node with sufficient capacity"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_invalid_configurations() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        // Setup node with invalid public key
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 1, false).await?;
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+        assert!(
+            result.is_none(),
+            "Should not select node with invalid public key"
+        );
+
+        // Test non-existent model
+        let result = state
+            .select_node_public_key_for_encryption("nonexistent-model", 800)
+            .await?;
+        assert!(
+            result.is_none(),
+            "Should handle non-existent model gracefully"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_security_level_requirement() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        // Create task with security level 0 (non-confidential)
+        create_test_task(&state.db, 2, "gpt-4", 0).await?;
+
+        // Setup valid node subscribed to non-confidential task
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 2, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 1, true).await?;
+        create_test_stack(&state.db, 2, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+        let result = state
+            .select_node_public_key_for_encryption("gpt-4", 800)
+            .await?;
+        assert!(
+            result.is_none(),
+            "Should not select node for non-confidential task"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_edge_cases() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 1, true).await?;
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+
+        // Test edge cases
+        let test_cases = vec![
+            (0, true, "zero tokens"),
+            (1000, true, "exact capacity match"),
+            (1001, false, "just over capacity"),
+            (-1, true, "negative tokens"),
+        ];
+
+        for (tokens, should_succeed, case) in test_cases {
+            let result = state
+                .select_node_public_key_for_encryption("gpt-4", tokens)
+                .await?;
+            assert_eq!(
+                result.is_some(),
+                should_succeed,
+                "Failed edge case: {} with {} tokens",
+                case,
+                tokens
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_concurrent_access() -> Result<()> {
+        let state = setup_test_environment().await?;
+
+        create_test_node(&state.db, 1).await?;
+        create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
+        create_test_node_public_key(&state.db, 1, true).await?;
+        create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
+            .await
+            .unwrap();
+        let futures: Vec<_> = (0..5)
+            .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800))
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        for result in results {
+            let node = result?;
+            assert!(node.is_some(), "Concurrent access failed to retrieve node");
+            assert_eq!(node.unwrap().node_small_id, 1);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_select_node_public_key_for_encryption_for_node() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test node
+        create_key_rotation(&state.db, 1, 1).await.unwrap();
+        create_test_node(&state.db, 1).await?;
+
+        // Insert test node public key
+        sqlx::query(
+            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(1i64)
+        .bind(1i64)
+        .bind(1i64)
+        .bind(vec![1u8, 2, 3, 4]) // Example public key bytes
+        .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(true)
+        .execute(&state.db)
+        .await?;
+
+        // Test successful retrieval
+        let result = state
+            .select_node_public_key_for_encryption_for_node(1)
+            .await?;
+        assert!(result.is_some());
+        let node_key = result.unwrap();
+        assert_eq!(node_key.node_small_id, 1);
+        assert_eq!(node_key.public_key, vec![1, 2, 3, 4]);
+
+        // Test non-existent node
+        let result = state
+            .select_node_public_key_for_encryption_for_node(999)
+            .await?;
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_select_node_public_key_for_encryption_for_node_multiple_keys() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert multiple test node public keys
+        for i in 1..=3 {
+            // Create test node
+            create_test_node(&state.db, i).await?;
+            create_key_rotation(&state.db, i, i).await.unwrap();
+            sqlx::query(
+                r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
+                   VALUES ($1, $2, $3, $4, $5, $6)"#,
+            )
+            .bind(i)
+            .bind(i)
+            .bind(i)
+            .bind(vec![i as u8; 4]) // Different key for each node
+            .bind(vec![i as u8; 4]) // Example tee remote attestation bytes
+            .bind(true)
+            .execute(&state.db)
+            .await?;
+        }
+
+        // Test retrieval of each key
+        for i in 1..=3 {
+            let result = state
+                .select_node_public_key_for_encryption_for_node(i)
+                .await?;
+            assert!(result.is_some());
+            let node_key = result.unwrap();
+            assert_eq!(node_key.node_small_id, i);
+            assert_eq!(node_key.public_key, vec![i as u8; 4]);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_select_node_public_key_for_encryption_for_node_invalid_data() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test node
+        create_test_node(&state.db, 1).await?;
+        create_key_rotation(&state.db, 1, 1).await.unwrap();
+
+        // Test with negative node_small_id
+        let result = state
+            .select_node_public_key_for_encryption_for_node(-1)
+            .await?;
+        assert!(result.is_none());
+
+        // Insert invalid public key (empty)
+        sqlx::query(
+            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(1i64)
+        .bind(1i64)
+        .bind(1i64)
+        .bind(Vec::<u8>::new()) // Empty public key
+        .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(true)
+        .execute(&state.db)
+        .await?;
+
+        // Should still return the key, even if empty
+        let result = state
+            .select_node_public_key_for_encryption_for_node(1)
+            .await?;
+        assert!(result.is_some());
+        let node_key = result.unwrap();
+        assert_eq!(node_key.node_small_id, 1);
+        assert!(node_key.public_key.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_select_node_public_key_for_encryption_for_node_concurrent_access() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Create test node
+        create_test_node(&state.db, 1).await?;
+        create_key_rotation(&state.db, 1, 1).await.unwrap();
+
+        // Insert test data
+        sqlx::query(
+            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(1i64)
+        .bind(1i64)
+        .bind(1i64)
+        .bind(vec![1u8, 2, 3, 4]) // Example public key bytes
+        .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(true)
+        .execute(&state.db)
+        .await?;
+
+        // Create multiple concurrent requests
+        let futures: Vec<_> = (0..10)
+            .map(|_| {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    state
+                        .select_node_public_key_for_encryption_for_node(1)
+                        .await
+                })
+            })
+            .collect();
+
+        // All requests should complete successfully
+        for future in futures {
+            let result = future.await.unwrap().unwrap();
+            assert!(result.is_some());
+            let node_key = result.unwrap();
+            assert_eq!(node_key.node_small_id, 1);
+            assert_eq!(node_key.public_key, vec![1, 2, 3, 4]);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_stack_for_confidential_compute_request() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Set up test data
+        sqlx::query(
+            r#"
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
+            VALUES 
+                (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0),  -- Confidential task
+                (2, 'task2', 'gpt-4', 0, 0, false, null, null, 0)   -- Non-confidential task
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES 
+                (1, 1, 1, 'key1', 'attestation1', true),   -- Valid key
+                (2, 1, 1, 'key2', 'attestation2', false),  -- Invalid key
+                (3, 1, 1, 'key3', 'attestation3', true)    -- Valid key
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO stacks (
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
+            )
+            VALUES 
+                (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now()),      -- Valid stack, confidential task
+                (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1, now()),      -- Invalid node key
+                (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1, now()),      -- Non-confidential task
+                (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1, now()),    -- Not enough compute units
+                (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1, now()),       -- In settle period
+                (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1, now())     -- Valid stack with partial usage
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Test cases
+        let test_cases = vec![
+            // (stack_small_id, available_compute_units, expected_result, description)
+            (1, 500, true, "Valid stack with enough compute units"),
+            (2, 500, false, "Stack with invalid node key"),
+            (3, 500, false, "Non-confidential task stack"),
+            (4, 200, false, "Stack with insufficient compute units"),
+            (5, 500, false, "Stack in settle period"),
+            (6, 400, true, "Valid stack with partial usage"),
+            (
+                6,
+                600,
+                false,
+                "Valid stack but requesting too many compute units",
+            ),
+            (999, 500, false, "Non-existent stack"),
+        ];
+
+        for (stack_id, compute_units, expected, description) in test_cases {
+            let result = state
+                .verify_stack_for_confidential_compute_request(stack_id, compute_units)
+                .await?;
+            assert_eq!(
+                result, expected,
+                "Failed test case: {} (stack_id: {}, compute_units: {})",
+                description, stack_id, compute_units
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Set up initial test data
+        sqlx::query(
+            r#"
+            INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
+            VALUES (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (1, 1)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            VALUES (1, 1, 1, 'key1', 'attestation1', true)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO stacks (
+                stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
+                num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
+            )
+            VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now())
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is initially valid
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(result, "Stack should be valid with current key rotation");
+
+        // Simulate key rotation
+        sqlx::query(
+            r#"
+            INSERT INTO key_rotations (epoch, key_rotation_counter)
+            VALUES (2, 2)
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is now invalid due to outdated key
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(!result, "Stack should be invalid after key rotation");
+
+        // Update node's key for new rotation
+        sqlx::query(
+            r#"
+            UPDATE node_public_keys 
+            SET public_key = 'key1_new',
+                tee_remote_attestation_bytes = 'attestation1_new',
+                key_rotation_counter = 2,
+                epoch = 2
+            WHERE node_small_id = 1 
+            AND key_rotation_counter = 1
+            "#,
+        )
+        .execute(&state.db)
+        .await?;
+
+        // Verify stack is valid again with new key
+        let result = state
+            .verify_stack_for_confidential_compute_request(1, 500)
+            .await?;
+        assert!(result, "Stack should be valid with updated key");
+
+        Ok(())
     }
 }

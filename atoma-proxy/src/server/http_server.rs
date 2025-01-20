@@ -1,38 +1,49 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use axum::http::StatusCode;
 use axum::middleware::from_fn_with_state;
 use axum::{
-    extract::State,
     routing::{get, post},
     Json, Router,
 };
+
 use flume::Sender;
-use serde_json::{json, Value};
+use serde::Serialize;
+
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
 use tracing::instrument;
-use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
-use zeroize::Zeroizing;
 
 pub use components::openapi::openapi_routes;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 
-use crate::server::handlers::{
-    chat_completions::chat_completions_handler, chat_completions::CHAT_COMPLETIONS_PATH,
-    embeddings::embeddings_handler, embeddings::EMBEDDINGS_PATH,
-    image_generations::image_generations_handler, image_generations::IMAGE_GENERATIONS_PATH,
+use crate::server::{
+    handlers::{
+        chat_completions::chat_completions_create,
+        chat_completions::CHAT_COMPLETIONS_PATH,
+        embeddings::embeddings_create,
+        embeddings::EMBEDDINGS_PATH,
+        image_generations::image_generations_create,
+        image_generations::IMAGE_GENERATIONS_PATH,
+        models::{models_list, MODELS_PATH},
+    },
+    Result,
 };
-use crate::sui::Sui;
 
 use super::components;
-use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
-use super::handlers::embeddings::CONFIDENTIAL_EMBEDDINGS_PATH;
-use super::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
+use super::handlers::chat_completions::{
+    confidential_chat_completions_create, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+};
+use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
+use super::handlers::image_generations::{
+    confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+};
+use super::handlers::nodes::{
+    nodes_create, nodes_create_lock, NODES_CREATE_LOCK_PATH, NODES_CREATE_PATH,
+};
 use super::middleware::{authenticate_middleware, confidential_compute_middleware};
 use super::AtomaServiceConfig;
 
@@ -40,12 +51,6 @@ use super::AtomaServiceConfig;
 ///
 /// This endpoint is used to check the health of the atoma proxy service.
 pub const HEALTH_PATH: &str = "/health";
-
-/// Path for the models listing endpoint.
-///
-/// This endpoint follows the OpenAI API format and returns a list
-/// of available AI models with their associated metadata and capabilities.
-pub const MODELS_PATH: &str = "/v1/models";
 
 /// Represents the shared state of the application.
 ///
@@ -68,11 +73,6 @@ pub struct ProxyState {
     /// such as acquiring new stack entries.
     pub sui: Arc<RwLock<Sui>>,
 
-    /// The password for the atoma proxy service.
-    ///
-    /// This password is used to authenticate requests to the atoma proxy service.
-    pub password: String,
-
     /// Tokenizer used for processing text input.
     ///
     /// The tokenizer is responsible for breaking down text input into
@@ -87,146 +87,6 @@ pub struct ProxyState {
     /// application to dynamically select and switch between different
     /// models as needed.
     pub models: Arc<Vec<String>>,
-
-    /// Secret key for X25519 key exchange.
-    ///
-    /// This key is used to compute shared secrets with nodes' public keys.
-    /// The key is wrapped in both Arc (for shared ownership) and Zeroizing
-    /// (to ensure the key material is securely erased from memory when dropped).
-    secret_key: Arc<Zeroizing<StaticSecret>>,
-}
-
-impl ProxyState {
-    /// Returns the public key for the X25519 key exchange.
-    ///
-    /// This key is used to compute shared secrets with nodes' public keys.
-    #[allow(dead_code)]
-    pub fn public_key(&self) -> PublicKey {
-        PublicKey::from(&**self.secret_key)
-    }
-
-    /// Computes the shared secret for the X25519 key exchange.
-    ///
-    /// This function computes the shared secret between the proxy's secret key
-    /// and a given node's public key.
-    pub fn compute_shared_secret(&self, public_key: &PublicKey) -> SharedSecret {
-        self.secret_key.diffie_hellman(public_key)
-    }
-}
-
-/// OpenAPI documentation for the models listing endpoint.
-///
-/// This struct is used to generate OpenAPI documentation for the models listing
-/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
-/// the OpenAPI specification from the code.
-#[derive(OpenApi)]
-#[openapi(paths(models_handler))]
-pub(crate) struct ModelsOpenApi;
-
-/// List models
-///
-/// This endpoint mimics the OpenAI models endpoint format, returning a list of
-/// available models with their associated metadata and permissions. Each model
-/// includes standard OpenAI-compatible fields to ensure compatibility with
-/// existing OpenAI client libraries.
-///
-/// # Arguments
-///
-/// * `state` - The shared application state containing the list of available models
-///
-/// # Returns
-///
-/// Returns a JSON response containing:
-/// * An "object" field set to "list"
-/// * A "data" array containing model objects with the following fields:
-///   - id: The model identifier
-///   - object: Always set to "model"
-///   - created: Timestamp (currently hardcoded)
-///   - owned_by: Set to "atoma"
-///   - root: Same as the model id
-///   - parent: Set to null
-///   - max_model_len: Maximum context length (currently hardcoded to 2048)
-///   - permission: Array of permission objects describing model capabilities
-///
-/// # Example Response
-///
-/// ```json
-/// {
-///   "object": "list",
-///   "data": [
-///     {
-///       "id": "meta-llama/Llama-3.1-70B-Instruct",
-///       "object": "model",
-///       "created": 1730930595,
-///       "owned_by": "atoma",
-///       "root": "meta-llama/Llama-3.1-70B-Instruct",
-///       "parent": null,
-///       "max_model_len": 2048,
-///       "permission": [
-///         {
-///           "id": "modelperm-meta-llama/Llama-3.1-70B-Instruct",
-///           "object": "model_permission",
-///           "created": 1730930595,
-///           "allow_create_engine": false,
-///           "allow_sampling": true,
-///           "allow_logprobs": true,
-///           "allow_search_indices": false,
-///           "allow_view": true,
-///           "allow_fine_tuning": false,
-///           "organization": "*",
-///           "group": null,
-///           "is_blocking": false
-///         }
-///       ]
-///     }
-///   ]
-/// }
-/// ```
-#[utoipa::path(
-    get,
-    path = "",
-    responses(
-        (status = OK, description = "List of available models", body = Value),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")
-    )
-)]
-async fn models_handler(State(state): State<ProxyState>) -> Result<Json<Value>, StatusCode> {
-    // TODO: Implement proper model handling
-    Ok(Json(json!({
-        "object": "list",
-        "data": state
-        .models
-        .iter()
-        .map(|model| {
-            json!({
-              "id": model,
-              "object": "model",
-              "created": 1730930595,
-              "owned_by": "atoma",
-              "root": model,
-              "parent": null,
-              "max_model_len": 2048,
-              "permission": [
-                {
-                  "id": format!("modelperm-{}", model),
-                  "object": "model_permission",
-                  "created": 1730930595,
-                  "allow_create_engine": false,
-                  "allow_sampling": true,
-                  "allow_logprobs": true,
-                  "allow_search_indices": false,
-                  "allow_view": true,
-                  "allow_fine_tuning": false,
-                  "organization": "*",
-                  "group": null,
-                  "is_blocking": false
-                }
-              ]
-            })
-        })
-        .collect::<Vec<_>>()
-      }
-    )))
 }
 
 #[derive(OpenApi)]
@@ -241,17 +101,25 @@ async fn models_handler(State(state): State<ProxyState>) -> Result<Json<Value>, 
 /// JSON response indicating the service status.
 pub(crate) struct HealthOpenApi;
 
+#[derive(Serialize, ToSchema)]
+pub struct HealthResponse {
+    /// The status of the service
+    message: String,
+}
+
 /// Health
 #[utoipa::path(
     get,
     path = "",
     responses(
-        (status = OK, description = "Service is healthy", body = Value),
+        (status = OK, description = "Service is healthy", body = HealthResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Service is unhealthy")
     )
 )]
-pub async fn health() -> Result<Json<Value>, StatusCode> {
-    Ok(Json(json!({ "status": "ok" })))
+pub async fn health() -> Result<Json<HealthResponse>> {
+    Ok(Json(HealthResponse {
+        message: "ok".to_string(),
+    }))
 }
 
 /// Creates a router with the appropriate routes and state for the atoma proxy service.
@@ -288,33 +156,34 @@ pub fn create_router(state: ProxyState) -> Router {
     let confidential_router = Router::new()
         .route(
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-            post(chat_completions_handler),
+            post(confidential_chat_completions_create),
         )
-        .route(CONFIDENTIAL_EMBEDDINGS_PATH, post(embeddings_handler))
+        .route(
+            CONFIDENTIAL_EMBEDDINGS_PATH,
+            post(confidential_embeddings_create),
+        )
         .route(
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-            post(image_generations_handler),
+            post(confidential_image_generations_create),
         )
-        .layer(
-            ServiceBuilder::new()
-                .layer(from_fn_with_state(state.clone(), authenticate_middleware))
-                .layer(from_fn_with_state(
-                    state.clone(),
-                    confidential_compute_middleware,
-                )),
-        )
+        .layer(ServiceBuilder::new().layer(from_fn_with_state(
+            state.clone(),
+            confidential_compute_middleware,
+        )))
         .with_state(state.clone());
 
     Router::new()
-        .route(CHAT_COMPLETIONS_PATH, post(chat_completions_handler))
-        .route(EMBEDDINGS_PATH, post(embeddings_handler))
-        .route(IMAGE_GENERATIONS_PATH, post(image_generations_handler))
+        .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
+        .route(EMBEDDINGS_PATH, post(embeddings_create))
+        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
         .layer(
             ServiceBuilder::new()
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_handler))
+        .route(MODELS_PATH, get(models_list))
+        .route(NODES_CREATE_PATH, post(nodes_create))
+        .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
         .with_state(state.clone())
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
@@ -339,20 +208,17 @@ pub fn create_router(state: ProxyState) -> Router {
 pub async fn start_server(
     config: AtomaServiceConfig,
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
-    sui: Sui,
+    sui: Arc<RwLock<Sui>>,
     tokenizers: Vec<Arc<Tokenizer>>,
     mut shutdown_receiver: watch::Receiver<bool>,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let tcp_listener = TcpListener::bind(config.service_bind_address).await?;
 
-    let secret_key = StaticSecret::random_from_rng(rand::thread_rng());
     let proxy_state = ProxyState {
         state_manager_sender,
-        sui: Arc::new(RwLock::new(sui)),
-        password: config.password,
+        sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
-        secret_key: Arc::new(Zeroizing::new(secret_key)),
     };
     let router = create_router(proxy_state);
     let server =
