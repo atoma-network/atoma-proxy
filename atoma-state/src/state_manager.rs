@@ -19,7 +19,7 @@ use tracing::instrument;
 
 pub(crate) type Result<T> = std::result::Result<T, AtomaStateManagerError>;
 
-type AtomaP2pData = (AtomaP2pEvent, Option<oneshot::Sender<Result<()>>>);
+type AtomaP2pData = (AtomaP2pEvent, Option<oneshot::Sender<bool>>);
 
 /// AtomaStateManager is a wrapper around a Postgres connection pool, responsible for managing the state of the Atoma system.
 ///
@@ -3463,7 +3463,7 @@ impl AtomaState {
         let exists = sqlx::query(
             "SELECT EXISTS(SELECT 1 FROM nodes WHERE node_small_id = $1 AND public_address = $2)",
         )
-        .bind(node_small_id as i64)
+        .bind(node_small_id)
         .bind(sui_address)
         .fetch_one(&self.db)
         .await?

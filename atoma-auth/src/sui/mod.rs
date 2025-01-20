@@ -48,7 +48,7 @@ pub struct StackEntryResponse {
 /// This struct is used to interact with the Sui contract.
 pub struct Sui {
     /// Sui wallet context
-    wallet_ctx: WalletContext,
+    pub wallet_ctx: WalletContext,
     /// Atoma package object ID
     atoma_package_id: ObjectID,
     /// Atoma DB object ID

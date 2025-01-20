@@ -112,7 +112,7 @@ pub fn verify_response_hash_and_signature(
     let response_hash = STANDARD.decode(response_hash).unwrap();
 
     if verify_hash {
-        verify_response_hash(&payload, &response_hash)?;
+        verify_response_hash(payload, &response_hash)?;
     }
 
     let node_signature =

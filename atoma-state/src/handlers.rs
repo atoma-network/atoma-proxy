@@ -186,7 +186,7 @@ pub async fn handle_atoma_event(
 pub async fn handle_p2p_event(
     state_manager: &AtomaStateManager,
     event: AtomaP2pEvent,
-    sender: Option<oneshot::Sender<Result<()>>>,
+    sender: Option<oneshot::Sender<bool>>,
 ) -> Result<()> {
     match event {
         AtomaP2pEvent::NodePublicUrlRegistrationEvent {
@@ -213,7 +213,7 @@ pub async fn handle_p2p_event(
             )
             .await;
             if let Some(sender) = sender {
-                sender.send(result).map_err(|_| {
+                sender.send(result.is_ok()).map_err(|_| {
                     error!(
                         target = "atoma-state-handlers",
                         event = "handle-node-small-id-ownership-verification-event",
