@@ -7,17 +7,28 @@ use rsa::{pkcs1::EncodeRsaPublicKey, BigUint, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use tracing::instrument;
 
 pub const ISS: &str = "https://accounts.google.com";
+pub const JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
+pub const KEYS: &str = "keys";
+pub const KID: &str = "kid";
+pub const N: &str = "n";
+pub const E: &str = "e";
 
 /// Claims struct for Google ID tokens
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    iss: String,               // Issuer
-    pub sub: String,           // Subject (user ID)
-    aud: String,               // Audience
-    exp: usize,                // Expiration time (as a UNIX timestamp)
-    pub email: Option<String>, // User's email (optional)
+    /// The issuer of the token
+    iss: String,
+    /// The subject of the token
+    pub sub: String,
+    /// The audience of the token
+    aud: String,
+    /// The expiration time of the token
+    exp: usize,
+    /// The email of the user
+    pub email: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -45,6 +56,7 @@ pub enum GoogleError {
 type Result<T> = std::result::Result<T, GoogleError>;
 
 /// Convert a JWK to a DecodingKey
+#[instrument(level = "debug")]
 fn jwk_to_decoding_key(n: &str, e: &str) -> Result<DecodingKey> {
     // Decode `n` and `e` from Base64URL
     let n_bytes = BASE64_URL_SAFE_NO_PAD.decode(n)?;
@@ -67,27 +79,31 @@ fn jwk_to_decoding_key(n: &str, e: &str) -> Result<DecodingKey> {
 }
 
 /// Fetch Google's public keys from the JWKS endpoint
+#[instrument(level = "debug")]
 pub async fn fetch_google_public_keys() -> Result<HashMap<String, DecodingKey>> {
-    let jwks_url = "https://www.googleapis.com/oauth2/v3/certs";
     let client = Client::new();
-    let res = client.get(jwks_url).send().await?;
+    let res = client.get(JWKS_URL).send().await?;
     let jwks: Value = res.json().await?;
-    let keys = jwks["keys"]
-        .as_array()
+    let keys = jwks
+        .get(KEYS)
+        .and_then(Value::as_array)
         .ok_or(GoogleError::MalformedPublicKeys)?;
 
     let mut public_keys = HashMap::new();
     for key in keys {
-        let kid = key["kid"]
-            .as_str()
+        let kid = key
+            .get(KID)
+            .and_then(Value::as_str)
             .ok_or(GoogleError::MalformedPublicKeys)?
             .to_string();
-        let n = key["n"]
-            .as_str()
+        let n = key
+            .get(N)
+            .and_then(Value::as_str)
             .ok_or(GoogleError::MalformedPublicKeys)?
             .to_string();
-        let e = key["e"]
-            .as_str()
+        let e = key
+            .get(E)
+            .and_then(Value::as_str)
             .ok_or(GoogleError::MalformedPublicKeys)?
             .to_string();
         public_keys.insert(kid, jwk_to_decoding_key(&n, &e)?);
@@ -106,6 +122,7 @@ pub async fn fetch_google_public_keys() -> Result<HashMap<String, DecodingKey>> 
 /// # Returns
 ///
 /// A `Result` containing the verified claims if successful, or an error if verification failed
+#[instrument(level = "debug", skip(public_keys))]
 pub fn verify_google_id_token(
     id_token: &str,
     audience: &str,

@@ -331,7 +331,7 @@ impl Auth {
     /// Check the google oauth token
     /// This method will check the google oauth token and generate a new refresh and access token
     /// The method will check if the email is present in the claims and store the user in the DB
-    /// The method will generate a new refresh and access token
+    /// The method will generate a new refresh and access tokens
     #[instrument(level = "info", skip(self))]
     pub async fn check_google_id_token(&self, id_token: &str) -> Result<(String, String)> {
         let claims = google::verify_google_id_token(
@@ -476,6 +476,18 @@ impl Auth {
         Ok(claims.user_id)
     }
 
+    /// Generate a new personal message from a string.
+    fn personal_message_hash(msg: &str) -> Result<GenericArray<u8, U32>> {
+        let personal_message = IntentMessage::new(
+            Intent::personal_message(),
+            PersonalMessage {
+                message: msg.as_bytes().to_vec(),
+            },
+        );
+        let intent_bcs = bcs::to_bytes(&personal_message)?;
+        Ok(blake2b_hash(&intent_bcs))
+    }
+
     /// Stores the wallet address for the user. The user needs to send a signed message to prove ownership of the wallet.
     /// The wallet address is stored in the signature.
     ///
@@ -496,20 +508,10 @@ impl Auth {
         let signature_bytes = signature.signature_bytes();
         let public_key_bytes = signature.public_key_bytes();
         let signature_scheme = signature.scheme();
-        let intent_msg = IntentMessage::new(
-            Intent::personal_message(),
-            PersonalMessage {
-                message: format!(
-                    "Sign this message to prove you are the owner of this wallet. User ID: {}",
-                    claims.user_id
-                )
-                .as_bytes()
-                .to_vec(),
-            },
-        );
-
-        let intent_bcs = bcs::to_bytes(&intent_msg)?;
-        let message_hash = blake2b_hash(&intent_bcs);
+        let message_hash = Self::personal_message_hash(&format!(
+            "Sign this message to prove you are the owner of this wallet. User ID: {}",
+            claims.user_id
+        ))?;
 
         match signature_scheme {
             SignatureScheme::ED25519 => {
@@ -542,19 +544,29 @@ impl Auth {
         Ok(())
     }
 
+    /// Get the wallet address for the ZkLogin signature. The signature needs to be verified and the message signed is the transaction digest.
+    /// The wallet address is stored in the signature.
+    ///
+    /// # Arguments
+    ///
+    /// * `zk_login_signature` - The zk_login signature to be used to get the wallet address
+    /// * `tx_digest` - The transaction digest to be used to confirm the signature
+    ///
+    /// # Returns
+    ///
+    /// * `Result<String>` - The wallet address
+    ///
+    /// # Errors
+    ///
+    /// * If the signature is not a zk_login signature
+    /// * If the signature is not valid
+    #[instrument(level = "info")]
     async fn get_zk_address(zk_login_signature: &str, tx_digest: &str) -> Result<String> {
         let user_signature = UserSignature::from_base64(zk_login_signature)?;
         if let UserSignature::ZkLogin(zk_login_authenticator) = user_signature {
-            // The message is the transaction digest that we claim is ours
-            let intent_msg = IntentMessage::new(
-                Intent::personal_message(),
-                PersonalMessage {
-                    message: tx_digest.as_bytes().to_vec(),
-                },
-            );
+            // The message is the transaction digest that the user claims its theirs
+            let message_hash = Self::personal_message_hash(tx_digest)?;
 
-            let intent_bcs = bcs::to_bytes(&intent_msg).unwrap();
-            let message_hash = blake2b_hash(&intent_bcs);
             // First verify that the signature is valid
             match zk_login_authenticator.signature {
                 SimpleSignature::Ed25519 {
@@ -614,6 +626,8 @@ impl Auth {
     ///
     /// * `jwt` - The access token to be used to update the balance
     /// * `transaction_digest` - The transaction digest to be used to update the balance
+    /// * `proof_signature` - The proof signature is present for the zk_login signature. We don't store the zk address in the DB, the user confirms every usdc
+    ///                       transaction by signing the hash of the transaction digest with their zk_login signature. This is used to confirm that the payment is for this user.
     ///
     /// # Returns
     ///
@@ -626,12 +640,13 @@ impl Auth {
     /// * If the payment is not for this user
     /// * If the user is not found
     /// * If the user balance is not updated
+    /// * If the user provided invalid zk_proof_signature
     #[instrument(level = "info", skip(self))]
     pub async fn usdc_payment(
         &self,
         jwt: &str,
         transaction_digest: &str,
-        proof_signature: Option<String>,
+        zk_proof_signature: Option<String>,
     ) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
 
@@ -688,7 +703,9 @@ impl Auth {
             .get_wallet_address()
             .map_err(AuthError::SuiError)?;
         if receiver == own_address {
-            match proof_signature {
+            // The signature is coming from the frontend where the user used his zk credentials to sign the transaction digest as a personal message (digest of the transaction).
+            // Now we need to prove that it was the digest he is trying to claim. And if the sui address from the signature is matching the address in the usdc payment transaction.
+            match zk_proof_signature {
                 Some(signature) => {
                     if sender.to_string()
                         != Self::get_zk_address(&signature, transaction_digest).await?
