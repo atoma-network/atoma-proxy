@@ -31,6 +31,19 @@ pub struct Claims {
     pub email: Option<String>,
 }
 
+#[cfg(test)]
+impl Claims {
+    pub fn new(iss: &str, sub: &str, aud: &str, exp: usize, email: Option<&str>) -> Self {
+        Self {
+            iss: iss.to_string(),
+            sub: sub.to_string(),
+            aud: aud.to_string(),
+            exp,
+            email: email.map(|s| s.to_string()),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum GoogleError {
     #[error("Base64 decode error: {0}")]
@@ -80,7 +93,7 @@ fn jwk_to_decoding_key(n: &str, e: &str) -> Result<DecodingKey> {
 
 /// Fetch Google's public keys from the JWKS endpoint
 #[instrument(level = "debug")]
-pub async fn fetch_google_public_keys() -> Result<HashMap<String, DecodingKey>> {
+pub async fn fetch_google_public_keys() -> Result<HashMap<String, (DecodingKey, Algorithm)>> {
     let client = Client::new();
     let res = client.get(JWKS_URL).send().await?;
     let jwks: Value = res.json().await?;
@@ -106,7 +119,7 @@ pub async fn fetch_google_public_keys() -> Result<HashMap<String, DecodingKey>> 
             .and_then(Value::as_str)
             .ok_or(GoogleError::MalformedPublicKeys)?
             .to_string();
-        public_keys.insert(kid, jwk_to_decoding_key(&n, &e)?);
+        public_keys.insert(kid, (jwk_to_decoding_key(&n, &e)?, Algorithm::RS256));
     }
 
     Ok(public_keys)
@@ -126,19 +139,19 @@ pub async fn fetch_google_public_keys() -> Result<HashMap<String, DecodingKey>> 
 pub fn verify_google_id_token(
     id_token: &str,
     audience: &str,
-    public_keys: &HashMap<String, DecodingKey>,
+    public_keys: &HashMap<String, (DecodingKey, Algorithm)>,
 ) -> Result<Claims> {
     // Decode the header to extract the kid
     let header = decode_header(id_token)?;
     let kid = header.kid.ok_or(GoogleError::MissingKid)?;
 
     // Find the matching public key
-    let decoding_key = public_keys.get(&kid).ok_or(GoogleError::DecodingKeyError(
+    let (decoding_key, algorithm) = public_keys.get(&kid).ok_or(GoogleError::DecodingKeyError(
         jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::InvalidToken),
     ))?;
 
     // Set validation rules
-    let mut validation = Validation::new(Algorithm::RS256);
+    let mut validation = Validation::new(*algorithm);
     validation.set_audience(&[audience]);
     let mut issuers = HashSet::new();
     issuers.insert(ISS.to_string());

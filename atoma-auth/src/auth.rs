@@ -16,7 +16,7 @@ use fastcrypto::{
 };
 use fastcrypto_zkp::zk_login_utils::Bn254FrElement;
 use flume::Sender;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
@@ -111,7 +111,7 @@ pub struct Auth {
     /// The sui client
     sui: Arc<RwLock<Sui>>,
     /// GooglePublicKeys
-    google_public_keys: HashMap<String, DecodingKey>,
+    google_public_keys: HashMap<String, (DecodingKey, Algorithm)>,
     /// Google client id
     google_client_id: String,
 }
@@ -772,10 +772,15 @@ mod test {
 
     use atoma_state::types::AtomaAtomaStateManagerEvent;
     use atoma_sui::AtomaSuiConfig;
+    use chrono::Utc;
     use flume::Receiver;
+    use jsonwebtoken::{decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header};
+    use rand::rngs::OsRng;
+    use rsa::{RsaPrivateKey, RsaPublicKey};
     use tokio::sync::RwLock;
 
-    use crate::AtomaAuthConfig;
+    use crate::google::ISS;
+    use crate::{google, AtomaAuthConfig};
 
     use super::Auth;
     use std::env;
@@ -984,6 +989,75 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         assert!(claims.refresh_token_hash.is_some());
         // Generate api token
         let _api_token = auth.generate_api_token(&access_token).await.unwrap();
+        if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
+            .await
+            .is_err()
+        {
+            panic!("mock_handle did not finish within 1 second");
+        }
+    }
+
+    #[tokio::test]
+    async fn google_login() {
+        let (mut auth, receiver) = setup_test().await;
+        let mock_handle = tokio::task::spawn(async move {
+            // First event is for the user to log in to get the tokens
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::OAuth {
+                    username: event_username,
+                    result_sender,
+                } => {
+                    assert_eq!(event_username, "email");
+                    result_sender.send(Ok(1)).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+                    user_id: event_user_id,
+                    refresh_token_hash: _refresh_token,
+                    result_sender,
+                } => {
+                    assert_eq!(event_user_id, 1);
+                    result_sender.send(Ok(true)).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+        });
+        // let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("Failed to generate a key");
+        // let public_key = RsaPublicKey::from(&private_key);
+        // (private_key, public_key);
+        let encoding_key = EncodingKey::from_secret("fake secret".as_bytes());
+        auth.google_public_keys.insert(
+            "kid".to_string(),
+            (
+                DecodingKey::from_secret("fake secret".as_bytes()),
+                Algorithm::HS256,
+            ),
+        );
+        let mut header = Header::default();
+        header.kid = Some("kid".to_string());
+        header.alg = Algorithm::HS256;
+        let id_token = encode(
+            &header,
+            &google::Claims::new(
+                ISS,
+                "sub",
+                "google_client_id",
+                Utc::now().timestamp() as usize + 1000,
+                Some("email"),
+            ),
+            &encoding_key,
+        )
+        .unwrap();
+        auth.check_google_id_token(&id_token).await.unwrap();
         if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
             .await
             .is_err()
