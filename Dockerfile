@@ -24,8 +24,8 @@ COPY . .
 
 
 # Compile
-RUN if [ "$PROFILE" = "local" ]; then \
-    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy --no-default-features; \
+RUN if [ "$PROFILE" = "cloud" ]; then \
+    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy --features google-oauth; \
     else \
     RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy; \
     fi
