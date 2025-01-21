@@ -114,6 +114,7 @@ service_bind_address = "0.0.0.0:8081"
 secret_key = "secret_key" # Secret key for the tokens generation
 access_token_lifetime = 1 # In minutes
 refresh_token_lifetime = 1 # In days
+google_client_id="" # Google client id for google login (In case google-oauth feature is enabled)
 ```
 
 4. Create required directories
@@ -138,6 +139,10 @@ The deployment consists of two main services:
 
 - **PostgreSQL**: Manages the database for the Atoma Proxy
 - **Atoma Proxy**: Manages the proxy operations and connects to the Atoma Network
+
+#### Profiles
+- local - this is for targeting the local deployment of the proxy
+- cloud - this is when the proxy is being deployed as a service. It has a zklogin (google oauth) feature enabled, which is not available for the local option.
 
 #### Service URLs
 

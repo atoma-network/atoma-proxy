@@ -32,3 +32,6 @@ sui-sdk-types = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[features]
+google-oauth = []

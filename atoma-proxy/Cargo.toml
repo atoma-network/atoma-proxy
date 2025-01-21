@@ -42,3 +42,6 @@ tokenizers.workspace = true
 tower = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+
+[features]
+google-oauth = ["atoma-auth/google-oauth", "atoma-proxy-service/google-oauth"]

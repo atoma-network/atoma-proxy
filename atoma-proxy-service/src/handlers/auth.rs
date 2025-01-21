@@ -49,6 +49,7 @@ pub(crate) const GET_USER_PROFILE_PATH: &str = "/user_profile";
 /// Set user's salt endpoint.
 pub(crate) const GET_SALT_PATH: &str = "/salt";
 
+#[cfg(feature = "google-oauth")]
 /// The path for the google_oauth endpoint.
 pub(crate) const GOOGLE_OAUTH_PATH: &str = "/google_oauth";
 
@@ -68,7 +69,7 @@ pub(crate) struct GetAllApiTokensOpenApi;
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the auth endpoints
 pub(crate) fn auth_router() -> Router<ProxyServiceState> {
-    Router::new()
+    let router = Router::new()
         .route(GET_ALL_API_TOKENS_PATH, get(get_all_api_tokens))
         .route(GENERATE_API_TOKEN_PATH, get(generate_api_token))
         .route(REVOKE_API_TOKEN_PATH, post(revoke_api_token))
@@ -79,8 +80,10 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
         .route(GET_BALANCE_PATH, get(get_balance))
         .route(GET_USER_PROFILE_PATH, get(get_user_profile))
-        .route(GET_SALT_PATH, get(get_salt))
-        .route(GOOGLE_OAUTH_PATH, post(google_oauth))
+        .route(GET_SALT_PATH, get(get_salt));
+    #[cfg(feature = "google-oauth")]
+    let router = router.route(GOOGLE_OAUTH_PATH, post(google_oauth));
+    router
 }
 
 fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
@@ -336,6 +339,7 @@ pub(crate) async fn login(
 /// This struct is used to generate OpenAPI documentation for the google_oauth
 /// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
 /// the OpenAPI specification from the code.
+#[cfg(feature = "google-oauth")]
 #[derive(OpenApi)]
 #[openapi(paths(google_oauth))]
 pub(crate) struct GoogleOAuth;
@@ -351,6 +355,7 @@ pub(crate) struct GoogleOAuth;
 /// # Returns
 ///
 /// * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
+#[cfg(feature = "google-oauth")]
 #[utoipa::path(
     post,
     path = "",

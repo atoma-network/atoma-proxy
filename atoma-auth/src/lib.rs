@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+#[cfg(feature = "google-oauth")]
 mod google;
 mod sui;
 

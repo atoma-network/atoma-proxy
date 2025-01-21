@@ -8,6 +8,7 @@ ARG TARGETARCH
 
 # Trace level argument
 ARG TRACE_LEVEL
+ARG PROFILE
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -21,8 +22,13 @@ WORKDIR /usr/src/atoma-proxy
 
 COPY . .
 
+
 # Compile
-RUN RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy
+RUN if [ "$PROFILE" = "cloud" ]; then \
+    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy --features google-oauth; \
+    else \
+    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy; \
+    fi
 
 # Final stage
 FROM --platform=$TARGETPLATFORM debian:bullseye-slim
