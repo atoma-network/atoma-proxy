@@ -142,7 +142,7 @@ The deployment consists of two main services:
 
 #### Profiles
 - local - this is for targeting the local deployment of the proxy
-- cloud - has the same features as the local, but also enables zklogin using google oauth
+- cloud - this is when the proxy is being deployed as a service. It has a zklogin (google oauth) feature enabled, which is not available for the local option.
 
 #### Service URLs
 
