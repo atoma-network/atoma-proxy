@@ -140,6 +140,10 @@ The deployment consists of two main services:
 - **PostgreSQL**: Manages the database for the Atoma Proxy
 - **Atoma Proxy**: Manages the proxy operations and connects to the Atoma Network
 
+#### Profiles
+- local - this is for targeting the local deployment of the proxy
+- cloud - has the same features as the local, but also enables zklogin using google oauth
+
 #### Service URLs
 
 - Atoma Proxy: `http://localhost:8080` (configured via ATOMA_PROXY_PORT). This is the main service that you will use to interact with the Atoma Network, via an
