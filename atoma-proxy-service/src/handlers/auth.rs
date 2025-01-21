@@ -9,10 +9,12 @@ use axum::{
     Json, Router,
 };
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
 use crate::ProxyServiceState;
+use rand::{Rng, SeedableRng};
 
 /// The path for the register endpoint.
 pub(crate) const REGISTER_PATH: &str = "/register";
@@ -44,6 +46,12 @@ pub(crate) const GET_BALANCE_PATH: &str = "/balance";
 /// Get user profile endpoint
 pub(crate) const GET_USER_PROFILE_PATH: &str = "/user_profile";
 
+/// Set user's salt endpoint.
+pub(crate) const GET_SALT_PATH: &str = "/salt";
+
+/// The path for the google_oauth endpoint.
+pub(crate) const GOOGLE_OAUTH_PATH: &str = "/google_oauth";
+
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// OpenAPI documentation for the get_all_api_tokens endpoint.
@@ -71,6 +79,8 @@ pub(crate) fn auth_router() -> Router<ProxyServiceState> {
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
         .route(GET_BALANCE_PATH, get(get_balance))
         .route(GET_USER_PROFILE_PATH, get(get_user_profile))
+        .route(GET_SALT_PATH, get(get_salt))
+        .route(GOOGLE_OAUTH_PATH, post(google_oauth))
 }
 
 fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
@@ -321,6 +331,54 @@ pub(crate) async fn login(
     }))
 }
 
+/// OpenAPI documentation for the google_oauth endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the google_oauth
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(google_oauth))]
+pub(crate) struct GoogleOAuth;
+
+/// Logs in a user with the proxy service using Google OAuth.
+/// This endpoint is used to verify a Google ID token and return an access token.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `body` - The request body containing the Google ID token
+///
+/// # Returns
+///
+/// * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
+#[utoipa::path(
+    post,
+    path = "",
+    responses(
+        (status = OK, description = "Logs in a user with Google OAuth", body = String),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to verify Google ID token")
+    )
+)]
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn google_oauth(
+    State(proxy_service_state): State<ProxyServiceState>,
+    body: Json<String>,
+) -> Result<Json<AuthResponse>> {
+    let id_token = body.0;
+    let (refresh_token, access_token) = proxy_service_state
+        .auth
+        .check_google_id_token(&id_token)
+        .await
+        .map_err(|e| {
+            error!("Failed to verify Google ID token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token,
+    }))
+}
+
 /// OpenAPI documentation for the update_sui_address endpoint.
 ///
 /// This struct is used to generate OpenAPI documentation for the update_sui_address
@@ -414,7 +472,7 @@ pub(crate) async fn usdc_payment(
 
     proxy_service_state
         .auth
-        .usdc_payment(jwt, &body.transaction_digest)
+        .usdc_payment(jwt, &body.transaction_digest, body.proof_signature.clone())
         .await
         .map_err(|e| {
             error!("Failed to usdc payment request: {:?}", e);
@@ -592,4 +650,81 @@ pub(crate) async fn get_user_profile(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?,
     ))
+}
+
+/// OpenAPI documentation for the get_salt endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_salt
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_salt))]
+pub(crate) struct GetSalt;
+
+/// Gets the salt for the user. It creates a new salt if the user does not have one.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+///
+/// # Returns
+///
+/// * `Result<Json<()>>` - A JSON response indicating the success of the operation
+#[utoipa::path(
+    get,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Sets the salt for the user"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to set salt")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+#[axum::debug_handler]
+pub(crate) async fn get_salt(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+) -> Result<Json<String>> {
+    let jwt = get_jwt_from_headers(&headers)?;
+
+    let user_id = proxy_service_state
+        .auth
+        .get_user_id_from_token(jwt)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user ID from token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    let salt = proxy_service_state
+        .atoma_state
+        .get_salt(user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user profile: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let salt = match salt {
+        Some(salt) => salt,
+        None => {
+            let mut rng = rand::rngs::StdRng::from_entropy();
+            let salt: [u8; 16] = rng.gen();
+            let salt = BASE64_STANDARD.encode(salt);
+            proxy_service_state
+                .atoma_state
+                .set_salt(user_id, &salt)
+                .await
+                .map_err(|e| {
+                    error!("Failed to set salt: {:?}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            salt
+        }
+    };
+    Ok(Json(salt))
 }

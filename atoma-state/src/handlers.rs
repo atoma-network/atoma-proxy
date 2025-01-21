@@ -1058,6 +1058,15 @@ pub(crate) async fn handle_state_manager_event(
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::OAuth {
+            username,
+            result_sender,
+        } => {
+            let user_id = state_manager.state.oauth(&username).await;
+            result_sender
+                .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
         AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
             username,
             password,
@@ -1178,6 +1187,25 @@ pub(crate) async fn handle_state_manager_event(
                 .state
                 .insert_new_usdc_payment_digest(digest)
                 .await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetSalt {
+            user_id,
+            result_sender,
+        } => {
+            let salt = state_manager.state.get_salt(user_id).await;
+            result_sender
+                .send(salt)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SetSalt {
+            user_id,
+            salt,
+            result_sender,
+        } => {
+            let success = state_manager.state.set_salt(user_id, &salt).await;
             result_sender
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;

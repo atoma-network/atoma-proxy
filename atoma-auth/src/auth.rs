@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
 use atoma_utils::hashing::blake2b_hash;
@@ -14,22 +14,27 @@ use fastcrypto::{
     secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
     traits::{ToFromBytes, VerifyingKey},
 };
+use fastcrypto_zkp::zk_login_utils::Bn254FrElement;
 use flume::Sender;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
 use sui_sdk::types::{
     base_types::SuiAddress,
-    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
+    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature, ZkLoginPublicIdentifier},
     object::Owner,
     TypeTag,
 };
+use sui_sdk_types::{SimpleSignature, UserSignature};
 use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
 
-use crate::{AtomaAuthConfig, Sui};
+use crate::{
+    google::{self, fetch_google_public_keys},
+    AtomaAuthConfig, Sui,
+};
 
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
@@ -59,6 +64,8 @@ pub enum AuthError {
     AtomaStateManagerError(#[from] AtomaStateManagerError),
     #[error("Refresh token is not valid")]
     InvalidRefreshToken,
+    #[error("Reqwest error: {0}")]
+    ReqwestError(#[from] reqwest::Error),
     #[error("User already registered")]
     UserAlreadyRegistered,
     #[error("Password not valid or user not found")]
@@ -85,6 +92,8 @@ pub enum AuthError {
     SenderOrReceiverNotFound,
     #[error("The payment is not for this user")]
     PaymentNotForThisUser,
+    #[error("Google error: {0}")]
+    GoogleError(#[from] crate::google::GoogleError),
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -101,22 +110,29 @@ pub struct Auth {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// The sui client
     sui: Arc<RwLock<Sui>>,
+    /// GooglePublicKeys
+    google_public_keys: HashMap<String, (DecodingKey, Algorithm)>,
+    /// Google client id
+    google_client_id: String,
 }
 
 impl Auth {
     /// Constructor
-    pub fn new(
+    pub async fn new(
         config: AtomaAuthConfig,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         sui: Arc<RwLock<Sui>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let google_public_keys = fetch_google_public_keys().await?;
+        Ok(Self {
             secret_key: config.secret_key,
             access_token_lifetime: config.access_token_lifetime,
             refresh_token_lifetime: config.refresh_token_lifetime,
             state_manager_sender,
             sui,
-        }
+            google_public_keys,
+            google_client_id: config.google_client_id,
+        })
     }
 
     /// Generate a new refresh token
@@ -312,6 +328,36 @@ impl Auth {
         Ok((refresh_token, access_token))
     }
 
+    /// Check the google oauth token
+    /// This method will check the google oauth token and generate a new refresh and access token
+    /// The method will check if the email is present in the claims and store the user in the DB
+    /// The method will generate a new refresh and access tokens
+    #[instrument(level = "info", skip(self))]
+    pub async fn check_google_id_token(&self, id_token: &str) -> Result<(String, String)> {
+        let claims = google::verify_google_id_token(
+            id_token,
+            &self.google_client_id,
+            &self.google_public_keys,
+        )?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        let email = match claims.email {
+            Some(email) => email,
+            None => {
+                return Err(google::GoogleError::EmailNotFound)?;
+            }
+        };
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::OAuth {
+                username: email,
+                result_sender,
+            })?;
+        let user_id = result_receiver.await??;
+        let refresh_token = self.generate_refresh_token(user_id).await?;
+        let access_token = self.generate_access_token(&refresh_token).await?;
+        Ok((refresh_token, access_token))
+    }
+
     /// Generate a new API token
     /// This method will generate a new API token for the user
     /// The method will check if the access token and its corresponding refresh token is valid and store the new API token in the state manager
@@ -430,6 +476,18 @@ impl Auth {
         Ok(claims.user_id)
     }
 
+    /// Generate a new personal message from a string.
+    fn personal_message_hash(msg: &str) -> Result<GenericArray<u8, U32>> {
+        let personal_message = IntentMessage::new(
+            Intent::personal_message(),
+            PersonalMessage {
+                message: msg.as_bytes().to_vec(),
+            },
+        );
+        let intent_bcs = bcs::to_bytes(&personal_message)?;
+        Ok(blake2b_hash(&intent_bcs))
+    }
+
     /// Stores the wallet address for the user. The user needs to send a signed message to prove ownership of the wallet.
     /// The wallet address is stored in the signature.
     ///
@@ -450,20 +508,10 @@ impl Auth {
         let signature_bytes = signature.signature_bytes();
         let public_key_bytes = signature.public_key_bytes();
         let signature_scheme = signature.scheme();
-        let intent_msg = IntentMessage::new(
-            Intent::personal_message(),
-            PersonalMessage {
-                message: format!(
-                    "Sign this message to prove you are the owner of this wallet. User ID: {}",
-                    claims.user_id
-                )
-                .as_bytes()
-                .to_vec(),
-            },
-        );
-
-        let intent_bcs = bcs::to_bytes(&intent_msg)?;
-        let message_hash = blake2b_hash(&intent_bcs);
+        let message_hash = Self::personal_message_hash(&format!(
+            "Sign this message to prove you are the owner of this wallet. User ID: {}",
+            claims.user_id
+        ))?;
 
         match signature_scheme {
             SignatureScheme::ED25519 => {
@@ -496,12 +544,90 @@ impl Auth {
         Ok(())
     }
 
+    /// Get the wallet address for the ZkLogin signature. The signature needs to be verified and the message signed is the transaction digest.
+    /// The wallet address is stored in the signature.
+    ///
+    /// # Arguments
+    ///
+    /// * `zk_login_signature` - The zk_login signature to be used to get the wallet address
+    /// * `tx_digest` - The transaction digest to be used to confirm the signature
+    ///
+    /// # Returns
+    ///
+    /// * `Result<String>` - The wallet address
+    ///
+    /// # Errors
+    ///
+    /// * If the signature is not a zk_login signature
+    /// * If the signature is not valid
+    #[instrument(level = "info")]
+    async fn get_zk_address(zk_login_signature: &str, tx_digest: &str) -> Result<String> {
+        let user_signature = UserSignature::from_base64(zk_login_signature)?;
+        if let UserSignature::ZkLogin(zk_login_authenticator) = user_signature {
+            // The message is the transaction digest that the user claims its theirs
+            let message_hash = Self::personal_message_hash(tx_digest)?;
+
+            // First verify that the signature is valid
+            match zk_login_authenticator.signature {
+                SimpleSignature::Ed25519 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Ed25519Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+                SimpleSignature::Secp256k1 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Secp256k1Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+                SimpleSignature::Secp256r1 {
+                    signature,
+                    public_key,
+                } => {
+                    let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).unwrap();
+                    let signature = Secp256r1Signature::from_bytes(signature.as_ref()).unwrap();
+                    public_key.verify(message_hash.as_slice(), &signature)?;
+                }
+            };
+            // Now that we know the signature is valid, lets get the address from the signature
+            let address_seed =
+                Bn254FrElement::from_str(&zk_login_authenticator.inputs.address_seed.to_string())
+                    .map_err(|e| {
+                    AuthError::FailedToParseSignature(format!(
+                        "Failed to parse address seed: {}",
+                        e
+                    ))
+                })?;
+            let public_id =
+                ZkLoginPublicIdentifier::new(google::ISS, &address_seed).map_err(|e| {
+                    AuthError::FailedToParseSignature(format!(
+                        "Failed to parse public identifier: {}",
+                        e
+                    ))
+                })?;
+            let public_key = PublicKey::ZkLogin(public_id);
+            let sui_address = SuiAddress::from(&public_key);
+            Ok(sui_address.to_string())
+        } else {
+            Err(AuthError::FailedToParseSignature(
+                "Not a zk_login signature".to_string(),
+            ))
+        }
+    }
+
     /// Updates the balance of the user
     ///
     /// # Arguments
     ///
     /// * `jwt` - The access token to be used to update the balance
     /// * `transaction_digest` - The transaction digest to be used to update the balance
+    /// * `proof_signature` - The proof signature is present for the zk_login signature. We don't store the zk address in the DB, the user confirms every usdc
+    ///                       transaction by signing the hash of the transaction digest with their zk_login signature. This is used to confirm that the payment is for this user.
     ///
     /// # Returns
     ///
@@ -514,8 +640,14 @@ impl Auth {
     /// * If the payment is not for this user
     /// * If the user is not found
     /// * If the user balance is not updated
+    /// * If the user provided invalid zk_proof_signature
     #[instrument(level = "info", skip(self))]
-    pub async fn usdc_payment(&self, jwt: &str, transaction_digest: &str) -> Result<()> {
+    pub async fn usdc_payment(
+        &self,
+        jwt: &str,
+        transaction_digest: &str,
+        zk_proof_signature: Option<String>,
+    ) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
 
         let (result_sender, result_receiver) = oneshot::channel();
@@ -571,18 +703,32 @@ impl Auth {
             .get_wallet_address()
             .map_err(AuthError::SuiError)?;
         if receiver == own_address {
-            let (result_sender, result_receiver) = oneshot::channel();
-            self.state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::ConfirmUser {
-                    sui_address: sender.to_string(),
-                    user_id: claims.user_id,
-                    result_sender,
-                })?;
-            let is_their_wallet = result_receiver.await??;
+            // The signature is coming from the frontend where the user used his zk credentials to sign the transaction digest as a personal message (digest of the transaction).
+            // Now we need to prove that it was the digest he is trying to claim. And if the sui address from the signature is matching the address in the usdc payment transaction.
+            match zk_proof_signature {
+                Some(signature) => {
+                    if sender.to_string()
+                        != Self::get_zk_address(&signature, transaction_digest).await?
+                    {
+                        return Err(AuthError::PaymentNotForThisUser);
+                    }
+                }
+                None => {
+                    let (result_sender, result_receiver) = oneshot::channel();
+                    self.state_manager_sender
+                        .send(AtomaAtomaStateManagerEvent::ConfirmUser {
+                            sui_address: sender.to_string(),
+                            user_id: claims.user_id,
+                            result_sender,
+                        })?;
+                    let is_their_wallet = result_receiver.await??;
 
-            if !is_their_wallet {
-                return Err(AuthError::PaymentNotForThisUser);
+                    if !is_their_wallet {
+                        return Err(AuthError::PaymentNotForThisUser);
+                    }
+                }
             }
+
             // We are the receiver and we know the sender
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::TopUpBalance {
@@ -626,10 +772,15 @@ mod test {
 
     use atoma_state::types::AtomaAtomaStateManagerEvent;
     use atoma_sui::AtomaSuiConfig;
+    use chrono::Utc;
     use flume::Receiver;
+    use jsonwebtoken::{decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header};
+    use rand::rngs::OsRng;
+    use rsa::{RsaPrivateKey, RsaPublicKey};
     use tokio::sync::RwLock;
 
-    use crate::AtomaAuthConfig;
+    use crate::google::ISS;
+    use crate::{google, AtomaAuthConfig};
 
     use super::Auth;
     use std::env;
@@ -719,12 +870,15 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     }
 
     async fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
-        let config = AtomaAuthConfig::new("secret".to_string(), 1, 1);
+        let config =
+            AtomaAuthConfig::new("secret".to_string(), 1, 1, "google_client_id".to_string());
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
         let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
         let sui = crate::Sui::new(&sui_config).await.unwrap();
-        let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)));
+        let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)))
+            .await
+            .unwrap();
         (auth, state_manager_receiver)
     }
 
@@ -835,6 +989,75 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         assert!(claims.refresh_token_hash.is_some());
         // Generate api token
         let _api_token = auth.generate_api_token(&access_token).await.unwrap();
+        if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
+            .await
+            .is_err()
+        {
+            panic!("mock_handle did not finish within 1 second");
+        }
+    }
+
+    #[tokio::test]
+    async fn google_login() {
+        let (mut auth, receiver) = setup_test().await;
+        let mock_handle = tokio::task::spawn(async move {
+            // First event is for the user to log in to get the tokens
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::OAuth {
+                    username: event_username,
+                    result_sender,
+                } => {
+                    assert_eq!(event_username, "email");
+                    result_sender.send(Ok(1)).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::StoreRefreshToken { .. } => {}
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+                    user_id: event_user_id,
+                    refresh_token_hash: _refresh_token,
+                    result_sender,
+                } => {
+                    assert_eq!(event_user_id, 1);
+                    result_sender.send(Ok(true)).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+        });
+        // let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("Failed to generate a key");
+        // let public_key = RsaPublicKey::from(&private_key);
+        // (private_key, public_key);
+        let encoding_key = EncodingKey::from_secret("fake secret".as_bytes());
+        auth.google_public_keys.insert(
+            "kid".to_string(),
+            (
+                DecodingKey::from_secret("fake secret".as_bytes()),
+                Algorithm::HS256,
+            ),
+        );
+        let mut header = Header::default();
+        header.kid = Some("kid".to_string());
+        header.alg = Algorithm::HS256;
+        let id_token = encode(
+            &header,
+            &google::Claims::new(
+                ISS,
+                "sub",
+                "google_client_id",
+                Utc::now().timestamp() as usize + 1000,
+                Some("email"),
+            ),
+            &encoding_key,
+        )
+        .unwrap();
+        auth.check_google_id_token(&id_token).await.unwrap();
         if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
             .await
             .is_err()

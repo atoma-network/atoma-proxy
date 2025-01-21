@@ -11,6 +11,8 @@ pub struct AtomaAuthConfig {
     pub access_token_lifetime: usize,
     /// The refresh token lifetime in days.
     pub refresh_token_lifetime: usize,
+    /// Google client id.
+    pub google_client_id: String,
 }
 
 impl AtomaAuthConfig {
@@ -19,11 +21,13 @@ impl AtomaAuthConfig {
         secret_key: String,
         access_token_lifetime: usize,
         refresh_token_lifetime: usize,
+        google_client_id: String,
     ) -> Self {
         Self {
             secret_key,
             access_token_lifetime,
             refresh_token_lifetime,
+            google_client_id,
         }
     }
 

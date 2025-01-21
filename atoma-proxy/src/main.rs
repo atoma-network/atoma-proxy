@@ -149,7 +149,7 @@ async fn main() -> Result<()> {
 
     let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
 
-    let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui));
+    let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui)).await?;
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
