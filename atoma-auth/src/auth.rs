@@ -1,5 +1,10 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+#[cfg(feature = "google-oauth")]
+use std::collections::HashMap;
+use std::{str::FromStr, sync::Arc};
 
+#[cfg(feature = "google-oauth")]
+use crate::google::{self, fetch_google_public_keys};
+use crate::{AtomaAuthConfig, Sui};
 use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
 use atoma_utils::hashing::blake2b_hash;
 use blake2::{
@@ -14,27 +19,28 @@ use fastcrypto::{
     secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
     traits::{ToFromBytes, VerifyingKey},
 };
+#[cfg(feature = "google-oauth")]
 use fastcrypto_zkp::zk_login_utils::Bn254FrElement;
 use flume::Sender;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+#[cfg(feature = "google-oauth")]
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
+#[cfg(feature = "google-oauth")]
+use sui_sdk::types::crypto::ZkLoginPublicIdentifier;
 use sui_sdk::types::{
     base_types::SuiAddress,
-    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature, ZkLoginPublicIdentifier},
+    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
     object::Owner,
     TypeTag,
 };
+#[cfg(feature = "google-oauth")]
 use sui_sdk_types::{SimpleSignature, UserSignature};
 use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
-
-use crate::{
-    google::{self, fetch_google_public_keys},
-    AtomaAuthConfig, Sui,
-};
 
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
@@ -92,8 +98,12 @@ pub enum AuthError {
     SenderOrReceiverNotFound,
     #[error("The payment is not for this user")]
     PaymentNotForThisUser,
+    #[cfg(feature = "google-oauth")]
     #[error("Google error: {0}")]
     GoogleError(#[from] crate::google::GoogleError),
+    #[cfg(not(feature = "google-oauth"))]
+    #[error("ZkLogin not enabled")]
+    ZkLoginNotEnabled,
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -110,8 +120,10 @@ pub struct Auth {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// The sui client
     sui: Arc<RwLock<Sui>>,
+    #[cfg(feature = "google-oauth")]
     /// GooglePublicKeys
     google_public_keys: HashMap<String, (DecodingKey, Algorithm)>,
+    #[cfg(feature = "google-oauth")]
     /// Google client id
     google_client_id: String,
 }
@@ -123,6 +135,7 @@ impl Auth {
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         sui: Arc<RwLock<Sui>>,
     ) -> Result<Self> {
+        #[cfg(feature = "google-oauth")]
         let google_public_keys = fetch_google_public_keys().await?;
         Ok(Self {
             secret_key: config.secret_key,
@@ -130,7 +143,9 @@ impl Auth {
             refresh_token_lifetime: config.refresh_token_lifetime,
             state_manager_sender,
             sui,
+            #[cfg(feature = "google-oauth")]
             google_public_keys,
+            #[cfg(feature = "google-oauth")]
             google_client_id: config.google_client_id,
         })
     }
@@ -332,6 +347,7 @@ impl Auth {
     /// This method will check the google oauth token and generate a new refresh and access token
     /// The method will check if the email is present in the claims and store the user in the DB
     /// The method will generate a new refresh and access tokens
+    #[cfg(feature = "google-oauth")]
     #[instrument(level = "info", skip(self))]
     pub async fn check_google_id_token(&self, id_token: &str) -> Result<(String, String)> {
         let claims = google::verify_google_id_token(
@@ -560,6 +576,7 @@ impl Auth {
     ///
     /// * If the signature is not a zk_login signature
     /// * If the signature is not valid
+    #[cfg(feature = "google-oauth")]
     #[instrument(level = "info")]
     async fn get_zk_address(zk_login_signature: &str, tx_digest: &str) -> Result<String> {
         let user_signature = UserSignature::from_base64(zk_login_signature)?;
@@ -706,12 +723,17 @@ impl Auth {
             // The signature is coming from the frontend where the user used his zk credentials to sign the transaction digest as a personal message (digest of the transaction).
             // Now we need to prove that it was the digest he is trying to claim. And if the sui address from the signature is matching the address in the usdc payment transaction.
             match zk_proof_signature {
+                #[cfg(feature = "google-oauth")]
                 Some(signature) => {
                     if sender.to_string()
                         != Self::get_zk_address(&signature, transaction_digest).await?
                     {
                         return Err(AuthError::PaymentNotForThisUser);
                     }
+                }
+                #[cfg(not(feature = "google-oauth"))]
+                Some(_) => {
+                    return Err(AuthError::ZkLoginNotEnabled);
                 }
                 None => {
                     let (result_sender, result_receiver) = oneshot::channel();
@@ -772,15 +794,10 @@ mod test {
 
     use atoma_state::types::AtomaAtomaStateManagerEvent;
     use atoma_sui::AtomaSuiConfig;
-    use chrono::Utc;
     use flume::Receiver;
-    use jsonwebtoken::{decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header};
-    use rand::rngs::OsRng;
-    use rsa::{RsaPrivateKey, RsaPublicKey};
     use tokio::sync::RwLock;
 
-    use crate::google::ISS;
-    use crate::{google, AtomaAuthConfig};
+    use crate::AtomaAuthConfig;
 
     use super::Auth;
     use std::env;
@@ -870,8 +887,13 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     }
 
     async fn setup_test() -> (Auth, Receiver<AtomaAtomaStateManagerEvent>) {
-        let config =
-            AtomaAuthConfig::new("secret".to_string(), 1, 1, "google_client_id".to_string());
+        let config = AtomaAuthConfig::new(
+            "secret".to_string(),
+            1,
+            1,
+            #[cfg(feature = "google-oauth")]
+            "google_client_id".to_string(),
+        );
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
         let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
@@ -997,8 +1019,12 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         }
     }
 
+    #[cfg(feature = "google-oauth")]
     #[tokio::test]
     async fn google_login() {
+        use crate::google::{Claims, ISS};
+        use chrono::Utc;
+        use jsonwebtoken::{encode, Algorithm, DecodingKey, EncodingKey, Header};
         let (mut auth, receiver) = setup_test().await;
         let mock_handle = tokio::task::spawn(async move {
             // First event is for the user to log in to get the tokens
@@ -1031,9 +1057,6 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
                 _ => panic!("Unexpected event"),
             }
         });
-        // let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("Failed to generate a key");
-        // let public_key = RsaPublicKey::from(&private_key);
-        // (private_key, public_key);
         let encoding_key = EncodingKey::from_secret("fake secret".as_bytes());
         auth.google_public_keys.insert(
             "kid".to_string(),
@@ -1042,12 +1065,14 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
                 Algorithm::HS256,
             ),
         );
-        let mut header = Header::default();
-        header.kid = Some("kid".to_string());
-        header.alg = Algorithm::HS256;
+        let header = Header {
+            kid: Some("kid".to_string()),
+            alg: Algorithm::HS256,
+            ..Default::default()
+        };
         let id_token = encode(
             &header,
-            &google::Claims::new(
+            &Claims::new(
                 ISS,
                 "sub",
                 "google_client_id",

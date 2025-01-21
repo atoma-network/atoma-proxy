@@ -23,3 +23,6 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }
+
+[features]
+google-oauth = ["atoma-auth/google-oauth"]
