@@ -102,6 +102,39 @@ services:
       - "traefik.http.routers.credentials.service=credentials_service"
       - "traefik.http.services.credentials_service.loadbalancer.server.port=${ATOMA_PROXY_SERVICE_PORT:-8081}"
 
+
+  backend:
+    profiles: ["cloud"]
+    image: mysten/zklogin:prover-stable
+    volumes:
+      # The ZKEY environment variable must be set to the path of the zkey file.
+      - ${ZKEY}:/app/binaries/zkLogin.zkey
+    environment:
+      - ZKEY=/app/binaries/zkLogin.zkey
+      - WITNESS_BINARIES=/app/binaries
+
+  frontend:
+    profiles: ["cloud"]
+    image: mysten/zklogin:prover-fe-stable
+    command: "8080"
+    ports:
+      - "${SUI_PROVER_SERVICE_PORT:-8082}:8080"
+    environment:
+      - PROVER_URI=http://backend:8080/input
+      - NODE_ENV=production
+      - DEBUG=zkLogin:info,jwks
+      # The default timeout is 15 seconds. Uncomment the following line to change it.
+      # - PROVER_TIMEOUT=30
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prover.rule=Host(`prover.atoma.network`)"
+      - "traefik.http.routers.prover.entrypoints=websecure"
+      - "traefik.http.routers.prover.tls.certresolver=myresolver"
+      - "traefik.http.routers.prover.service=prover_service"
+      - "traefik.http.services.prover_service.loadbalancer.server.port=${SUI_PROVER_SERVICE_PORT:-8082}"
+  networks:
+    - atoma-network
+
 volumes:
   postgres-data:
   sui-config-volume:
