@@ -95,12 +95,12 @@ services:
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.routers.api.service=api_service"
-      - "traefik.http.services.api_service.loadbalancer.server.port=${ATOMA_API_SERVICE_PORT:-8080}"
+      - "traefik.http.services.api_service.loadbalancer.server.port=8080" # This is the internal port of the docker, this have to match the port in the config.toml
       - "traefik.http.routers.credentials.rule=Host(`credentials.atoma.network`)"
       - "traefik.http.routers.credentials.entrypoints=websecure"
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
       - "traefik.http.routers.credentials.service=credentials_service"
-      - "traefik.http.services.credentials_service.loadbalancer.server.port=${ATOMA_PROXY_SERVICE_PORT:-8081}"
+      - "traefik.http.services.credentials_service.loadbalancer.server.port=8081" # This is the internal port of the docker, this have to match the port in the config.toml
 
 
   backend:
@@ -117,8 +117,6 @@ services:
     profiles: ["cloud"]
     image: mysten/zklogin:prover-fe-stable
     command: "8080"
-    ports:
-      - "${SUI_PROVER_SERVICE_PORT:-8082}:8080"
     environment:
       - PROVER_URI=http://backend:8080/input
       - NODE_ENV=production
@@ -131,7 +129,7 @@ services:
       - "traefik.http.routers.prover.entrypoints=websecure"
       - "traefik.http.routers.prover.tls.certresolver=myresolver"
       - "traefik.http.routers.prover.service=prover_service"
-      - "traefik.http.services.prover_service.loadbalancer.server.port=${SUI_PROVER_SERVICE_PORT:-8082}"
+      - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
     networks:
       - atoma-network
 
