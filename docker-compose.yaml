@@ -129,7 +129,7 @@ services:
       - "traefik.http.routers.prover.entrypoints=websecure"
       - "traefik.http.routers.prover.tls.certresolver=myresolver"
       - "traefik.http.routers.prover.service=prover_service"
-      - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker, this have to match the port in the config.toml
+      - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
     networks:
       - atoma-network
 
