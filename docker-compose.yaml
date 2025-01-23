@@ -112,6 +112,8 @@ services:
     environment:
       - ZKEY=/app/binaries/zkLogin.zkey
       - WITNESS_BINARIES=/app/binaries
+    networks:
+      - atoma-network
 
   frontend:
     profiles: ["cloud"]
