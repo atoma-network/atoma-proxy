@@ -15,7 +15,7 @@ cursor_path = "./cursor.toml"
 database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
 
 [atoma_service]
-service_bind_address = "0.0.0.0:8080" # Address to bind the service to
+service_bind_address = "0.0.0.0:8080" # Address to bind the service to, this should match the port in the docker-compose.yml
 password = "password" # Password for the service
 models = [
   "meta-llama/Llama-3.2-3B-Instruct",
@@ -26,7 +26,7 @@ modalities = [["Chat Completions"],["Chat Completions"]] # Modalities of the abo
 hf_token = "<API_KEY>" # Hugging face api token, required if you want to access a gated model
 
 [atoma_proxy_service]
-service_bind_address = "0.0.0.0:8081"
+service_bind_address = "0.0.0.0:8081" # This should match the port in the docker-compose.yml
 
 [atoma_auth]
 secret_key = "secret_key" # Secret key for the tokens generation
