@@ -37,7 +37,7 @@ use sui_sdk::types::{
     object::Owner,
     TypeTag,
 };
-use sui_sdk_types::{SimpleSignature, UserSignature, ZkLoginInputs};
+use sui_sdk_types::{SimpleSignature, UserSignature};
 use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
