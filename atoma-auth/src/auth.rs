@@ -5,6 +5,7 @@ use std::{str::FromStr, sync::Arc};
 #[cfg(feature = "google-oauth")]
 use crate::google::{self, fetch_google_public_keys};
 use crate::{AtomaAuthConfig, Sui};
+use anyhow::anyhow;
 use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
 use atoma_utils::hashing::blake2b_hash;
 use blake2::{
@@ -19,25 +20,24 @@ use fastcrypto::{
     secp256r1::{Secp256r1PublicKey, Secp256r1Signature},
     traits::{ToFromBytes, VerifyingKey},
 };
-#[cfg(feature = "google-oauth")]
 use fastcrypto_zkp::zk_login_utils::Bn254FrElement;
 use flume::Sender;
 #[cfg(feature = "google-oauth")]
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
-#[cfg(feature = "google-oauth")]
 use sui_sdk::types::crypto::ZkLoginPublicIdentifier;
 use sui_sdk::types::{
     base_types::SuiAddress,
-    crypto::{PublicKey, Signature, SignatureScheme, SuiSignature},
+    crypto::{PublicKey, SignatureScheme},
+    error::SuiError,
     object::Owner,
     TypeTag,
 };
-#[cfg(feature = "google-oauth")]
-use sui_sdk_types::{SimpleSignature, UserSignature};
+use sui_sdk_types::{SimpleSignature, UserSignature, ZkLoginInputs};
 use thiserror::Error;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{error, instrument};
@@ -87,7 +87,7 @@ pub enum AuthError {
     #[error("Unsupported signature scheme {0}")]
     UnsupportedSignatureScheme(SignatureScheme),
     #[error("Error: {0}")]
-    SuiError(anyhow::Error),
+    AnyhowError(#[from] anyhow::Error),
     #[error("No balance changes found")]
     NoBalanceChangesFound,
     #[error("Multiple senders")]
@@ -104,6 +104,8 @@ pub enum AuthError {
     #[cfg(not(feature = "google-oauth"))]
     #[error("ZkLogin not enabled")]
     ZkLoginNotEnabled,
+    #[error("Sui error: {0}")]
+    SuiError(#[from] SuiError),
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -504,6 +506,194 @@ impl Auth {
         Ok(blake2b_hash(&intent_bcs))
     }
 
+    /// NOTE: These function are copied (with comments) from the original implementation in `sui-sdk` crate. https://github.com/MystenLabs/sui-rust-sdk/blob/master/crates/sui-crypto/src/zklogin/mod.rs#L142
+    /// I just changed the errors to match ours.
+    /// If they publish them as a public function, we can use them directly. But for now this is the only way how to get the ISS from the signature.
+    ///
+    /// Map a base64 string to a bit array by taking each char's index and convert it to binary form with one bit per u8
+    /// element in the output. Returns SignatureError if one of the characters is not in the base64 charset.
+    fn base64_to_bitarray(input: &str) -> Result<Vec<u8>> {
+        use itertools::Itertools;
+        const BASE64_URL_CHARSET: &str =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+        input
+            .chars()
+            .map(|c| {
+                BASE64_URL_CHARSET
+                    .find(c)
+                    .map(|index| index as u8)
+                    .map(|index| (0..6).rev().map(move |i| index >> i & 1))
+                    .ok_or_else(|| {
+                        AuthError::AnyhowError(anyhow!("base64_to_bitarry invalid input"))
+                    })
+            })
+            .flatten_ok()
+            .collect()
+    }
+
+    /// Convert a bitarray (each bit is represented by a u8) to a byte array by taking each 8 bits as a
+    /// byte in big-endian format.
+    fn bitarray_to_bytearray(bits: &[u8]) -> Result<Vec<u8>> {
+        if bits.len() % 8 != 0 {
+            return Err(anyhow!("bitarray_to_bytearray invalid input"))?;
+        }
+        Ok(bits
+            .chunks(8)
+            .map(|chunk| {
+                let mut byte = 0u8;
+                for (i, bit) in chunk.iter().rev().enumerate() {
+                    byte |= bit << i;
+                }
+                byte
+            })
+            .collect())
+    }
+
+    /// Parse the base64 string, add paddings based on offset, and convert to a bytearray.
+    fn decode_base64_url(s: &str, index_mod_4: &u8) -> Result<String> {
+        if s.len() < 2 {
+            return Err(anyhow!("Base64 string smaller than 2"))?;
+        }
+        let mut bits = Self::base64_to_bitarray(s)?;
+        match index_mod_4 {
+            0 => {}
+            1 => {
+                bits.drain(..2);
+            }
+            2 => {
+                bits.drain(..4);
+            }
+            _ => {
+                return Err(anyhow!("Invalid first_char_offset"))?;
+            }
+        }
+
+        let last_char_offset = (index_mod_4 + s.len() as u8 - 1) % 4;
+        match last_char_offset {
+            3 => {}
+            2 => {
+                bits.drain(bits.len() - 2..);
+            }
+            1 => {
+                bits.drain(bits.len() - 4..);
+            }
+            _ => {
+                return Err(anyhow!("Invalid last_char_offset"))?;
+            }
+        }
+
+        if bits.len() % 8 != 0 {
+            return Err(anyhow!("Invalid bits length"))?;
+        }
+
+        Ok(std::str::from_utf8(&Self::bitarray_to_bytearray(&bits)?)
+            .map_err(|_| anyhow!("Invalid UTF8 string"))?
+            .to_owned())
+    }
+
+    /// Get Sui address from signature. We do support zk_login and simple signatures.
+    /// The signature has to be for the message.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - The signature to be used to get the Sui address
+    /// * `message` - The message to be used check the signature
+    ///
+    /// # Returns
+    ///
+    /// * `Result<SuiAddress>` - The Sui address from the signature
+    ///
+    /// # Errors
+    ///
+    /// * If the signature is not valid
+    /// * If the signature is not supported
+    /// * If the public key is not found
+    /// * If the public key is not verified
+    #[instrument(level = "info")]
+    fn get_sui_address_from_signature(signature: &str, message: &str) -> Result<SuiAddress> {
+        let user_signature = UserSignature::from_base64(signature).map_err(|e| {
+            error!("Failed to parse signature: {}", e);
+            AuthError::FailedToParseSignature(signature.to_string())
+        })?;
+        let message_hash = Self::personal_message_hash(message)?;
+
+        let (signature, mut public_key) = match user_signature {
+            UserSignature::ZkLogin(zk_login_authenticator) => {
+                let address_seed = Bn254FrElement::from_str(
+                    &zk_login_authenticator.inputs.address_seed.to_string(),
+                )?;
+                let iss = Self::decode_base64_url(
+                    &zk_login_authenticator.inputs.iss_base64_details.value,
+                    &zk_login_authenticator.inputs.iss_base64_details.index_mod_4,
+                )?;
+                let re = Regex::new(r#""iss":"(.*)".*"#).unwrap();
+                let captures = re.captures(&iss).unwrap();
+                let iss = captures
+                    .get(1)
+                    .ok_or_else(|| AuthError::FailedToParseSignature("No iss".to_string()))?
+                    .as_str();
+                let public_id = ZkLoginPublicIdentifier::new(iss, &address_seed)?;
+                let public_key = PublicKey::ZkLogin(public_id);
+                (zk_login_authenticator.signature, Some(public_key))
+            }
+            UserSignature::Simple(simple_signature) => (simple_signature, None),
+            _ => {
+                return Err(AuthError::FailedToParseSignature(
+                    "Unsupported signature".to_string(),
+                ))
+            }
+        };
+        match signature {
+            SimpleSignature::Ed25519 {
+                signature,
+                public_key: pk,
+            } => {
+                let pk = Ed25519PublicKey::from_bytes(pk.as_ref())?;
+                let signature = Ed25519Signature::from_bytes(signature.as_ref())?;
+                pk.verify(message_hash.as_slice(), &signature)?;
+                if public_key.is_none() {
+                    public_key = Some(
+                        PublicKey::try_from_bytes(SignatureScheme::ED25519, pk.as_bytes()).unwrap(),
+                    );
+                }
+            }
+            SimpleSignature::Secp256k1 {
+                signature,
+                public_key: pk,
+            } => {
+                let pk = Secp256k1PublicKey::from_bytes(pk.as_ref())?;
+                let signature = Secp256k1Signature::from_bytes(signature.as_ref())?;
+                pk.verify(message_hash.as_slice(), &signature)?;
+                if public_key.is_none() {
+                    public_key = Some(
+                        PublicKey::try_from_bytes(SignatureScheme::Secp256k1, pk.as_bytes())
+                            .unwrap(),
+                    );
+                }
+            }
+            SimpleSignature::Secp256r1 {
+                signature,
+                public_key: pk,
+            } => {
+                let pk = Secp256r1PublicKey::from_bytes(pk.as_ref())?;
+                let signature = Secp256r1Signature::from_bytes(signature.as_ref())?;
+                pk.verify(message_hash.as_slice(), &signature)?;
+                if public_key.is_none() {
+                    public_key = Some(
+                        PublicKey::try_from_bytes(SignatureScheme::Secp256r1, pk.as_bytes())
+                            .unwrap(),
+                    );
+                }
+            }
+        };
+        let sui_address = SuiAddress::from(
+            &public_key
+                .ok_or_else(|| AuthError::FailedToParseSignature("No public key".to_string()))?,
+        );
+        Ok(sui_address)
+    }
+
     /// Stores the wallet address for the user. The user needs to send a signed message to prove ownership of the wallet.
     /// The wallet address is stored in the signature.
     ///
@@ -517,124 +707,20 @@ impl Auth {
     #[instrument(level = "info", skip(self))]
     pub async fn update_sui_address(&self, jwt: &str, signature: &str) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
-        let signature = Signature::from_str(signature).map_err(|e| {
-            error!("Failed to parse signature: {}", e);
-            AuthError::FailedToParseSignature(signature.to_string())
-        })?;
-        let signature_bytes = signature.signature_bytes();
-        let public_key_bytes = signature.public_key_bytes();
-        let signature_scheme = signature.scheme();
-        let message_hash = Self::personal_message_hash(&format!(
-            "Sign this message to prove you are the owner of this wallet. User ID: {}",
-            claims.user_id
-        ))?;
+        let sui_address = Self::get_sui_address_from_signature(
+            signature,
+            &format!(
+                "Sign this message to prove you are the owner of this wallet. User ID: {}",
+                claims.user_id
+            ),
+        )?;
 
-        match signature_scheme {
-            SignatureScheme::ED25519 => {
-                let public_key = Ed25519PublicKey::from_bytes(public_key_bytes)?;
-                let signature = Ed25519Signature::from_bytes(signature_bytes)?;
-                public_key.verify(message_hash.as_slice(), &signature)?
-            }
-            SignatureScheme::Secp256k1 => {
-                let public_key = Secp256k1PublicKey::from_bytes(public_key_bytes)?;
-                let signature = Secp256k1Signature::from_bytes(signature_bytes)?;
-                public_key.verify(message_hash.as_slice(), &signature)?;
-            }
-            SignatureScheme::Secp256r1 => {
-                let public_key = Secp256r1PublicKey::from_bytes(public_key_bytes)?;
-                let signature = Secp256r1Signature::from_bytes(signature_bytes)?;
-                public_key.verify(message_hash.as_slice(), &signature)?;
-            }
-            schema => {
-                error!("Currently unsupported signature scheme {schema}");
-                return Err(AuthError::UnsupportedSignatureScheme(schema));
-            }
-        }
-        let public_key = PublicKey::try_from_bytes(signature_scheme, public_key_bytes).unwrap();
-        let sui_address = SuiAddress::from(&public_key);
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::UpdateSuiAddress {
                 user_id: claims.user_id,
                 sui_address: sui_address.to_string(),
             })?;
         Ok(())
-    }
-
-    /// Get the wallet address for the ZkLogin signature. The signature needs to be verified and the message signed is the transaction digest.
-    /// The wallet address is stored in the signature.
-    ///
-    /// # Arguments
-    ///
-    /// * `zk_login_signature` - The zk_login signature to be used to get the wallet address
-    /// * `tx_digest` - The transaction digest to be used to confirm the signature
-    ///
-    /// # Returns
-    ///
-    /// * `Result<String>` - The wallet address
-    ///
-    /// # Errors
-    ///
-    /// * If the signature is not a zk_login signature
-    /// * If the signature is not valid
-    #[cfg(feature = "google-oauth")]
-    #[instrument(level = "info")]
-    async fn get_zk_address(zk_login_signature: &str, tx_digest: &str) -> Result<String> {
-        let user_signature = UserSignature::from_base64(zk_login_signature)?;
-        if let UserSignature::ZkLogin(zk_login_authenticator) = user_signature {
-            // The message is the transaction digest that the user claims its theirs
-            let message_hash = Self::personal_message_hash(tx_digest)?;
-
-            // First verify that the signature is valid
-            match zk_login_authenticator.signature {
-                SimpleSignature::Ed25519 {
-                    signature,
-                    public_key,
-                } => {
-                    let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).unwrap();
-                    let signature = Ed25519Signature::from_bytes(signature.as_ref()).unwrap();
-                    public_key.verify(message_hash.as_slice(), &signature)?;
-                }
-                SimpleSignature::Secp256k1 {
-                    signature,
-                    public_key,
-                } => {
-                    let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).unwrap();
-                    let signature = Secp256k1Signature::from_bytes(signature.as_ref()).unwrap();
-                    public_key.verify(message_hash.as_slice(), &signature)?;
-                }
-                SimpleSignature::Secp256r1 {
-                    signature,
-                    public_key,
-                } => {
-                    let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).unwrap();
-                    let signature = Secp256r1Signature::from_bytes(signature.as_ref()).unwrap();
-                    public_key.verify(message_hash.as_slice(), &signature)?;
-                }
-            };
-            // Now that we know the signature is valid, lets get the address from the signature
-            let address_seed =
-                Bn254FrElement::from_str(&zk_login_authenticator.inputs.address_seed.to_string())
-                    .map_err(|e| {
-                    AuthError::FailedToParseSignature(format!(
-                        "Failed to parse address seed: {}",
-                        e
-                    ))
-                })?;
-            let public_id =
-                ZkLoginPublicIdentifier::new(google::ISS, &address_seed).map_err(|e| {
-                    AuthError::FailedToParseSignature(format!(
-                        "Failed to parse public identifier: {}",
-                        e
-                    ))
-                })?;
-            let public_key = PublicKey::ZkLogin(public_id);
-            let sui_address = SuiAddress::from(&public_key);
-            Ok(sui_address.to_string())
-        } else {
-            Err(AuthError::FailedToParseSignature(
-                "Not a zk_login signature".to_string(),
-            ))
-        }
     }
 
     /// Updates the balance of the user
@@ -680,8 +766,7 @@ impl Auth {
             .read()
             .await
             .get_balance_changes(transaction_digest)
-            .await
-            .map_err(AuthError::SuiError)?;
+            .await?;
         let balance_changes = balance_changes.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
         let mut receiver = None;
@@ -713,12 +798,7 @@ impl Auth {
         }
         let sender = sender.unwrap();
         let receiver = receiver.unwrap();
-        let own_address = self
-            .sui
-            .write()
-            .await
-            .get_wallet_address()
-            .map_err(AuthError::SuiError)?;
+        let own_address = self.sui.write().await.get_wallet_address()?;
         if receiver == own_address {
             // The signature is coming from the frontend where the user used his zk credentials to sign the transaction digest as a personal message (digest of the transaction).
             // Now we need to prove that it was the digest he is trying to claim. And if the sui address from the signature is matching the address in the usdc payment transaction.
@@ -726,7 +806,8 @@ impl Auth {
                 #[cfg(feature = "google-oauth")]
                 Some(signature) => {
                     if sender.to_string()
-                        != Self::get_zk_address(&signature, transaction_digest).await?
+                        != Self::get_sui_address_from_signature(&signature, transaction_digest)?
+                            .to_string()
                     {
                         return Err(AuthError::PaymentNotForThisUser);
                     }

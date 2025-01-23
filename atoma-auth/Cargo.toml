@@ -18,9 +18,11 @@ fastcrypto.workspace = true
 fastcrypto-zkp.workspace = true
 flume.workspace = true
 hex.workspace = true
+itertools.workspace = true
 jsonwebtoken.workspace = true
 pem.workspace = true
 rand.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 rsa.workspace = true
 serde = { workspace = true, features = ["derive"] }
