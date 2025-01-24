@@ -406,33 +406,41 @@ async fn handle_image_generation_response(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageRequest {
     /// A text description of the desired image(s). The maximum length is 1000 characters.
+    #[schema(example = "A cute baby sea otter floating on its back")]
     pub prompt: String,
 
     /// The model to use for image generation.
+    #[schema(example = "black-forest-labs/FLUX.1-schnell")]
     pub model: String,
 
     /// The number of images to generate. Defaults to 1.
+    #[schema(example = 1)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
 
     /// The quality of the image that will be generated.
     /// `hd` creates images with finer details and greater consistency across the image.
+    #[schema(example = "hd")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<String>,
 
     /// The format in which the generated images are returned.
+    #[schema(example = "url")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<String>,
 
     /// The size of the generated images.
+    #[schema(example = "1024x1024")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<String>,
 
     /// The style of the generated images.
+    #[schema(example = "vivid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<String>,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+    #[schema(example = "user-1234")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
@@ -441,6 +449,7 @@ pub struct CreateImageRequest {
 /// Response format for image generation
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageResponse {
+    #[schema(example = 1677649420)]
     pub created: i64,
     pub data: Vec<ImageData>,
 }
@@ -448,7 +457,12 @@ pub struct CreateImageResponse {
 /// Individual image data in the response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ImageData {
+    #[schema(
+        example = "A stunning image of a baby sea otter floating on its back in crystal clear blue water, with gentle ripples surrounding it. The otter's fur appears soft and well-detailed, and its expression is peaceful and content."
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revised_prompt: Option<String>,
+
+    #[schema(example = "https://oaidalleapiprodscus.blob.core.windows.net/private/image.png")]
     pub url: String,
 }

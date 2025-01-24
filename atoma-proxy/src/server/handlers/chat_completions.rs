@@ -692,7 +692,7 @@ async fn handle_streaming_response(
 /// Represents a chat completion request model following the OpenAI API format
 pub struct RequestModelChatCompletions {
     /// The identifier of the model to use for the completion
-    /// (e.g., "gpt-3.5-turbo", "gpt-4", etc.)
+    /// (e.g., "gpt-3.5-turbo", "meta-llama/Llama-3.3-70B-Instruct", etc.)
     model: String,
 
     /// Array of message objects that represent the conversation history
@@ -803,42 +803,51 @@ pub struct CreateChatCompletionStreamRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionRequest {
     /// ID of the model to use
+    #[schema(example = "meta-llama/Llama-3.3-70B-Instruct")]
     pub model: String,
 
     /// A list of messages comprising the conversation so far
     pub messages: Vec<ChatCompletionMessage>,
 
     /// What sampling temperature to use, between 0 and 2
+    #[schema(example = 0.7)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
 
     /// An alternative to sampling with temperature
+    #[schema(example = 1.0)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
 
     /// How many chat completion choices to generate for each input message
+    #[schema(example = 1)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<i32>,
 
     /// Whether to stream back partial progress
+    #[schema(example = false)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 
     /// Up to 4 sequences where the API will stop generating further tokens
+    #[schema(example = "json([\"stop\", \"halt\"])", default = "[]")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
 
     /// The maximum number of tokens to generate in the chat completion
+    #[schema(example = 2048)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<i32>,
 
     /// Number between -2.0 and 2.0. Positive values penalize new tokens based on
     /// whether they appear in the text so far
+    #[schema(example = 0.0)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
 
     /// Number between -2.0 and 2.0. Positive values penalize new tokens based on their
     /// existing frequency in the text so far
+    #[schema(example = 0.0)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
 
@@ -847,6 +856,7 @@ pub struct ChatCompletionRequest {
     pub logit_bias: Option<std::collections::HashMap<String, f32>>,
 
     /// A unique identifier representing your end-user
+    #[schema(example = "user-1234")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 
@@ -871,6 +881,7 @@ pub struct ChatCompletionRequest {
     pub tool_choice: Option<Value>,
 
     /// If specified, our system will make a best effort to sample deterministically
+    #[schema(example = 123)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
 }
@@ -878,12 +889,15 @@ pub struct ChatCompletionRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionMessage {
     /// The role of the message author. One of: "system", "user", "assistant", "tool", or "function"
+    #[schema(example = "user")]
     pub role: String,
 
     /// The contents of the message
+    #[schema(example = "Hello! How can you help me today?")]
     pub content: String,
 
     /// The name of the author of this message
+    #[schema(example = "john_doe")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -891,12 +905,15 @@ pub struct ChatCompletionMessage {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionResponse {
     /// A unique identifier for the chat completion.
+    #[schema(example = "chatcmpl-123")]
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chat completion was created.
+    #[schema(example = 1677652288)]
     pub created: i64,
 
     /// The model used for the chat completion.
+    #[schema(example = "meta-llama/Llama-3.3-70B-Instruct")]
     pub model: String,
 
     /// A list of chat completion choices.
@@ -906,6 +923,7 @@ pub struct ChatCompletionResponse {
     pub usage: Option<CompletionUsage>,
 
     /// The system fingerprint for the completion, if applicable.
+    #[schema(example = "fp_44709d6fcb")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
 }
@@ -919,12 +937,14 @@ pub struct ChatCompletionStreamResponse {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChoice {
     /// The index of this choice in the list of choices.
+    #[schema(example = 0)]
     pub index: i32,
 
     /// The chat completion message.
     pub message: ChatCompletionMessage,
 
     /// The reason the chat completion was finished.
+    #[schema(example = "stop")]
     pub finish_reason: Option<String>,
 
     /// Log probability information for the choice, if applicable.
@@ -935,12 +955,15 @@ pub struct ChatCompletionChoice {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompletionUsage {
     /// Number of tokens in the prompt.
+    #[schema(example = 9)]
     pub prompt_tokens: i32,
 
     /// Number of tokens in the completion.
+    #[schema(example = 12)]
     pub completion_tokens: i32,
 
     /// Total number of tokens used (prompt + completion).
+    #[schema(example = 21)]
     pub total_tokens: i32,
 }
 
@@ -948,12 +971,15 @@ pub struct CompletionUsage {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChunk {
     /// A unique identifier for the chat completion chunk.
+    #[schema(example = "chatcmpl-123")]
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chunk was created.
+    #[schema(example = 1677652288)]
     pub created: i64,
 
     /// The model used for the chat completion.
+    #[schema(example = "meta-llama/Llama-3.3-70B-Instruct")]
     pub model: String,
 
     /// A list of chat completion chunk choices.
@@ -963,12 +989,14 @@ pub struct ChatCompletionChunk {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChunkChoice {
     /// The index of this choice in the list of choices.
+    #[schema(example = 0)]
     pub index: i32,
 
     /// The chat completion delta message for streaming.
     pub delta: ChatCompletionChunkDelta,
 
     /// The reason the chat completion was finished, if applicable.
+    #[schema(example = "stop")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
 }
@@ -976,10 +1004,12 @@ pub struct ChatCompletionChunkChoice {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChunkDelta {
     /// The role of the message author, if present in this chunk.
+    #[schema(example = "assistant")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
 
     /// The content of the message, if present in this chunk.
+    #[schema(example = "Hello")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 

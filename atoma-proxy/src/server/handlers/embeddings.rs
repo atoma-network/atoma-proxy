@@ -447,6 +447,7 @@ async fn handle_embeddings_response(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateEmbeddingRequest {
     /// ID of the model to use.
+    #[schema(example = "intfloat/multilingual-e5-large-instruct")]
     pub model: String,
 
     /// Input text to get embeddings for. Can be a string or array of strings.
@@ -454,16 +455,17 @@ pub struct CreateEmbeddingRequest {
     pub input: EmbeddingInput,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+    #[schema(example = "user-1234")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 
     /// The format to return the embeddings in. Can be "float" or "base64".
     /// Defaults to "float"
+    #[schema(example = "float")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding_format: Option<String>,
 
     /// The number of dimensions the resulting output embeddings should have.
-    /// Only supported in text-embedding-3 models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dimensions: Option<u32>,
 }
@@ -471,7 +473,9 @@ pub struct CreateEmbeddingRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum EmbeddingInput {
+    #[schema(example = "The quick brown fox jumped over the lazy dog")]
     Single(String),
+    #[schema(example = "[\"The quick brown fox\", \"jumped over the lazy dog\"]")]
     Multiple(Vec<String>),
 }
 
@@ -479,9 +483,11 @@ pub enum EmbeddingInput {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateEmbeddingResponse {
     /// The object type, which is always "list"
+    #[schema(example = "list")]
     pub object: String,
 
     /// The model used for generating embeddings
+    #[schema(example = "intfloat/multilingual-e5-large-instruct")]
     pub model: String,
 
     /// List of embedding objects
@@ -495,12 +501,15 @@ pub struct CreateEmbeddingResponse {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingObject {
     /// The object type, which is always "embedding"
+    #[schema(example = "embedding")]
     pub object: String,
 
     /// The embedding vector
+    #[schema(example = "[0.0023064255, -0.009327292]")]
     pub embedding: Vec<f32>,
 
     /// Index of the embedding in the list of embeddings
+    #[schema(example = 0)]
     pub index: usize,
 }
 
@@ -508,8 +517,10 @@ pub struct EmbeddingObject {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingUsage {
     /// Number of tokens in the prompt
+    #[schema(example = 8)]
     pub prompt_tokens: u32,
 
     /// Total tokens used in the request
+    #[schema(example = 8)]
     pub total_tokens: u32,
 }
