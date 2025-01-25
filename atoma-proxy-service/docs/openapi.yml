@@ -583,38 +583,6 @@ paths:
               schema: {}
         '500':
           description: Failed to get node distribution
-  /google_oauth:
-    post:
-      tags:
-      - Auth
-      summary: |-
-        Logs in a user with the proxy service using Google OAuth.
-        This endpoint is used to verify a Google ID token and return an access token.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the Google ID token
-
-        # Returns
-
-        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
-      operationId: google_oauth
-      requestBody:
-        content:
-          text/plain:
-            schema:
-              type: string
-        required: true
-      responses:
-        '200':
-          description: Logs in a user with Google OAuth
-          content:
-            text/plain:
-              schema:
-                type: string
-        '500':
-          description: Failed to verify Google ID token
 components:
   schemas:
     AuthRequest:
