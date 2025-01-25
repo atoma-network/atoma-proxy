@@ -5,13 +5,15 @@ use utoipa::{
 };
 use utoipa_swagger_ui::SwaggerUi;
 
+#[cfg(feature = "google-oauth")]
+use crate::handlers::auth::{GoogleOAuth, GOOGLE_OAUTH_PATH};
 use crate::{
     handlers::{
         auth::{
-            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSuiAddress,
+            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSalt, GetSuiAddress,
             GetUserProfile, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress,
             UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH,
-            GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH, LOGIN_PATH, REGISTER_PATH,
+            GET_SALT_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH, LOGIN_PATH, REGISTER_PATH,
             REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{
@@ -47,6 +49,7 @@ pub fn openapi_router() -> Router {
             (path = GET_ALL_STACKS_FOR_USER_PATH, api = GetStacksByUserId, tags = ["Stacks"]),
             (path = GET_BALANCE_PATH, api = GetBalance, tags = ["Auth"]),
             (path = GET_USER_PROFILE_PATH, api = GetUserProfile, tags = ["Auth"]),
+            (path = GET_SALT_PATH, api = GetSalt, tags = ["Auth"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),
             (path = LATENCY_PATH, api = GetLatency, tags = ["Stats"]),
@@ -68,6 +71,22 @@ pub fn openapi_router() -> Router {
     )]
     struct ApiDoc;
 
+    #[cfg(feature = "google-oauth")]
+    #[derive(OpenApi)]
+    #[openapi(
+        modifiers(&SecurityAddon),
+        nest(
+            (path = GOOGLE_OAUTH_PATH, api = GoogleOAuth, tags = ["Auth"]),
+        ),
+        tags(
+            (name = "Auth", description = "Authentication and API token management"),
+        ),
+        servers(
+            (url = "http://localhost:8081", description = "Local server"),
+        )
+    )]
+    struct GoogleOAuthApiDoc;
+
     struct SecurityAddon;
 
     impl Modify for SecurityAddon {
@@ -81,14 +100,17 @@ pub fn openapi_router() -> Router {
         }
     }
 
+    let openapi = ApiDoc::openapi();
+    #[cfg(feature = "google-oauth")]
+    let openapi = openapi.merge_from(GoogleOAuthApiDoc::openapi());
+
     // Generate the OpenAPI spec and write it to a file in debug mode
     #[cfg(debug_assertions)]
     {
         use std::fs;
         use std::path::Path;
 
-        let spec =
-            serde_yaml::to_string(&ApiDoc::openapi()).expect("Failed to serialize OpenAPI spec");
+        let spec = serde_yaml::to_string(&openapi).expect("Failed to serialize OpenAPI spec");
 
         let docs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
         fs::create_dir_all(&docs_dir).expect("Failed to create docs directory");
@@ -99,6 +121,5 @@ pub fn openapi_router() -> Router {
         println!("OpenAPI spec written to: {:?}", spec_path);
     }
 
-    Router::new()
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+    Router::new().merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi))
 }

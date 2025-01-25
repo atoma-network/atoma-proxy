@@ -10,8 +10,10 @@ atoma-auth.workspace = true
 atoma-state.workspace = true
 atoma-sui.workspace = true
 axum.workspace = true
+base64.workspace = true
 chrono.workspace = true
 config.workspace = true
+rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
 sui-sdk.workspace = true
@@ -21,3 +23,6 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }
+
+[features]
+google-oauth = ["atoma-auth/google-oauth"]

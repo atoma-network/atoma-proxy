@@ -3521,6 +3521,42 @@ impl AtomaState {
         Ok(user.map(|user| user.get("id")))
     }
 
+    /// Get the id of the user by username (register if not in the table yet).
+    ///
+    /// This method queries the `users` table to get the user_id by username. If the user is not found, it will insert the user into the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<i64>`: A result containing either:
+    ///   - `Ok(i64)`: The user_id of the user.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn oauth(state_manager: &AtomaStateManager, username: &str) -> Result<i64> {
+    ///    state_manager.oauth(username).await
+    /// }
+    /// ```
+    pub async fn oauth(&self, username: &str) -> Result<i64> {
+        let user = sqlx::query("INSERT INTO users (username) VALUES ($1) ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username RETURNING id")
+                .bind(username)
+                .fetch_one(&self.db).await?;
+
+        Ok(user.get("id"))
+    }
+
     /// Check if the refresh_token_hash is valid for the user.
     ///
     /// This method checks if the refresh token hash is valid for the user by querying the `refresh_tokens` table.
@@ -4339,6 +4375,63 @@ impl AtomaState {
     pub async fn insert_new_usdc_payment_digest(&self, digest: String) -> Result<()> {
         sqlx::query("INSERT INTO usdc_payment_digests (digest) VALUES ($1)")
             .bind(digest)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Gets the salt for the user.
+    ///
+    /// This method fetches the salt for the user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///   - `Ok(Some(String))`: The salt for the user.
+    ///   - `Ok(None)`: If the user is not found.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_salt(&self, user_id: i64) -> Result<Option<String>> {
+        let salt = sqlx::query_scalar::<_, Option<String>>("SELECT salt FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.db)
+            .await?;
+
+        Ok(salt.flatten())
+    }
+
+    /// Sets the salt for the user.
+    ///
+    /// This method updates the `salt` field for the user in the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `salt` - The new salt to store for the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    pub async fn set_salt(&self, user_id: i64, salt: &str) -> Result<()> {
+        sqlx::query("UPDATE users SET salt = $1 WHERE id = $2")
+            .bind(salt)
+            .bind(user_id)
             .execute(&self.db)
             .await?;
         Ok(())
