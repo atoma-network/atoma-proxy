@@ -18,7 +18,10 @@ use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use super::request_model::RequestModel;
-use super::{update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY};
+use super::{
+    handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
+    RESPONSE_HASH_KEY,
+};
 use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
@@ -484,10 +487,11 @@ async fn handle_non_streaming_response(
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response = response
@@ -661,10 +665,11 @@ async fn handle_streaming_response(
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let stream = response.bytes_stream();
