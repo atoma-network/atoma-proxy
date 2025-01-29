@@ -378,6 +378,9 @@ impl Stream for Streamer {
                     }
                 };
 
+                // We need to verify the hash when the endpoint is not confidential, as the node
+                // is not running within a secure enclave. Otherwise, the fact that the node can process requests
+                // with confidential data is proof of data integrity.
                 let verify_hash = self.endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
                 verify_response_hash_and_signature(&chunk, verify_hash).map_err(|e| {
                     error!(
