@@ -32,7 +32,7 @@ curl -X POST https://api.atoma.network/v1/chat/completions \
 -d '{
   "model": "meta-llama/Llama-3.3-70B-Instruct",
   "messages": [{"role": "user", "content": "Tell me a joke"}],
-  "max_tokens": 4096,
+  "max_completion_tokens": 4096,
   "stream": true
 }'
 ```
