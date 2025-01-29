@@ -29,9 +29,6 @@ pub(crate) const RESPONSE_HASH_KEY: &str = "response_hash";
 /// Key for the signature in the payload
 pub(crate) const SIGNATURE_KEY: &str = "signature";
 
-/// Key for the usage in the payload
-pub(crate) const USAGE_KEY: &str = "usage";
-
 /// Updates the state manager with token usage and hash information for a stack.
 ///
 /// This function performs two main operations:
@@ -253,7 +250,6 @@ fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Resu
     if let Some(obj) = value_tmp.as_object_mut() {
         obj.remove(RESPONSE_HASH_KEY);
         obj.remove(SIGNATURE_KEY);
-        obj.remove(USAGE_KEY);
     }
     let mut hasher = blake2::Blake2b::new();
     hasher.update(value_tmp.to_string().as_bytes());
