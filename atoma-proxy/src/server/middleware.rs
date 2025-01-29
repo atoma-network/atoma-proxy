@@ -14,15 +14,12 @@ use serde_json::Value;
 use tracing::instrument;
 
 use super::{
-    error::AtomaProxyError,
-    handlers::{
+    error::AtomaProxyError, handlers::{
         chat_completions::{CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
         update_state_manager,
-    },
-    http_server::ProxyState,
-    DEFAULT_MAX_TOKENS, MAX_TOKENS,
+    }, http_server::ProxyState, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
@@ -246,7 +243,7 @@ pub async fn authenticate_middleware(
         })?;
     if endpoint == CONFIDENTIAL_CHAT_COMPLETIONS_PATH || endpoint == CHAT_COMPLETIONS_PATH {
         // NOTE: Chat completions endpoints processed by Atoma nodes require a max_tokens field
-        body_json[MAX_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
+        body_json[MAX_COMPLETION_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
     }
     let endpoint = req_parts.uri.path().to_string();
 

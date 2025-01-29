@@ -568,12 +568,20 @@ components:
             format: float
           propertyNames:
             type: string
+        max_completion_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: The maximum number of tokens to generate in the chat completion
+          example: 2048
         max_tokens:
           type:
           - integer
           - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
+          deprecated: true
           example: 2048
         messages:
           type: array

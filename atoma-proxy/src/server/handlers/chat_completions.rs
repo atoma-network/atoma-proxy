@@ -22,7 +22,7 @@ use super::{
     handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
     RESPONSE_HASH_KEY,
 };
-use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS, MODEL};
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -706,7 +706,7 @@ pub struct RequestModelChatCompletions {
 
     /// The maximum number of tokens to generate in the completion
     /// This limits the length of the model's response
-    max_tokens: u64,
+    max_completion_tokens: u64,
 }
 
 impl RequestModel for RequestModelChatCompletions {
@@ -726,15 +726,16 @@ impl RequestModel for RequestModelChatCompletions {
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
-        let max_tokens = request
-            .get(MAX_TOKENS)
+        let max_completion_tokens = request
+            .get(MAX_COMPLETION_TOKENS)
+            .or(request.get(MAX_TOKENS))
             .and_then(|m| m.as_u64())
             .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Self {
             model: model.to_string(),
             messages: messages.to_vec(),
-            max_tokens,
+            max_completion_tokens,
         })
     }
 
@@ -779,7 +780,7 @@ impl RequestModel for RequestModelChatCompletions {
             // add 1 token as a safety margin, for the role name of the message
             total_num_tokens += 1;
         }
-        total_num_tokens += self.max_tokens;
+        total_num_tokens += self.max_completion_tokens;
         Ok(total_num_tokens)
     }
 }
@@ -842,7 +843,13 @@ pub struct ChatCompletionRequest {
     /// The maximum number of tokens to generate in the chat completion
     #[schema(example = 2048)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[deprecated = "It is recommended to use max_completion_tokens instead"]
     pub max_tokens: Option<i32>,
+
+    /// The maximum number of tokens to generate in the chat completion
+    #[schema(example = 2048)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<i32>,
 
     /// Number between -2.0 and 2.0. Positive values penalize new tokens based on
     /// whether they appear in the text so far
