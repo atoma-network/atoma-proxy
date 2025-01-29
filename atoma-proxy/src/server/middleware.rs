@@ -244,11 +244,6 @@ pub async fn authenticate_middleware(
             message: format!("Failed to parse body as JSON: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
-    if endpoint == CONFIDENTIAL_CHAT_COMPLETIONS_PATH || endpoint == CHAT_COMPLETIONS_PATH {
-        // NOTE: Chat completions endpoints processed by Atoma nodes require a max_tokens field
-        body_json[MAX_COMPLETION_TOKENS] = serde_json::json!(DEFAULT_MAX_TOKENS);
-    }
-    let endpoint = req_parts.uri.path().to_string();
 
     // Authenticate request and lock compute units for a Stack.
     //
