@@ -213,6 +213,37 @@ pub fn verify_response_hash_and_signature(
     Ok(())
 }
 
+/// Verifies that a response hash matches the computed hash of the payload
+///
+/// This function computes a Blake2b hash of the payload (excluding the response_hash and signature fields)
+/// and compares it with the provided response hash to ensure data integrity.
+///
+/// # Arguments
+///
+/// * `value` - The JSON payload to verify, containing the full response data
+/// * `response_hash` - The expected Blake2b hash to verify against
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the computed hash matches the provided response hash,
+/// or an error if verification fails.
+///
+/// # Errors
+///
+/// Returns `AtomaProxyError::InternalError` if:
+/// - The computed Blake2b hash does not match the provided response hash
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let payload = serde_json::json!({
+///     "data": "example",
+///     "response_hash": "base64_encoded_hash",
+///     "signature": "signature_data"
+/// });
+/// let response_hash = decode_base64("base64_encoded_hash");
+/// verify_response_hash(&payload, &response_hash)?;
+/// ```
 #[instrument(level = "debug", skip_all)]
 fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Result<()> {
     let mut value_tmp = value.clone();
