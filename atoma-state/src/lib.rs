@@ -1,3 +1,8 @@
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::doc_markdown)]
+
 pub mod config;
 pub mod handlers;
 pub mod state_manager;

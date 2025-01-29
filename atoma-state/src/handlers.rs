@@ -11,7 +11,7 @@ use tracing::{info, instrument, trace};
 use crate::{
     state_manager::Result,
     timestamp_to_datetime_or_now,
-    types::{AtomaAtomaStateManagerEvent, Stack},
+    types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
     AtomaStateManager, AtomaStateManagerError,
 };
 
@@ -467,7 +467,7 @@ pub(crate) async fn handle_stack_try_settle_event(
         event = "handle-stack-try-settle-event",
         "Processing stack try settle event"
     );
-    let stack_settlement_ticket = event.into();
+    let stack_settlement_ticket = StackSettlementTicket::try_from(event)?;
     state_manager
         .state
         .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
@@ -1333,7 +1333,7 @@ pub(crate) async fn handle_node_key_rotation_event(
 }
 
 mod utils {
-    use super::*;
+    use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
     use dcap_qvl::quote::{Quote, Report};
@@ -1376,7 +1376,7 @@ mod utils {
     /// async fn verify_attestation() {
     ///     let quote_data = vec![/* quote data */];
     ///     let public_key = vec![/* public key data */];
-    ///     
+    ///
     ///     match verify_quote_v4_attestation(&quote_data, &public_key).await {
     ///         Ok(()) => println!("Attestation verified successfully"),
     ///         Err(e) => eprintln!("Attestation verification failed: {:?}", e),
@@ -1389,7 +1389,7 @@ mod utils {
     /// * Uses Intel's PCCS service at a hardcoded URL with a 10-second timeout
     /// * The `new_public_key` parameter is currently passed through but not used in the verification process
     /// * This function is specifically for Quote V4 format attestations
-    pub(crate) async fn verify_quote_v4_attestation(
+    pub async fn verify_quote_v4_attestation(
         quote_bytes: &[u8],
         new_public_key: &[u8],
     ) -> Result<()> {
@@ -1398,6 +1398,7 @@ mod utils {
         let fmspc = quote
             .fmspc()
             .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
+        #[allow(clippy::uninlined_format_args)]
         let certification_tcb_url = format!(
             "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc={:?}&update={TCB_UPDATE_MODE}",
             fmspc

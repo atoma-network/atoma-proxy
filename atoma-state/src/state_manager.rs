@@ -34,7 +34,8 @@ pub struct AtomaStateManager {
 
 impl AtomaStateManager {
     /// Constructor
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         db: PgPool,
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
         state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
@@ -52,6 +53,18 @@ impl AtomaStateManager {
     ///
     /// This method establishes a connection to the Postgres database using the provided URL,
     /// creates all necessary tables in the database, and returns a new `AtomaStateManager` instance.
+    ///
+    /// # Arguments
+    /// * `database_url` - PostgreSQL connection URL
+    /// * `event_subscriber_receiver` - Channel for receiving Atoma events
+    /// * `state_manager_receiver` - Channel for receiving state manager events
+    /// * `sui_address` - Sui blockchain address
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Failed to connect to the database
+    /// - Failed to create the database pool
+    /// - Failed to run database migrations
     pub async fn new_from_url(
         database_url: &str,
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
@@ -196,11 +209,20 @@ pub struct AtomaState {
 
 impl AtomaState {
     /// Constructor
-    pub fn new(db: PgPool) -> Self {
+    #[must_use]
+    pub const fn new(db: PgPool) -> Self {
         Self { db }
     }
 
-    /// Creates a new `AtomaState` instance from a database URL.
+    /// Creates a new state manager instance from a database URL.
+    ///
+    /// # Arguments
+    /// * `database_url` - PostgreSQL connection URL
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Failed to connect to the database
+    /// - Failed to create the database pool
     pub async fn new_from_url(database_url: &str) -> Result<Self> {
         let db = PgPool::connect(database_url).await?;
         // run migrations
@@ -262,41 +284,41 @@ impl AtomaState {
     ) -> Result<Option<Stack>> {
         // TODO: filter also by security level and other constraints
         let mut query = String::from(
-            r#"
+            r"
             WITH selected_stack AS (
                 SELECT stacks.stack_small_id
                 FROM stacks
-                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id"#,
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id",
         );
 
         if is_confidential {
-            query.push_str(r#"
-                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.node_small_id"#);
+            query.push_str(r"
+                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.node_small_id");
         }
 
         query.push_str(
-            r#"
+            r"
                 WHERE tasks.model_name = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
-                AND stacks.user_id = $3"#,
+                AND stacks.user_id = $3",
         );
 
         if is_confidential {
             query.push_str(
-                r#"
+                r"
                 AND tasks.security_level = 1
-                AND node_public_keys.is_valid = true"#,
+                AND node_public_keys.is_valid = true",
             );
         }
 
         query.push_str(
-            r#"
+            r"
                 LIMIT 1
             )
             UPDATE stacks
             SET already_computed_units = already_computed_units + $2
             WHERE stack_small_id IN (SELECT stack_small_id FROM selected_stack)
-            RETURNING stacks.*"#,
+            RETURNING stacks.*",
         );
 
         let stack = sqlx::query(&query)
@@ -380,10 +402,10 @@ impl AtomaState {
     /// async fn find_cheapest_node(state: &AtomaState) -> anyhow::Result<()> {
     ///     // Find cheapest non-confidential node for GPT-4
     ///     let regular_node = state.get_cheapest_node_for_model("gpt-4", false).await?;
-    ///     
+    ///
     ///     // Find cheapest confidential node for GPT-4
     ///     let confidential_node = state.get_cheapest_node_for_model("gpt-4", true).await?;
-    ///     
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -395,44 +417,44 @@ impl AtomaState {
     ) -> Result<Option<CheapestNode>> {
         // TODO: benchmark this query performance
         let mut query = String::from(
-            r#"
+            r"
             WITH latest_rotation AS (
-                SELECT key_rotation_counter 
-                FROM key_rotations 
-                ORDER BY key_rotation_counter DESC 
+                SELECT key_rotation_counter
+                FROM key_rotations
+                ORDER BY key_rotation_counter DESC
                 LIMIT 1
             )
-            SELECT tasks.task_small_id, node_subscriptions.price_per_one_million_compute_units, 
+            SELECT tasks.task_small_id, node_subscriptions.price_per_one_million_compute_units,
                 node_subscriptions.max_num_compute_units, node_subscriptions.node_small_id
             FROM tasks
-            INNER JOIN node_subscriptions ON tasks.task_small_id = node_subscriptions.task_small_id"#,
+            INNER JOIN node_subscriptions ON tasks.task_small_id = node_subscriptions.task_small_id",
         );
 
         if is_confidential {
-            query.push_str(r#"
+            query.push_str(r"
             INNER JOIN node_public_keys ON node_public_keys.node_small_id = node_subscriptions.node_small_id
-            INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter"#);
+            INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter");
         }
 
         query.push_str(
-            r#"
+            r"
             WHERE tasks.is_deprecated = false
             AND tasks.model_name = $1
-            AND node_subscriptions.valid = true"#,
+            AND node_subscriptions.valid = true",
         );
 
         if is_confidential {
             query.push_str(
-                r#"
+                r"
             AND tasks.security_level = 1
-            AND node_public_keys.is_valid = true"#,
+            AND node_public_keys.is_valid = true",
             );
         }
 
         query.push_str(
-            r#"
-            ORDER BY node_subscriptions.price_per_one_million_compute_units 
-            LIMIT 1"#,
+            r"
+            ORDER BY node_subscriptions.price_per_one_million_compute_units
+            LIMIT 1",
         );
 
         let node_settings = sqlx::query(&query)
@@ -488,12 +510,12 @@ impl AtomaState {
     /// async fn encrypt_for_node(state: &AtomaState) -> anyhow::Result<()> {
     ///     // Find a node that can handle GPT-4 requests with up to1000 tokens
     ///     let node_key = state.select_node_public_key_for_encryption("gpt-4", 1000).await?;
-    ///     
+    ///
     ///     if let Some(node_key) = node_key {
     ///         // Use the node's public key for encryption
     ///         // ...
     ///     }
-    ///     
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -504,7 +526,7 @@ impl AtomaState {
         max_num_tokens: i64,
     ) -> Result<Option<NodePublicKey>> {
         let node = sqlx::query(
-            r#"
+            r"
             SELECT node_public_keys.public_key as public_key, node_public_keys.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
                 FROM node_public_keys
                 INNER JOIN stacks ON stacks.selected_node_id = node_public_keys.node_small_id
@@ -516,7 +538,7 @@ impl AtomaState {
                 AND node_public_keys.is_valid = true
                 ORDER BY stacks.price_per_one_million_compute_units ASC
                 LIMIT 1
-            "#,
+            ",
         )
         .bind(model)
         .bind(max_num_tokens)
@@ -550,15 +572,15 @@ impl AtomaState {
         available_compute_units: i64,
     ) -> Result<bool> {
         let result = sqlx::query_scalar::<_, bool>(
-            r#"
+            r"
             WITH latest_rotation AS (
-                SELECT key_rotation_counter 
-                FROM key_rotations 
-                ORDER BY key_rotation_counter DESC 
+                SELECT key_rotation_counter
+                FROM key_rotations
+                ORDER BY key_rotation_counter DESC
                 LIMIT 1
             )
             SELECT EXISTS (
-                SELECT 1 
+                SELECT 1
                 FROM stacks
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
                 INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.selected_node_id
@@ -569,7 +591,7 @@ impl AtomaState {
                 AND tasks.is_deprecated = false
                 AND node_public_keys.is_valid = true
                 AND stacks.in_settle_period = false
-            )"#,
+            )",
         )
         .bind(stack_small_id)
         .bind(available_compute_units)
@@ -605,12 +627,12 @@ impl AtomaState {
     /// async fn get_node_key(state: &AtomaState) -> anyhow::Result<()> {
     ///     let node_id = 123;
     ///     let node_key = state.select_node_public_key_for_encryption_for_node(node_id).await?;
-    ///     
+    ///
     ///     if let Some(key) = node_key {
     ///         // Use the node's public key for encryption
     ///         // ...
     ///     }
-    ///     
+    ///
     ///     Ok(())
     /// }
     /// ```
@@ -620,7 +642,7 @@ impl AtomaState {
         node_small_id: i64,
     ) -> Result<Option<NodePublicKey>> {
         let node_public_key =
-            sqlx::query(r#"SELECT node_small_id, public_key FROM node_public_keys WHERE node_small_id = $1 and is_valid = true"#)
+            sqlx::query(r"SELECT node_small_id, public_key FROM node_public_keys WHERE node_small_id = $1 and is_valid = true")
                 .bind(node_small_id)
                 .fetch_optional(&self.db)
                 .await?;
@@ -1129,8 +1151,8 @@ impl AtomaState {
         max_num_compute_units: i64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_subscriptions 
-                (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid) 
+            "INSERT INTO node_subscriptions
+                (node_small_id, task_small_id, price_per_one_million_compute_units, max_num_compute_units, valid)
                 VALUES ($1, $2, $3, $4, TRUE)",
         )
             .bind(node_small_id)
@@ -1320,7 +1342,7 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn get_stack(state_manager: &AtomaStateManager, stack_small_id: i64) -> Result<Stack, AtomaStateManagerError> {  
+    /// async fn get_stack(state_manager: &AtomaStateManager, stack_small_id: i64) -> Result<Stack, AtomaStateManagerError> {
     ///     state_manager.get_stack(stack_id).await
     /// }
     /// ```
@@ -1567,7 +1589,7 @@ impl AtomaState {
     /// async fn get_filled_stacks(state_manager: &AtomaStateManager) -> Result<Vec<Stack>, AtomaStateManagerError> {
     ///     let node_ids = &[1, 2, 3];  // Check stacks for these nodes
     ///     let threshold = 0.8;        // Look for stacks that are 80% or more filled
-    ///     
+    ///
     ///     state_manager.get_almost_filled_stacks(node_ids, threshold).await
     /// }
     /// ```
@@ -1671,7 +1693,7 @@ impl AtomaState {
     ) -> Result<Option<Stack>> {
         // Single query that updates and returns the modified row
         let maybe_stack = sqlx::query_as::<_, Stack>(
-            r#"
+            r"
             UPDATE stacks
             SET already_computed_units = already_computed_units + $1
             WHERE stack_small_id = $2
@@ -1679,7 +1701,7 @@ impl AtomaState {
             AND num_compute_units - already_computed_units >= $1
             AND in_settle_period = false
             RETURNING *
-            "#,
+            ",
         )
         .bind(num_compute_units)
         .bind(stack_small_id)
@@ -1720,12 +1742,12 @@ impl AtomaState {
     /// async fn lock_units(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
     ///     let stack_small_id = 1;
     ///     let units_to_lock = 100;
-    ///     
+    ///
     ///     state_manager.lock_compute_units_for_stack(stack_small_id, units_to_lock).await
     /// }
     /// ```
     #[instrument(
-        level = "trace",    
+        level = "trace",
         skip_all,
         fields(
             %stack_small_id,
@@ -1738,9 +1760,9 @@ impl AtomaState {
         available_compute_units: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE stacks 
-            SET already_computed_units = already_computed_units + $1 
-            WHERE stack_small_id = $2 
+            "UPDATE stacks
+            SET already_computed_units = already_computed_units + $1
+            WHERE stack_small_id = $2
             AND already_computed_units + $1 <= num_compute_units",
         )
         .bind(available_compute_units)
@@ -1778,7 +1800,7 @@ impl AtomaState {
     ///
     /// async fn insert_stack(state_manager: &AtomaStateManager, stack: Stack) -> Result<(), AtomaStateManagerError> {
     ///     state_manager.insert_new_stack(stack).await
-    /// }   
+    /// }
     /// ```
     #[instrument(
         level = "trace",
@@ -1797,8 +1819,8 @@ impl AtomaState {
         acquired_timestamp: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO stacks 
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp) 
+            "INSERT INTO stacks
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
             .bind(stack.owner)
@@ -1907,8 +1929,8 @@ impl AtomaState {
         total_tokens: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE stacks 
-            SET already_computed_units = already_computed_units - ($1 - $2) 
+            "UPDATE stacks
+            SET already_computed_units = already_computed_units - ($1 - $2)
             WHERE stack_small_id = $3",
         )
         .bind(estimated_total_tokens)
@@ -2065,19 +2087,19 @@ impl AtomaState {
     ) -> Result<()> {
         let mut tx = self.db.begin().await?;
         sqlx::query(
-            "INSERT INTO stack_settlement_tickets 
+            "INSERT INTO stack_settlement_tickets
                 (
-                    stack_small_id, 
-                    selected_node_id, 
-                    num_claimed_compute_units, 
-                    requested_attestation_nodes, 
-                    committed_stack_proofs, 
-                    stack_merkle_leaves, 
-                    dispute_settled_at_epoch, 
-                    already_attested_nodes, 
-                    is_in_dispute, 
-                    user_refund_amount, 
-                    is_claimed) 
+                    stack_small_id,
+                    selected_node_id,
+                    num_claimed_compute_units,
+                    requested_attestation_nodes,
+                    committed_stack_proofs,
+                    stack_merkle_leaves,
+                    dispute_settled_at_epoch,
+                    already_attested_nodes,
+                    is_in_dispute,
+                    user_refund_amount,
+                    is_claimed)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(stack_settlement_ticket.stack_small_id)
@@ -2102,8 +2124,8 @@ impl AtomaState {
         // Also update the stack to set in_settle_period to true
         sqlx::query(
             "INSERT into stats_stacks (timestamp,settled_num_compute_units) VALUES ($1,$2)
-             ON CONFLICT (timestamp) 
-             DO UPDATE SET 
+             ON CONFLICT (timestamp)
+             DO UPDATE SET
                 settled_num_compute_units = stats_stacks.settled_num_compute_units + EXCLUDED.settled_num_compute_units"
         )
         .bind(timestamp)
@@ -2157,7 +2179,7 @@ impl AtomaState {
         new_hash: [u8; 32],
     ) -> Result<()> {
         let rows_affected = sqlx::query(
-            "UPDATE stacks 
+            "UPDATE stacks
             SET total_hash = total_hash || $1,
                 num_total_messages = num_total_messages + 1
             WHERE stack_small_id = $2",
@@ -2329,8 +2351,8 @@ impl AtomaState {
         let mut tx = self.db.begin().await?;
 
         let row = sqlx::query(
-            "SELECT committed_stack_proofs, stack_merkle_leaves, requested_attestation_nodes 
-             FROM stack_settlement_tickets 
+            "SELECT committed_stack_proofs, stack_merkle_leaves, requested_attestation_nodes
+             FROM stack_settlement_tickets
              WHERE stack_small_id = $1",
         )
         .bind(stack_small_id)
@@ -2362,10 +2384,10 @@ impl AtomaState {
         committed_stack_proofs[start..end].copy_from_slice(&committed_stack_proof[..32]);
 
         sqlx::query(
-            "UPDATE stack_settlement_tickets 
+            "UPDATE stack_settlement_tickets
              SET committed_stack_proofs = $1,
-                 stack_merkle_leaves = $2, 
-                 already_attested_nodes = CASE 
+                 stack_merkle_leaves = $2,
+                 already_attested_nodes = CASE
                      WHEN already_attested_nodes IS NULL THEN json_array($3)
                      ELSE json_insert(already_attested_nodes, '$[#]', $3)
                  END
@@ -2466,7 +2488,7 @@ impl AtomaState {
         user_refund_amount: i64,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE stack_settlement_tickets 
+            "UPDATE stack_settlement_tickets
                 SET user_refund_amount = $1,
                     is_claimed = true
                 WHERE stack_small_id = $2",
@@ -2570,7 +2592,7 @@ impl AtomaState {
         attestation_node_id: i64,
     ) -> Result<Vec<StackAttestationDispute>> {
         let disputes = sqlx::query(
-            "SELECT * FROM stack_attestation_disputes 
+            "SELECT * FROM stack_attestation_disputes
                 WHERE stack_small_id = $1 AND attestation_node_id = $2",
         )
         .bind(stack_small_id)
@@ -2732,8 +2754,8 @@ impl AtomaState {
         stack_attestation_dispute: StackAttestationDispute,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO stack_attestation_disputes 
-                (stack_small_id, attestation_commitment, attestation_node_id, original_node_id, original_commitment) 
+            "INSERT INTO stack_attestation_disputes
+                (stack_small_id, attestation_commitment, attestation_node_id, original_node_id, original_commitment)
                 VALUES ($1, $2, $3, $4, $5)",
         )
             .bind(stack_attestation_dispute.stack_small_id)
@@ -2818,7 +2840,7 @@ impl AtomaState {
     ///
     /// async fn get_address(state_manager: &AtomaStateManager, small_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
     ///    state_manager.get_node_public_address(small_id).await
-    /// }    
+    /// }
     /// ```
     #[instrument(level = "trace", skip_all, fields(%small_id))]
     pub async fn get_node_public_address(&self, small_id: i64) -> Result<Option<String>> {
@@ -2865,7 +2887,7 @@ impl AtomaState {
     ///     let (public_address, node_small_id) = state_manager
     ///         .get_node_public_url_and_small_id(stack_small_id)
     ///         .await?;
-    ///     
+    ///
     ///     println!("Node {} has public address: {:?}", node_small_id, public_address);
     ///     Ok(())
     /// }
@@ -2876,9 +2898,9 @@ impl AtomaState {
         stack_small_id: i64,
     ) -> Result<(Option<String>, i64)> {
         let result = sqlx::query_as::<_, (Option<String>, i64)>(
-            "SELECT n.public_address, n.node_small_id 
+            "SELECT n.public_address, n.node_small_id
              FROM stacks s
-             JOIN nodes n ON s.selected_node_id = n.node_small_id 
+             JOIN nodes n ON s.selected_node_id = n.node_small_id
              WHERE s.stack_small_id = $1",
         )
         .bind(stack_small_id)
@@ -2916,7 +2938,7 @@ impl AtomaState {
     ///
     /// async fn get_address(state_manager: &AtomaStateManager, small_id: i64) -> Result<Option<String>, AtomaStateManagerError> {
     ///    state_manager.get_node_sui_address(small_id).await
-    /// }    
+    /// }
     /// ```
     #[instrument(level = "trace", skip_all, fields(%small_id))]
     pub async fn get_node_sui_address(&self, small_id: i64) -> Result<Option<String>> {
@@ -2965,11 +2987,11 @@ impl AtomaState {
         time: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_throughput_performance 
-                (node_small_id, queries, input_tokens, output_tokens, time) 
-                VALUES ($1, $2, $3, $4, $5) 
+            "INSERT INTO node_throughput_performance
+                (node_small_id, queries, input_tokens, output_tokens, time)
+                VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (node_small_id)
-                DO UPDATE SET queries = node_throughput_performance.queries + EXCLUDED.queries, 
+                DO UPDATE SET queries = node_throughput_performance.queries + EXCLUDED.queries,
                               input_tokens = node_throughput_performance.input_tokens + EXCLUDED.input_tokens,
                               output_tokens = node_throughput_performance.output_tokens + EXCLUDED.output_tokens,
                               time = node_throughput_performance.time + EXCLUDED.time",
@@ -3021,11 +3043,11 @@ impl AtomaState {
         time: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_prefill_performance 
-                (node_small_id, queries, tokens, time) 
-                VALUES ($1, $2, $3, $4) 
+            "INSERT INTO node_prefill_performance
+                (node_small_id, queries, tokens, time)
+                VALUES ($1, $2, $3, $4)
                 ON CONFLICT (node_small_id)
-                DO UPDATE SET queries = node_prefill_performance.queries + EXCLUDED.queries, 
+                DO UPDATE SET queries = node_prefill_performance.queries + EXCLUDED.queries,
                               tokens = node_prefill_performance.tokens + EXCLUDED.tokens,
                               time = node_prefill_performance.time + EXCLUDED.time",
         )
@@ -3075,11 +3097,11 @@ impl AtomaState {
         time: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_decode_performance 
-                (node_small_id, queries, tokens, time) 
-                VALUES ($1, $2, $3, $4) 
+            "INSERT INTO node_decode_performance
+                (node_small_id, queries, tokens, time)
+                VALUES ($1, $2, $3, $4)
                 ON CONFLICT (node_small_id)
-                DO UPDATE SET queries = node_decode_performance.queries + EXCLUDED.queries, 
+                DO UPDATE SET queries = node_decode_performance.queries + EXCLUDED.queries,
                               tokens = node_decode_performance.tokens + EXCLUDED.tokens,
                               time = node_decode_performance.time + EXCLUDED.time",
         )
@@ -3126,9 +3148,9 @@ impl AtomaState {
         latency: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_latency_performance 
-                (node_small_id, queries, latency) 
-                VALUES ($1, $2, $3) 
+            "INSERT INTO node_latency_performance
+                (node_small_id, queries, latency)
+                VALUES ($1, $2, $3)
                 ON CONFLICT (node_small_id)
                 DO UPDATE SET queries = node_latency_performance.queries + EXCLUDED.queries,
                               latency = node_latency_performance.latency + EXCLUDED.latency",
@@ -3171,7 +3193,7 @@ impl AtomaState {
     /// async fn rotate_keys(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
     ///     let current_epoch = 100;
     ///     let rotation_counter = 5;
-    ///     
+    ///
     ///     state_manager.insert_new_key_rotation(current_epoch, rotation_counter).await
     /// }
     /// ```
@@ -3257,9 +3279,9 @@ impl AtomaState {
         sqlx::query(
             "INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (node_small_id)
-                DO UPDATE SET epoch = $2, 
+                DO UPDATE SET epoch = $2,
                               key_rotation_counter = $3,
-                              public_key = $4, 
+                              public_key = $4,
                               tee_remote_attestation_bytes = $5,
                               is_valid = $6",
         )
@@ -3886,7 +3908,7 @@ impl AtomaState {
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
             "INSERT INTO stats_compute_units_processed (timestamp, model_name, amount, time) VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (timestamp, model_name) DO UPDATE SET 
+                 ON CONFLICT (timestamp, model_name) DO UPDATE SET
                     amount = stats_compute_units_processed.amount + EXCLUDED.amount,
                     time = stats_compute_units_processed.time + EXCLUDED.time,
                     requests = stats_compute_units_processed.requests + 1",
@@ -3938,7 +3960,7 @@ impl AtomaState {
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
             "INSERT INTO stats_latency (timestamp, latency) VALUES ($1, $2)
-                 ON CONFLICT (timestamp) DO UPDATE SET 
+                 ON CONFLICT (timestamp) DO UPDATE SET
                     latency = stats_latency.latency + EXCLUDED.latency,
                     requests = stats_latency.requests + 1",
         )
@@ -3990,8 +4012,8 @@ impl AtomaState {
             .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
             "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
-                 ON CONFLICT (timestamp) 
-                 DO UPDATE SET 
+                 ON CONFLICT (timestamp)
+                 DO UPDATE SET
                     num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",
         )
         .bind(timestamp)
@@ -4154,10 +4176,10 @@ impl AtomaState {
     #[instrument(level = "trace", skip(self))]
     pub async fn top_up_balance(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query(
-            "INSERT INTO balance (user_id, usdc_balance) 
-                         VALUES ($1, $2) 
-                         ON CONFLICT (user_id) 
-                         DO UPDATE SET 
+            "INSERT INTO balance (user_id, usdc_balance)
+                         VALUES ($1, $2)
+                         ON CONFLICT (user_id)
+                         DO UPDATE SET
                             usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance",
         )
         .bind(user_id)
@@ -4336,7 +4358,7 @@ mod tests {
     async fn truncate_tables(db: &sqlx::PgPool) {
         // List all your tables here
         sqlx::query(
-            "TRUNCATE TABLE 
+            "TRUNCATE TABLE
                 tasks,
                 node_subscriptions,
                 stacks,
@@ -4459,7 +4481,7 @@ mod tests {
     ) -> sqlx::Result<()> {
         sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)")
             .bind(user_id)
-            .bind(format!("test_user_{}", user_id)) // Create unique username
+            .bind(format!("test_user_{user_id}")) // Create unique username
             .bind("test_password_hash") // Default password hash
             .execute(pool)
             .await?;
@@ -4949,9 +4971,7 @@ mod tests {
             assert_eq!(
                 result.is_some(),
                 should_succeed,
-                "Failed edge case: {} with {} tokens",
-                case,
-                tokens
+                "Failed edge case: {case} with {tokens} tokens"
             );
         }
 
@@ -4996,8 +5016,8 @@ mod tests {
 
         // Insert test node public key
         sqlx::query(
-            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(1i64)
         .bind(1i64)
@@ -5038,8 +5058,8 @@ mod tests {
             create_test_node(&state.db, i).await?;
             create_key_rotation(&state.db, i, i).await.unwrap();
             sqlx::query(
-                r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
-                   VALUES ($1, $2, $3, $4, $5, $6)"#,
+                r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+                   VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(i)
             .bind(i)
@@ -5083,8 +5103,8 @@ mod tests {
 
         // Insert invalid public key (empty)
         sqlx::query(
-            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(1i64)
         .bind(1i64)
@@ -5119,8 +5139,8 @@ mod tests {
 
         // Insert test data
         sqlx::query(
-            r#"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) 
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(1i64)
         .bind(1i64)
@@ -5163,51 +5183,51 @@ mod tests {
 
         // Set up test data
         sqlx::query(
-            r#"
+            r"
             INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
-            VALUES 
+            VALUES
                 (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0),  -- Confidential task
                 (2, 'task2', 'gpt-4', 0, 0, false, null, null, 0)   -- Non-confidential task
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO key_rotations (epoch, key_rotation_counter)
             VALUES (1, 1)
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-            VALUES 
+            VALUES
                 (1, 1, 1, 'key1', 'attestation1', true),   -- Valid key
                 (2, 1, 1, 'key2', 'attestation2', false),  -- Invalid key
                 (3, 1, 1, 'key3', 'attestation3', true)    -- Valid key
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO stacks (
                 stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
                 num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
             )
-            VALUES 
+            VALUES
                 (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now()),      -- Valid stack, confidential task
                 (2, '0x2', 'stack2', 1, 2, 100, 1000, 0, false, 'hash2', 1, 1, now()),      -- Invalid node key
                 (3, '0x3', 'stack3', 2, 1, 100, 1000, 0, false, 'hash3', 1, 1, now()),      -- Non-confidential task
                 (4, '0x4', 'stack4', 1, 1, 100, 1000, 900, false, 'hash4', 1, 1, now()),    -- Not enough compute units
                 (5, '0x5', 'stack5', 1, 1, 100, 1000, 0, true, 'hash5', 1, 1, now()),       -- In settle period
                 (6, '0x6', 'stack6', 1, 3, 100, 1000, 500, false, 'hash6', 1, 1, now())     -- Valid stack with partial usage
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
@@ -5236,8 +5256,7 @@ mod tests {
                 .await?;
             assert_eq!(
                 result, expected,
-                "Failed test case: {} (stack_id: {}, compute_units: {})",
-                description, stack_id, compute_units
+                "Failed test case: {description} (stack_id: {stack_id}, compute_units: {compute_units})",
             );
         }
 
@@ -5252,40 +5271,40 @@ mod tests {
 
         // Set up initial test data
         sqlx::query(
-            r#"
+            r"
             INSERT INTO tasks (task_small_id, task_id, model_name, security_level, role, is_deprecated, valid_until_epoch, deprecated_at_epoch, minimum_reputation_score)
             VALUES (1, 'task1', 'gpt-4', 1, 0, false, null, null, 0)
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO key_rotations (epoch, key_rotation_counter)
             VALUES (1, 1)
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
             VALUES (1, 1, 1, 'key1', 'attestation1', true)
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO stacks (
                 stack_small_id, owner, stack_id, task_small_id, selected_node_id, price_per_one_million_compute_units,
                 num_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp
             )
             VALUES (1, '0x1', 'stack1', 1, 1, 100, 1000, 0, false, 'hash1', 1, 1, now())
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
@@ -5298,10 +5317,10 @@ mod tests {
 
         // Simulate key rotation
         sqlx::query(
-            r#"
+            r"
             INSERT INTO key_rotations (epoch, key_rotation_counter)
             VALUES (2, 2)
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
@@ -5314,15 +5333,15 @@ mod tests {
 
         // Update node's key for new rotation
         sqlx::query(
-            r#"
-            UPDATE node_public_keys 
+            r"
+            UPDATE node_public_keys
             SET public_key = 'key1_new',
                 tee_remote_attestation_bytes = 'attestation1_new',
                 key_rotation_counter = 2,
                 epoch = 2
-            WHERE node_small_id = 1 
+            WHERE node_small_id = 1
             AND key_rotation_counter = 1
-            "#,
+            ",
         )
         .execute(&state.db)
         .await?;
