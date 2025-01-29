@@ -372,7 +372,7 @@ async fn handle_embeddings_response(
             .status()
             .canonical_reason()
             .unwrap_or("Unknown error");
-        handle_status_code_error(response.status(), &endpoint, &error)?;
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response =

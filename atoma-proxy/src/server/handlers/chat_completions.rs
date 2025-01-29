@@ -487,10 +487,11 @@ async fn handle_non_streaming_response(
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response = response
@@ -668,7 +669,7 @@ async fn handle_streaming_response(
             .status()
             .canonical_reason()
             .unwrap_or("Unknown error");
-        handle_status_code_error(response.status(), &endpoint, &error)?;
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let stream = response.bytes_stream();
