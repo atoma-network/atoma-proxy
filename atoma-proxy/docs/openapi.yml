@@ -574,7 +574,7 @@ components:
           - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
-          example: 2048
+          example: 4096
         max_tokens:
           type:
           - integer
@@ -582,7 +582,7 @@ components:
           format: int32
           description: The maximum number of tokens to generate in the chat completion
           deprecated: true
-          example: 2048
+          example: 4096
         messages:
           type: array
           items:
