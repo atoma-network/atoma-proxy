@@ -10,6 +10,7 @@ use fastcrypto::{
     traits::{ToFromBytes, VerifyingKey},
 };
 use flume::Sender;
+use reqwest::StatusCode;
 use sui_sdk::types::crypto::{PublicKey, Signature, SignatureScheme, SuiSignature};
 use tracing::instrument;
 
@@ -261,4 +262,43 @@ fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Resu
         });
     }
     Ok(())
+}
+
+/// Handles the status code returned by the inference service.
+///
+/// This function maps the status code to an appropriate error variant.
+///
+/// # Arguments
+///
+/// * `status_code` - The status code returned by the inference service
+/// * `endpoint` - The API endpoint path where the request was received
+/// * `error` - The error message returned by the inference service
+///
+/// # Returns
+///
+/// Returns an `AtomaServiceError` variant based on the status code.
+#[instrument(level = "info", skip_all, fields(endpoint))]
+pub fn handle_status_code_error(
+    status_code: StatusCode,
+    endpoint: &str,
+    error: &str,
+) -> Result<()> {
+    match status_code {
+        StatusCode::UNAUTHORIZED => Err(AtomaProxyError::AuthError {
+            auth_error: format!("Unauthorized response from inference service: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        StatusCode::INTERNAL_SERVER_ERROR => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned internal server error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        StatusCode::BAD_REQUEST => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned bad request error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        _ => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned non-success error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+    }
 }

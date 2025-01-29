@@ -24,8 +24,8 @@ use crate::server::{
 };
 
 use super::{
-    request_model::RequestModel, update_state_manager, verify_response_hash_and_signature,
-    RESPONSE_HASH_KEY,
+    handle_status_code_error, request_model::RequestModel, update_state_manager,
+    verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -368,10 +368,11 @@ async fn handle_embeddings_response(
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, &error)?;
     }
 
     let response =

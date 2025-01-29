@@ -16,7 +16,7 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
-use super::verify_response_hash_and_signature;
+use super::{handle_status_code_error, verify_response_hash_and_signature};
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
 
@@ -338,10 +338,11 @@ async fn handle_image_generation_response(
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, &error)?;
     }
 
     let response = response
