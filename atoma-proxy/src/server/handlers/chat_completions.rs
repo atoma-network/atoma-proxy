@@ -841,13 +841,13 @@ pub struct ChatCompletionRequest {
     pub stop: Option<Vec<String>>,
 
     /// The maximum number of tokens to generate in the chat completion
-    #[schema(example = 2048)]
+    #[schema(example = 4096)]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[deprecated = "It is recommended to use max_completion_tokens instead"]
     pub max_tokens: Option<i32>,
 
     /// The maximum number of tokens to generate in the chat completion
-    #[schema(example = 2048)]
+    #[schema(example = 4096)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_completion_tokens: Option<i32>,
 

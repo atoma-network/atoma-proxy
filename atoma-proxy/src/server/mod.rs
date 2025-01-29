@@ -18,7 +18,7 @@ use tracing::instrument;
 
 pub type Result<T> = std::result::Result<T, error::AtomaProxyError>;
 
-/// The max_tokens field in the request payload.
+/// The max_tokens field in the request payload, currently deprecated by the OpenAI API, in favor of max_completion_tokens.
 pub(crate) const MAX_TOKENS: &str = "max_tokens";
 
 /// The max_completion_tokens field in the request payload.
