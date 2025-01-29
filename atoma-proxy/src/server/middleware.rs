@@ -14,12 +14,15 @@ use serde_json::Value;
 use tracing::instrument;
 
 use super::{
-    error::AtomaProxyError, handlers::{
+    error::AtomaProxyError,
+    handlers::{
         chat_completions::{CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
         update_state_manager,
-    }, http_server::ProxyState, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS
+    },
+    http_server::ProxyState,
+    DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS,
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
