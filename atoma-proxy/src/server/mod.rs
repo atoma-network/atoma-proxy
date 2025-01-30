@@ -30,7 +30,7 @@ pub const MAX_TOKENS: &str = "max_tokens";
 pub const MAX_COMPLETION_TOKENS: &str = "max_completion_tokens";
 
 /// The default max_tokens value.
-pub const DEFAULT_MAX_TOKENS: u64 = 4_096;
+pub const DEFAULT_MAX_TOKENS: u64 = 8_192;
 
 /// The one million constant.
 pub const ONE_MILLION: u64 = 1_000_000;

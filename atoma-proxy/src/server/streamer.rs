@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
@@ -29,6 +29,9 @@ const DATA_PREFIX: &str = "data: ";
 
 /// The keep-alive chunk
 const KEEP_ALIVE_CHUNK: &[u8] = b": keep-alive\n\n";
+
+/// The keep-alive chunk as a string
+const KEEP_ALIVE_CHUNK_STR: &str = ": keep-alive\n\n";
 
 /// The choices key
 const CHOICES: &str = "choices";
@@ -60,6 +63,8 @@ pub struct Streamer {
     endpoint: String,
     /// A chunk buffer (needed as some chunks might be split into multiple parts)
     chunk_buffer: String,
+    /// The position in the keep-alive chunk buffer
+    keep_alive_pos: usize,
 }
 
 /// Represents the various states of a streaming process
@@ -100,6 +105,7 @@ impl Streamer {
             model_name,
             endpoint,
             chunk_buffer: String::new(),
+            keep_alive_pos: 0,
         }
     }
 
@@ -293,6 +299,29 @@ impl Stream for Streamer {
                         )))));
                     }
                 };
+
+                if let Some(remaining) = KEEP_ALIVE_CHUNK_STR.get(self.keep_alive_pos..) {
+                    if remaining.starts_with(chunk_str) {
+                        self.keep_alive_pos += chunk_str.len();
+
+                        if self.keep_alive_pos == KEEP_ALIVE_CHUNK_STR.len() {
+                            // Full keep-alive received
+                            self.keep_alive_pos = 0;
+                            return Poll::Pending;
+                        }
+                        return Poll::Pending;
+                    } else if self.keep_alive_pos > 0 {
+                        // Reset position if we had partial match but current chunk doesn't continue it
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Keep-alive chunk interrupted by non-matching chunk, resetting position"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(format!(
+                            "Keep-alive chunk interrupted by non-matching chunk, {chunk_str}",
+                        )))));
+                    }
+                }
 
                 let chunk_str = chunk_str.strip_prefix(DATA_PREFIX).unwrap_or(chunk_str);
 

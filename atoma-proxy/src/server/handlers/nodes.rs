@@ -31,7 +31,7 @@ const BODY_HASH_SIZE: usize = 32;
 /// in the request. We set a default value here to be used for node selection, as a upper
 /// bound for the number of tokens for each request.
 /// TODO: In the future, this number can be dynamically adjusted based on the model.
-pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 128_000;
+pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 8_192;
 
 #[derive(OpenApi)]
 #[openapi(paths(nodes_create, nodes_create_lock))]
