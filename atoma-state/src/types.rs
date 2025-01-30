@@ -55,7 +55,7 @@ pub struct UsdcPaymentRequest {
     pub proof_signature: Option<String>,
 }
 
-///Represents a computed units processed response
+/// Represents a computed units processed response
 ///
 /// This struct is used to represent the response for the get_compute_units_processed endpoint.
 /// The timestamp of the computed units processed measurement. We measure the computed units processed on hourly basis. We do these measurements for each model.

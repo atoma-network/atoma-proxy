@@ -277,7 +277,8 @@ impl Auth {
 
         let claims = Claims {
             user_id: claims.user_id,
-            exp: usize::try_from(expiration.timestamp()).unwrap(),
+            exp: usize::try_from(expiration.timestamp())
+                .map_err(|e| AuthError::AnyhowError(anyhow!("Failed to convert timestamp: {e}")))?,
             refresh_token_hash: Some(refresh_token_hash),
         };
         let token = encode(
@@ -537,11 +538,13 @@ impl Auth {
             .map(|c| {
                 BASE64_URL_CHARSET
                     .find(c)
-                    .map(|index| u8::try_from(index).unwrap())
-                    .map(|index| (0..6).rev().map(move |i| index >> i & 1))
-                    .ok_or_else(|| {
-                        AuthError::AnyhowError(anyhow!("base64_to_bitarry invalid input"))
+                    .map(|index| {
+                        u8::try_from(index).map_err(|e| {
+                            AuthError::AnyhowError(anyhow!("Failed to convert index: {e}"))
+                        })
                     })
+                    .unwrap()
+                    .map(|index| (0..6).rev().map(move |i| index >> i & 1))
             })
             .flatten_ok()
             .collect()
@@ -584,7 +587,12 @@ impl Auth {
             }
         }
 
-        let last_char_offset = (index_mod_4 + u8::try_from(s.len()).unwrap() - 1) % 4;
+        let last_char_offset = (index_mod_4
+            + u8::try_from(s.len())
+                .map_err(|e| AuthError::AnyhowError(anyhow!("Failed to convert length: {e}")))
+                .unwrap()
+            - 1)
+            % 4;
         match last_char_offset {
             3 => {}
             2 => {
@@ -851,7 +859,9 @@ impl Auth {
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::TopUpBalance {
                     user_id: claims.user_id,
-                    amount: i64::try_from(money_in.unwrap()).unwrap(),
+                    amount: i64::try_from(money_in.unwrap()).map_err(|e| {
+                        AuthError::AnyhowError(anyhow!("Failed to convert amount: {e}"))
+                    })?,
                 })?;
         }
         Ok(())
