@@ -316,12 +316,14 @@ impl Stream for Streamer {
                         return Poll::Pending;
                     } else if self.keep_alive_pos > 0 {
                         // Reset position if we had partial match but current chunk doesn't continue it
-                        warn!(
+                        error!(
                             target = "atoma-service-streamer",
-                            level = "warn",
+                            level = "error",
                             "Keep-alive chunk interrupted by non-matching chunk, resetting position"
                         );
-                        self.keep_alive_pos = 0;
+                        return Poll::Ready(Some(Err(Error::new(format!(
+                            "Keep-alive chunk interrupted by non-matching chunk, {chunk_str}",
+                        )))));
                     }
                 }
 
