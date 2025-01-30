@@ -16,13 +16,10 @@ use tracing::instrument;
 use super::{
     error::AtomaProxyError,
     handlers::{
-        chat_completions::{CHAT_COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-        update_state_manager,
+        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager,
     },
     http_server::ProxyState,
-    DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS,
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
@@ -239,7 +236,7 @@ pub async fn authenticate_middleware(
             message: format!("Failed to convert body to bytes: {}", e),
             endpoint: req_parts.uri.path().to_string(),
         })?;
-    let mut body_json: Value =
+    let body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to parse body as JSON: {}", e),
             endpoint: req_parts.uri.path().to_string(),
