@@ -18,7 +18,8 @@ pub struct AtomaAuthConfig {
 
 impl AtomaAuthConfig {
     /// Constructor
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         secret_key: String,
         access_token_lifetime: usize,
         refresh_token_lifetime: usize,

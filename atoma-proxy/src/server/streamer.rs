@@ -1,3 +1,6 @@
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::too_many_lines)]
+
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
@@ -148,7 +151,7 @@ impl Streamer {
         // Get input tokens
         let input_tokens = usage
             .get("prompt_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -160,7 +163,7 @@ impl Streamer {
         // Get output tokens
         let output_tokens = usage
             .get("completion_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -172,7 +175,7 @@ impl Streamer {
         // Get total tokens
         let total_tokens = usage
             .get("total_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -196,12 +199,10 @@ impl Streamer {
             error!(
                 target = "atoma-service-streamer",
                 level = "error",
-                "Error updating node throughput performance: {}",
-                e
+                "Error updating node throughput performance: {e:?}"
             );
             return Err(Error::new(format!(
-                "Error updating node throughput performance: {}",
-                e
+                "Error updating node throughput performance: {e:?}"
             )));
         }
 
@@ -223,8 +224,7 @@ impl Streamer {
                 e
             );
             return Err(Error::new(format!(
-                "Error updating node decode performance: {}",
-                e
+                "Error updating node decode performance: {e:?}"
             )));
         }
         if let Err(e) = self.state_manager_sender.send(
@@ -237,12 +237,10 @@ impl Streamer {
             error!(
                 target = "atoma-service-streamer",
                 level = "error",
-                "Error updating node prefill performance: {}",
-                e
+                "Error updating node prefill performance: {e:?}"
             );
             return Err(Error::new(format!(
-                "Error updating node prefill performance: {}",
-                e
+                "Error updating node prefill performance: {e:?}"
             )));
         }
 
@@ -261,8 +259,7 @@ impl Streamer {
                 e
             );
             return Err(Error::new(format!(
-                "Error updating stack num tokens: {}",
-                e
+                "Error updating stack num tokens: {e:?}"
             )));
         }
 
@@ -298,8 +295,7 @@ impl Stream for Streamer {
                             e
                         );
                         return Poll::Ready(Some(Err(Error::new(format!(
-                            "Invalid UTF-8 sequence: {}",
-                            e
+                            "Invalid UTF-8 sequence: {e:?}"
                         )))));
                     }
                 };
@@ -368,8 +364,7 @@ impl Stream for Streamer {
                                 e
                             );
                             return Poll::Ready(Some(Err(Error::new(format!(
-                                "Error parsing chunk: {}",
-                                e
+                                "Error parsing chunk: {e:?}"
                             )))));
                         }
 
@@ -399,8 +394,7 @@ impl Stream for Streamer {
                                 );
                                 self.chunk_buffer.clear();
                                 return Poll::Ready(Some(Err(Error::new(format!(
-                                    "Error parsing chunk: {}",
-                                    e
+                                    "Error parsing chunk: {e:?}"
                                 )))));
                             }
                         }
@@ -418,7 +412,7 @@ impl Stream for Streamer {
                         "Error verifying response: {}",
                         e
                     );
-                    Error::new(format!("Error verifying and signing response: {}", e))
+                    Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
                 if self.start_decode.is_none() {
@@ -437,23 +431,21 @@ impl Stream for Streamer {
                                 "Error updating node latency performance: {}",
                                 e
                             );
-                            Error::new(format!("Error updating node latency performance: {}", e))
+                            Error::new(format!("Error updating node latency performance: {e:?}"))
                         })?;
                 }
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH {
-                    let choices = match chunk.get(CHOICES).and_then(|choices| choices.as_array()) {
-                        Some(choices) => choices,
-                        None => {
-                            error!(
-                                target = "atoma-service-streamer",
-                                level = "error",
-                                "Error getting choices from chunk"
-                            );
-                            return Poll::Ready(Some(Err(Error::new(
-                                "Error getting choices from chunk",
-                            ))));
-                        }
+                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
+                    else {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error getting choices from chunk"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(
+                            "Error getting choices from chunk",
+                        ))));
                     };
 
                     if choices.is_empty() {
