@@ -18,7 +18,7 @@ pub const MODELS_PATH: &str = "/v1/models";
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(models_list), components(schemas(ModelList, Model)))]
-pub(crate) struct ModelsOpenApi;
+pub struct ModelsOpenApi;
 
 /// List models
 ///
@@ -45,7 +45,7 @@ pub async fn models_list(
         .map(|model| Model {
             id: model.to_string(),
             object: "model".to_string(),
-            created: 1686935002,
+            created: 1_686_935_002,
             owned_by: "atoma".to_string(),
         })
         .collect();

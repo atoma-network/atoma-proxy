@@ -67,7 +67,7 @@ struct Config {
 }
 
 impl Config {
-    async fn load(path: String) -> Self {
+    fn load(path: String) -> Self {
         Self {
             sui: AtomaSuiConfig::from_file_path(path.clone()),
             service: AtomaServiceConfig::from_file_path(path.clone()),
@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
 
-    let config = Config::load(args.config_path).await;
+    let config = Config::load(args.config_path);
     tracing::info!("Configuration loaded successfully");
 
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
-    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
 
     let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui)).await?;
 
@@ -223,6 +223,7 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
+    #[allow(clippy::redundant_pub_crate)]
     let ctrl_c = tokio::task::spawn(async move {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -234,7 +235,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let (sui_subscriber_result, server_result, state_manager_result, proxy_service_result, _) = try_join!(
+    let (sui_subscriber_result, server_result, state_manager_result, proxy_service_result, ()) = try_join!(
         sui_subscriber_handle,
         server_handle,
         state_manager_handle,
@@ -278,7 +279,7 @@ async fn main() -> Result<()> {
 /// async fn example() -> Result<()> {
 ///     let models = vec!["facebook/opt-125m".to_string()];
 ///     let revisions = vec!["main".to_string()];
-///     
+///
 ///     let tokenizers = initialize_tokenizers(&models, &revisions).await?;
 ///     Ok(())
 /// }

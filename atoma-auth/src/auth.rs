@@ -106,6 +106,10 @@ pub enum AuthError {
     ZkLoginNotEnabled,
     #[error("Sui error: {0}")]
     SuiError(#[from] SuiError),
+    #[error("Failed to convert integer: {0}")]
+    IntConversionError(#[from] std::num::TryFromIntError),
+    #[error("Failed to convert timestamp")]
+    TimestampConversionError,
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -131,7 +135,17 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Constructor
+    /// Constructor for the Auth struct.
+    ///
+    /// # Arguments
+    /// * `config` - Authentication configuration
+    /// * `state_manager_sender` - Channel for sending state manager events
+    /// * `sui` - Sui blockchain client instance
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Failed to fetch Google public keys (when google-oauth feature is enabled)
+    #[allow(clippy::unused_async)]
     pub async fn new(
         config: AtomaAuthConfig,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
@@ -171,7 +185,9 @@ impl Auth {
         let expiration = Utc::now() + Duration::days(self.refresh_token_lifetime as i64);
         let claims = Claims {
             user_id,
-            exp: expiration.timestamp() as usize,
+            exp: usize::try_from(expiration.timestamp())
+                .map_err(|_| AuthError::TimestampConversionError)
+                .unwrap(),
             refresh_token_hash: None,
         };
         let token = encode(
@@ -211,10 +227,9 @@ impl Auth {
 
         let claims = token_data.claims;
         if claims.refresh_token_hash.is_none() != is_refresh {
-            Err(AuthError::NotRefreshToken)
-        } else {
-            Ok(claims)
+            return Err(AuthError::NotRefreshToken);
         }
+        Ok(claims)
     }
 
     /// Check the validity of the refresh token
@@ -268,7 +283,9 @@ impl Auth {
 
         let claims = Claims {
             user_id: claims.user_id,
-            exp: expiration.timestamp() as usize,
+            exp: usize::try_from(expiration.timestamp())
+                .map_err(|_| AuthError::TimestampConversionError)
+                .unwrap(),
             refresh_token_hash: Some(refresh_token_hash),
         };
         let token = encode(
@@ -289,6 +306,7 @@ impl Auth {
     /// # Returns
     ///
     /// * `String` - The hashed password
+    #[must_use]
     pub fn hash_string(&self, text: &str) -> String {
         let mut hasher = Blake2b::new();
         hasher.update(text);
@@ -478,17 +496,22 @@ impl Auth {
         Ok(claims)
     }
 
-    /// Get the user id from the token
+    /// Get the user id from the token.
     /// This method will get the user id from the token
-    /// The method will check if the token is valid
+    /// and check if the token is valid.
     ///
     /// # Arguments
-    ///
     /// * `jwt` - The access token to be used to get the user id
     ///
     /// # Returns
-    ///
     /// * `Result<i64>` - The user id from the token
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The JWT token is invalid or expired
+    /// - The token's claims cannot be decoded
+    /// - The refresh token is invalid or revoked
+    /// - The token is not an access token
     pub async fn get_user_id_from_token(&self, jwt: &str) -> Result<i64> {
         let claims = self.get_claims_from_token(jwt).await?;
         Ok(claims.user_id)
@@ -522,11 +545,9 @@ impl Auth {
             .map(|c| {
                 BASE64_URL_CHARSET
                     .find(c)
-                    .map(|index| index as u8)
+                    .map(|index| u8::try_from(index).map_err(AuthError::IntConversionError))
+                    .unwrap()
                     .map(|index| (0..6).rev().map(move |i| index >> i & 1))
-                    .ok_or_else(|| {
-                        AuthError::AnyhowError(anyhow!("base64_to_bitarry invalid input"))
-                    })
             })
             .flatten_ok()
             .collect()
@@ -551,7 +572,7 @@ impl Auth {
     }
 
     /// Parse the base64 string, add paddings based on offset, and convert to a bytearray.
-    fn decode_base64_url(s: &str, index_mod_4: &u8) -> Result<String> {
+    fn decode_base64_url(s: &str, index_mod_4: u8) -> Result<String> {
         if s.len() < 2 {
             return Err(anyhow!("Base64 string smaller than 2"))?;
         }
@@ -569,7 +590,12 @@ impl Auth {
             }
         }
 
-        let last_char_offset = (index_mod_4 + s.len() as u8 - 1) % 4;
+        let last_char_offset = (index_mod_4
+            + u8::try_from(s.len())
+                .map_err(|e| AuthError::AnyhowError(anyhow!("Failed to convert length: {e}")))
+                .unwrap()
+            - 1)
+            % 4;
         match last_char_offset {
             3 => {}
             2 => {
@@ -625,7 +651,7 @@ impl Auth {
                 )?;
                 let iss = Self::decode_base64_url(
                     &zk_login_authenticator.inputs.iss_base64_details.value,
-                    &zk_login_authenticator.inputs.iss_base64_details.index_mod_4,
+                    zk_login_authenticator.inputs.iss_base64_details.index_mod_4,
                 )?;
                 let re = Regex::new(r#""iss":"(.*)".*"#).unwrap();
                 let captures = re.captures(&iss).unwrap();
@@ -836,7 +862,9 @@ impl Auth {
             self.state_manager_sender
                 .send(AtomaAtomaStateManagerEvent::TopUpBalance {
                     user_id: claims.user_id,
-                    amount: money_in.unwrap() as i64,
+                    amount: i64::try_from(money_in.unwrap()).map_err(|e| {
+                        AuthError::AnyhowError(anyhow!("Failed to convert amount: {e}"))
+                    })?,
                 })?;
         }
         Ok(())
@@ -927,8 +955,8 @@ secret_key = "secret_key"
 access_token_lifetime = 1
 refresh_token_lifetime = 1
         "#,
-            sui_config_path.to_str().unwrap().replace("\\", "\\\\"),
-            sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
+            sui_config_path.to_str().unwrap().replace('\\', "\\\\"),
+            sui_keystore_path.to_str().unwrap().replace('\\', "\\\\")
         );
 
         let mut file = File::create(&workspace_cargo_toml_path).unwrap();
@@ -949,7 +977,7 @@ envs:
 active_env: testnet
 active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e7160381b"
 "#,
-                    sui_keystore_path.to_str().unwrap().replace("\\", "\\\\")
+                    sui_keystore_path.to_str().unwrap().replace('\\', "\\\\")
                 )
                 .as_bytes(),
             )
@@ -978,7 +1006,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
         let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
-        let sui = crate::Sui::new(&sui_config).await.unwrap();
+        let sui = crate::Sui::new(&sui_config).unwrap();
         let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)))
             .await
             .unwrap();

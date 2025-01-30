@@ -95,7 +95,7 @@ pub fn openapi_router() -> Router {
                 components.add_security_scheme(
                     "bearerAuth",
                     SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
-                )
+                );
             }
         }
     }
@@ -118,7 +118,7 @@ pub fn openapi_router() -> Router {
         let spec_path = docs_dir.join("openapi.yml");
         fs::write(&spec_path, spec).expect("Failed to write OpenAPI spec to file");
 
-        println!("OpenAPI spec written to: {:?}", spec_path);
+        println!("OpenAPI spec written to: {spec_path:?}");
     }
 
     Router::new().merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi))

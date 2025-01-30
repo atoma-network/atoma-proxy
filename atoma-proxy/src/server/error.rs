@@ -107,7 +107,7 @@ impl AtomaProxyError {
     /// - `"MODEL_ERROR"` for ML model errors
     /// - `"AUTH_ERROR"` for authentication failures
     /// - `"INTERNAL_ERROR"` for unexpected server errors
-    fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::InvalidBody { .. } => "INVALID_BODY",
             Self::AuthError { .. } => "AUTH_ERROR",
@@ -135,7 +135,7 @@ impl AtomaProxyError {
     /// - For internal errors: A generic server error message
     fn client_message(&self) -> String {
         match self {
-            Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
+            Self::InvalidBody { message, .. } => format!("Invalid request body: {message}"),
             Self::AuthError { .. } => "Authentication failed".to_string(),
             Self::InternalError { .. } => "Internal server error occurred".to_string(),
             Self::NotFound { .. } => "Resource not found".to_string(),
@@ -154,7 +154,7 @@ impl AtomaProxyError {
     /// # Returns
     ///
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
-    pub fn status_code(&self) -> StatusCode {
+    pub const fn status_code(&self) -> StatusCode {
         match self {
             Self::InvalidBody { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
@@ -175,12 +175,12 @@ impl AtomaProxyError {
     /// A `String` containing the API endpoint path where the error was encountered.
     fn endpoint(&self) -> String {
         match self {
-            Self::InvalidBody { endpoint, .. } => endpoint.clone(),
-            Self::AuthError { endpoint, .. } => endpoint.clone(),
-            Self::InternalError { endpoint, .. } => endpoint.clone(),
-            Self::NotFound { endpoint, .. } => endpoint.clone(),
-            Self::NotImplemented { endpoint, .. } => endpoint.clone(),
-            Self::ServiceUnavailable { endpoint, .. } => endpoint.clone(),
+            Self::InvalidBody { endpoint, .. }
+            | Self::AuthError { endpoint, .. }
+            | Self::InternalError { endpoint, .. }
+            | Self::NotFound { endpoint, .. }
+            | Self::NotImplemented { endpoint, .. }
+            | Self::ServiceUnavailable { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -201,12 +201,12 @@ impl AtomaProxyError {
     /// - For internal errors: The detailed internal error message
     fn message(&self) -> String {
         match self {
-            Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
-            Self::AuthError { auth_error, .. } => format!("Authentication error: {}", auth_error),
-            Self::InternalError { message, .. } => format!("Internal server error: {}", message),
+            Self::InvalidBody { message, .. } => format!("Invalid request body: {message}"),
+            Self::AuthError { auth_error, .. } => format!("Authentication error: {auth_error}"),
+            Self::InternalError { message, .. } => format!("Internal server error: {message}"),
             Self::NotFound { .. } => "Resource not found".to_string(),
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
-            Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {}", message),
+            Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {message}"),
         }
     }
 }

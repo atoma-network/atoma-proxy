@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// The path for the health check endpoint.
-pub(crate) const HEALTH_PATH: &str = "/health";
+pub const HEALTH_PATH: &str = "/health";
 
 /// State container for the Atoma proxy service that manages node operations and interactions.
 ///
@@ -96,10 +96,20 @@ pub struct ProxyServiceState {
 /// async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 ///     let proxy_service_state = ProxyServiceState::new(/* ... */);
 ///     let listener = TcpListener::bind("127.0.0.1:3000").await?;
-///     
+///
 ///     run_proxy_service(proxy_service_state, listener).await
 /// }
 /// ```
+/// # Errors
+/// Returns an error if:
+/// - Failed to accept new connections
+/// - Failed to spawn worker tasks
+/// - Failed to handle client requests
+/// - Failed to shut down gracefully
+///
+/// # Panics
+/// Panics if:
+/// - Failed to receive shutdown signal
 pub async fn run_proxy_service(
     proxy_service_state: ProxyServiceState,
     tcp_listener: TcpListener,
@@ -111,7 +121,7 @@ pub async fn run_proxy_service(
             shutdown_receiver
                 .changed()
                 .await
-                .expect("Error receiving shutdown signal")
+                .expect("Error receiving shutdown signal");
         });
     server.await?;
     Ok(())
@@ -160,7 +170,7 @@ pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Ro
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(health))]
-pub(crate) struct HealthOpenApi;
+pub struct HealthOpenApi;
 
 /// Health check endpoint for the proxy service.
 ///
@@ -175,6 +185,6 @@ pub(crate) struct HealthOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn health() -> StatusCode {
+pub async fn health() -> StatusCode {
     StatusCode::OK
 }

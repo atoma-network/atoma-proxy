@@ -10,14 +10,14 @@ use utoipa::ToSchema;
 use crate::state_manager::Result;
 
 /// Request payload for revoking an API token
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RevokeApiTokenRequest {
     /// The API token to be revoked
     pub api_token: String,
 }
 
 /// Request payload for user authentication
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AuthRequest {
     /// The user's unique identifier
     pub username: String,
@@ -30,7 +30,7 @@ pub struct AuthRequest {
 /// Contains both an access token and a refresh token for implementing token-based authentication:
 /// - The access token is used to authenticate API requests
 /// - The refresh token is used to obtain new access tokens when they expire
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct AuthResponse {
     /// JWT token used to authenticate API requests
     pub access_token: String,
@@ -41,7 +41,7 @@ pub struct AuthResponse {
 /// Request payload for updating the sui address for the user.
 ///
 /// Contains the signature of the user to prove ownership of the sui address.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProofRequest {
     pub signature: String,
 }
@@ -49,21 +49,34 @@ pub struct ProofRequest {
 /// Request payload for acknowledging a usdc payment.
 ///
 /// Contains the transaction digest of the payment.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UsdcPaymentRequest {
     pub transaction_digest: String,
     pub proof_signature: Option<String>,
 }
 
 /// Represents a computed units processed response
+///
 /// This struct is used to represent the response for the get_compute_units_processed endpoint.
 /// The timestamp of the computed units processed measurement. We measure the computed units processed on hourly basis. We do these measurements for each model.
 /// So the timestamp is the hour for which it is measured.
 /// The amount is the sum of all computed units processed in that hour. The requests is the total number of requests in that hour.
 /// And the time is the time taken to process all computed units in that hour.
+/// Tracks hourly measurements
+/// of compute unit processing for each model.
+/// Each measurement includes:
+/// - Total compute units processed
+/// - Number of requests handled
+/// - Processing time
+/// - Timestamp (hourly basis)
 ///
-/// E.g. you have two requests in the hour, one with 10 computed units and the other with 20 computed units.
-/// The amount will be 30, the requests will be 2 and the time will be the sum of the time taken to process the 10 and 20 computed units.
+/// # Example
+/// For two requests in an hour:
+/// - Request 1: 10 compute units
+/// - Request 2: 20 compute units
+/// - Total compute units = 30
+/// - Total requests = 2
+/// - Time = sum of processing time for both requests
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct ComputedUnitsProcessedResponse {
     /// Timestamp of the computed units processed measurement
@@ -80,19 +93,26 @@ pub struct ComputedUnitsProcessedResponse {
 
 /// Represents a user profile
 /// This struct is used to represent the response for the get_user_profile endpoint.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct UserProfile {
     /// Username of the user
     pub username: String,
 }
 
-/// Represents a latency response
-/// This struct is used to represent the response for the get_latency endpoint.
-/// The timestamp of the latency measurement. We measure the latency on hourly basis. So the timestamp is the hour for which it is measured.
-/// The latency is the sum of all latencies in that hour. And the number of requests is the total number of requests in that hour.
+/// Represents a latency response.
 ///
-/// E.g. you have two requests in the hour, one with 1 second latency and the other with 2 seconds latency.
-/// The latency will be 3 seconds and the requests will be 2.
+/// Tracks hourly latency measurements for the system.
+/// Each measurement includes:
+/// - Total latency for all requests in the hour
+/// - Number of requests processed
+/// - Timestamp of the measurement
+///
+/// # Example
+/// For two requests in an hour:
+/// - Request 1: 1 second latency
+/// - Request 2: 2 seconds latency
+/// - Total latency = 3 seconds
+/// - Total requests = 2
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct LatencyResponse {
     /// Timestamp of the latency measurement
@@ -103,14 +123,21 @@ pub struct LatencyResponse {
     pub requests: i64,
 }
 
-/// Represents a stats stacks response
-/// This struct is used to represent the response for the get_stats_stacks endpoint.
-/// The timestamp of the stats stacks measurement. We measure the stats stacks on hourly basis. So the timestamp is the hour for which it is measured.
-/// The number of compute units is the total number of compute units in the system. The settled number of compute units is the total number of settled compute units in the system.
+/// Represents a stats stacks response.
 ///
-/// E.g. you have new stack for 10 compute units and stack settled with 5 settled compute units during the hour.
-/// The number of compute units will be 10 and the settled number of compute units will be 5.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+/// This struct tracks hourly statistics about compute units in the system.
+/// Includes both total and settled compute units measured each hour.
+///
+/// Measurements include:
+/// - Total compute units in the system
+/// - Number of settled compute units
+/// - Timestamp of the measurement (hourly basis)
+///
+/// # Example
+/// If you have a new stack with 10 compute units and 5 units are settled:
+/// - Total compute units = 10
+/// - Settled compute units = 5
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct StatsStackResponse {
     pub timestamp: DateTime<Utc>,
     pub num_compute_units: i64,
@@ -118,7 +145,7 @@ pub struct StatsStackResponse {
 }
 
 /// Represents a task in the system
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct Task {
     /// Unique small integer identifier for the task
     pub task_small_id: i64,
@@ -142,7 +169,7 @@ pub struct Task {
 
 impl From<TaskRegisteredEvent> for Task {
     fn from(event: TaskRegisteredEvent) -> Self {
-        Task {
+        Self {
             task_id: event.task_id,
             task_small_id: event.task_small_id.inner as i64,
             role: event.role.inner as i16,
@@ -150,8 +177,8 @@ impl From<TaskRegisteredEvent> for Task {
             is_deprecated: false,
             valid_until_epoch: None,
             deprecated_at_epoch: None,
-            security_level: event.security_level.inner as i32,
-            minimum_reputation_score: event.minimum_reputation_score.map(|score| score as i16),
+            security_level: i32::from(event.security_level.inner),
+            minimum_reputation_score: event.minimum_reputation_score.map(i16::from),
         }
     }
 }
@@ -169,17 +196,18 @@ pub struct CheapestNode {
     pub node_small_id: i64,
 }
 
-/// Response for getting the node distribution
-/// This struct is used to represent the response for the get_node_distribution endpoint.
-/// The country is the country of the node and the count is the number of nodes in that country.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+/// Response for getting the node distribution.
+///
+/// This struct represents the response for the get_node_distribution endpoint.
+/// Contains the country of the node and the count of nodes in that country.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct NodeDistribution {
     pub country: Option<String>,
     pub count: i64,
 }
 
 /// Represents a stack of compute units for a specific task
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct Stack {
     /// Address of the owner of the stack
     pub owner: String,
@@ -208,7 +236,7 @@ pub struct Stack {
 
 impl From<StackCreatedEvent> for Stack {
     fn from(event: StackCreatedEvent) -> Self {
-        Stack {
+        Self {
             owner: event.owner,
             stack_id: event.stack_id,
             stack_small_id: event.stack_small_id.inner as i64,
@@ -225,7 +253,7 @@ impl From<StackCreatedEvent> for Stack {
 }
 
 /// Represents a settlement ticket for a compute stack
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct StackSettlementTicket {
     /// Unique small integer identifier for the stack
     pub stack_small_id: i64,
@@ -251,8 +279,10 @@ pub struct StackSettlementTicket {
     pub is_claimed: bool,
 }
 
-impl From<StackTrySettleEvent> for StackSettlementTicket {
-    fn from(event: StackTrySettleEvent) -> Self {
+impl TryFrom<StackTrySettleEvent> for StackSettlementTicket {
+    type Error = crate::state_manager::AtomaStateManagerError;
+
+    fn try_from(event: StackTrySettleEvent) -> std::result::Result<Self, Self::Error> {
         let num_attestation_nodes = event.requested_attestation_nodes.len();
         let expanded_size = 32 * num_attestation_nodes;
 
@@ -262,7 +292,7 @@ impl From<StackTrySettleEvent> for StackSettlementTicket {
         let mut expanded_leaves = event.stack_merkle_leaf;
         expanded_leaves.resize(expanded_size, 0);
 
-        StackSettlementTicket {
+        Ok(Self {
             stack_small_id: event.stack_small_id.inner as i64,
             selected_node_id: event.selected_node_id.inner as i64,
             num_claimed_compute_units: event.num_claimed_compute_units as i64,
@@ -281,12 +311,12 @@ impl From<StackTrySettleEvent> for StackSettlementTicket {
             is_in_dispute: false,
             user_refund_amount: 0,
             is_claimed: false,
-        }
+        })
     }
 }
 
 /// Represents a dispute in the stack attestation process
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct StackAttestationDispute {
     /// Unique small integer identifier for the stack involved in the dispute
     pub stack_small_id: i64,
@@ -302,7 +332,7 @@ pub struct StackAttestationDispute {
 
 impl From<StackAttestationDisputeEvent> for StackAttestationDispute {
     fn from(event: StackAttestationDisputeEvent) -> Self {
-        StackAttestationDispute {
+        Self {
             stack_small_id: event.stack_small_id.inner as i64,
             attestation_commitment: event.attestation_commitment,
             attestation_node_id: event.attestation_node_id.inner as i64,
@@ -313,7 +343,7 @@ impl From<StackAttestationDisputeEvent> for StackAttestationDispute {
 }
 
 /// Represents a node subscription to a task
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct NodeSubscription {
     /// Unique small integer identifier for the node subscription
     pub node_small_id: i64,
@@ -329,7 +359,7 @@ pub struct NodeSubscription {
 
 /// Represents a node's Diffie-Hellman public key so that a client
 /// can encrypt a message and the selected node can decrypt it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct NodePublicKey {
     /// Unique small integer identifier for the node
     pub node_small_id: i64,
@@ -384,7 +414,7 @@ pub enum AtomaAtomaStateManagerEvent {
     },
     /// Verifies if a stack is valid for confidential compute request
     VerifyStackForConfidentialComputeRequest {
-        /// Unique small integer identifier for the stack   
+        /// Unique small integer identifier for the stack
         stack_small_id: i64,
 
         /// Available compute units for the stack
