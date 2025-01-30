@@ -36,7 +36,7 @@ jobs:
       - name: cargo format
         run: cargo fmt --all -- --check
 
-clippy:
+  clippy:
     name: clippy
     runs-on: ubuntu-22.04
     steps:
@@ -59,6 +59,7 @@ clippy:
             -W clippy::perf \
             -W clippy::suspicious \
             -W clippy::correctness
+
   test:
     name: test
     runs-on: ubuntu-22.04
