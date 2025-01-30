@@ -318,7 +318,7 @@ impl Auth {
     /// This method will register a new user with a username and password
     /// The password is hashed and stored in the DB
     /// The method will generate a new refresh and access token
-    #[instrument(level = "info", skip(self))]
+    #[instrument(level = "info", skip(self, password))]
     pub async fn register(&self, username: &str, password: &str) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
         self.state_manager_sender
