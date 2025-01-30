@@ -146,4 +146,11 @@ allow-git = [
 ]
 
 [sources.allow-org]
-github = ["mystenmark", "bmwill", "mystenlabs", "nextest-rs", "rustls"]
+github = [
+	"mystenmark",
+	"bmwill",
+	"mystenlabs",
+	"nextest-rs",
+	"rustls",
+	"atoma-network",
+]
