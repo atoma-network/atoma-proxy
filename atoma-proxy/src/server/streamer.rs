@@ -303,11 +303,18 @@ impl Stream for Streamer {
                 if let Some(remaining) = KEEP_ALIVE_CHUNK_STR.get(self.keep_alive_pos..) {
                     if remaining.starts_with(chunk_str) {
                         self.keep_alive_pos += chunk_str.len();
-
-                        if self.keep_alive_pos == KEEP_ALIVE_CHUNK_STR.len() {
+                        info!(
+                            target: "atoma-service-streamer",
+                            "Partial keep-alive received, current position: {}",
+                            self.keep_alive_pos
+                        );
+                        if self.keep_alive_pos >= KEEP_ALIVE_CHUNK_STR.len() {
                             // Full keep-alive received
                             self.keep_alive_pos = 0;
-                            return Poll::Pending;
+                            info!(
+                                target: "atoma-service-streamer",
+                                "Full keep-alive received, resetting position"
+                            );
                         }
                         return Poll::Pending;
                     } else if self.keep_alive_pos > 0 {
