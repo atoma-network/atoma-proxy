@@ -66,7 +66,7 @@ pub struct RequestModelEmbeddings {
         CreateEmbeddingResponse
     ))
 )]
-pub(crate) struct EmbeddingsOpenApi;
+pub struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
     fn new(request: &Value) -> Result<Self> {
@@ -111,7 +111,7 @@ impl RequestModel for RequestModelEmbeddings {
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to encode input: {:?}", err),
+                message: format!("Failed to encode input: {err:?}"),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
@@ -206,7 +206,7 @@ pub async fn embeddings_create(
     paths(confidential_embeddings_create),
     components(schemas(ConfidentialComputeRequest,))
 )]
-pub(crate) struct ConfidentialEmbeddingsOpenApi;
+pub struct ConfidentialEmbeddingsOpenApi;
 
 /// Create confidential embeddings
 ///
@@ -275,9 +275,8 @@ pub async fn confidential_embeddings_create(
                 let total_tokens = response
                     .get("usage")
                     .and_then(|usage| usage.get("total_tokens"))
-                    .and_then(|total_tokens| total_tokens.as_u64())
-                    .map(|n| n as i64)
-                    .unwrap_or(0);
+                    .and_then(serde_json::Value::as_u64)
+                    .map_or(0, |n| n as i64);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -363,7 +362,7 @@ async fn handle_embeddings_response(
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send embeddings request: {:?}", err),
+            message: format!("Failed to send embeddings request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -380,7 +379,7 @@ async fn handle_embeddings_response(
             .json::<Value>()
             .await
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to parse embeddings response: {:?}", err),
+                message: format!("Failed to parse embeddings response: {err:?}"),
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -410,7 +409,7 @@ async fn handle_embeddings_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {:?}", err),
+            message: format!("Failed to update node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -437,7 +436,7 @@ async fn handle_embeddings_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 

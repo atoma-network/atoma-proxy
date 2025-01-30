@@ -25,10 +25,10 @@ pub mod nodes;
 pub mod request_model;
 
 /// Key for the response hash in the payload
-pub(crate) const RESPONSE_HASH_KEY: &str = "response_hash";
+pub const RESPONSE_HASH_KEY: &str = "response_hash";
 
 /// Key for the signature in the payload
-pub(crate) const SIGNATURE_KEY: &str = "signature";
+pub const SIGNATURE_KEY: &str = "signature";
 
 /// Updates the state manager with token usage and hash information for a stack.
 ///
@@ -134,7 +134,7 @@ pub fn verify_response_hash_and_signature(
     let public_key =
         PublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
             AtomaProxyError::InternalError {
-                message: format!("Failed to create public key: {}", e),
+                message: format!("Failed to create public key: {e}"),
                 endpoint: "verify_signature".to_string(),
             }
         })?;
@@ -143,35 +143,35 @@ pub fn verify_response_hash_and_signature(
         SignatureScheme::ED25519 => {
             let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create public key: {}", e),
+                    message: format!("Failed to create public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Ed25519Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create ed25519 signature: {}", e),
+                        message: format!("Failed to create ed25519 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
             public_key
                 .verify(response_hash.as_slice(), &signature)
                 .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to verify ed25519 signature: {}", e),
+                    message: format!("Failed to verify ed25519 signature: {e}"),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
         SignatureScheme::Secp256k1 => {
             let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create secp256k1 public key: {}", e),
+                    message: format!("Failed to create secp256k1 public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Secp256k1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create secp256k1 signature: {}", e),
+                        message: format!("Failed to create secp256k1 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -185,14 +185,14 @@ pub fn verify_response_hash_and_signature(
         SignatureScheme::Secp256r1 => {
             let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create secp256r1 public key: {}", e),
+                    message: format!("Failed to create secp256r1 public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Secp256r1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create secp256r1 signature: {}", e),
+                        message: format!("Failed to create secp256r1 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;

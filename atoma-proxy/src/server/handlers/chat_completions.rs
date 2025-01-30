@@ -61,7 +61,7 @@ const STREAM: &str = "stream";
         ChatCompletionChunkDelta
     ))
 )]
-pub(crate) struct ChatCompletionsOpenApi;
+pub struct ChatCompletionsOpenApi;
 
 /// Create chat completion
 ///
@@ -245,7 +245,7 @@ async fn handle_chat_completions_request(
     )
 )]
 #[allow(dead_code)]
-pub async fn chat_completions_create_stream(
+pub fn chat_completions_create_stream(
     Extension(_metadata): Extension<RequestMetadataExtension>,
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
@@ -288,7 +288,7 @@ pub async fn chat_completions_create_stream(
     ),
     components(schemas(ConfidentialComputeRequest))
 )]
-pub(crate) struct ConfidentialChatCompletionsOpenApi;
+pub struct ConfidentialChatCompletionsOpenApi;
 
 /// Create confidential chat completion
 ///
@@ -304,7 +304,7 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// * A streaming SSE connection for real-time completions
 /// * An `AtomaProxyError` error if the request processing fails
 ///
-/// ## Errors   
+/// ## Errors
 ///
 /// Returns `AtomaProxyError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
@@ -395,7 +395,7 @@ pub async fn confidential_chat_completions_create(
     )
 )]
 #[allow(dead_code)]
-pub async fn confidential_chat_completions_create_stream(
+pub fn confidential_chat_completions_create_stream(
     Extension(_metadata): Extension<RequestMetadataExtension>,
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
@@ -568,7 +568,7 @@ async fn handle_non_streaming_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -582,7 +582,7 @@ async fn handle_non_streaming_response(
         &endpoint,
     ) {
         return Err(AtomaProxyError::InternalError {
-            message: format!("Error updating state manager: {}", e),
+            message: format!("Error updating state manager: {e:?}"),
             endpoint: endpoint.to_string(),
         });
     }
@@ -654,7 +654,7 @@ async fn handle_streaming_response(
     let client = reqwest::Client::new();
     let start = Instant::now();
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
@@ -729,12 +729,12 @@ impl RequestModel for RequestModelChatCompletions {
         let max_completion_tokens = request
             .get(MAX_COMPLETION_TOKENS)
             .or(request.get(MAX_TOKENS))
-            .and_then(|m| m.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Self {
             model: model.to_string(),
-            messages: messages.to_vec(),
+            messages: messages.clone(),
             max_completion_tokens,
         })
     }
@@ -756,7 +756,7 @@ impl RequestModel for RequestModelChatCompletions {
 
         let mut total_num_tokens = 0;
 
-        for message in self.messages.iter() {
+        for message in &self.messages {
             let content = message
                 .get("content")
                 .and_then(|content| content.as_str())
@@ -921,7 +921,7 @@ pub struct ChatCompletionResponse {
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chat completion was created.
-    #[schema(example = 1677652288)]
+    #[schema(example = 1_677_652_288)]
     pub created: i64,
 
     /// The model used for the chat completion.
@@ -987,7 +987,7 @@ pub struct ChatCompletionChunk {
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chunk was created.
-    #[schema(example = 1677652288)]
+    #[schema(example = 1_677_652_288)]
     pub created: i64,
 
     /// The model used for the chat completion.

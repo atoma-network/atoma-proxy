@@ -100,7 +100,7 @@ pub struct ProxyState {
 ///
 /// The health check endpoint is accessible at `/health` and returns a simple
 /// JSON response indicating the service status.
-pub(crate) struct HealthOpenApi;
+pub struct HealthOpenApi;
 
 #[derive(Serialize, ToSchema)]
 pub struct HealthResponse {
@@ -153,7 +153,7 @@ pub async fn health() -> Result<Json<HealthResponse>> {
 /// # Returns
 ///
 /// Returns an configured `Router` instance with all routes and middleware set up
-pub fn create_router(state: ProxyState) -> Router {
+pub fn create_router(state: &ProxyState) -> Router {
     let confidential_router = Router::new()
         .route(
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
@@ -221,7 +221,7 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
     };
-    let router = create_router(proxy_state);
+    let router = create_router(&proxy_state);
     let server =
         axum::serve(tcp_listener, router.into_make_service()).with_graceful_shutdown(async move {
             shutdown_receiver

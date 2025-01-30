@@ -57,7 +57,7 @@ pub struct RequestModelImageGenerations {
     paths(image_generations_create),
     components(schemas(CreateImageRequest, CreateImageResponse, ImageData))
 )]
-pub(crate) struct ImageGenerationsOpenApi;
+pub struct ImageGenerationsOpenApi;
 
 impl RequestModel for RequestModelImageGenerations {
     fn new(request: &Value) -> Result<Self> {
@@ -195,7 +195,7 @@ pub async fn image_generations_create(
     paths(confidential_image_generations_create),
     components(schemas(ConfidentialComputeRequest))
 )]
-pub(crate) struct ConfidentialImageGenerationsOpenApi;
+pub struct ConfidentialImageGenerationsOpenApi;
 
 /// Create confidential image
 ///
@@ -450,7 +450,7 @@ pub struct CreateImageRequest {
 /// Response format for image generation
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageResponse {
-    #[schema(example = 1677649420)]
+    #[schema(example = 1_677_649_420)]
     pub created: i64,
     pub data: Vec<ImageData>,
 }

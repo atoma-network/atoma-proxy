@@ -15,7 +15,7 @@ use thiserror::Error;
 use tokio::sync::watch::Receiver;
 use tracing::instrument;
 
-pub(crate) type Result<T> = std::result::Result<T, AtomaStateManagerError>;
+pub type Result<T> = std::result::Result<T, AtomaStateManagerError>;
 
 /// AtomaStateManager is a wrapper around a Postgres connection pool, responsible for managing the state of the Atoma system.
 ///
