@@ -106,6 +106,10 @@ pub enum AuthError {
     ZkLoginNotEnabled,
     #[error("Sui error: {0}")]
     SuiError(#[from] SuiError),
+    #[error("Failed to convert integer: {0}")]
+    IntConversionError(#[from] std::num::TryFromIntError),
+    #[error("Failed to convert timestamp")]
+    TimestampConversionError,
 }
 
 type Result<T> = std::result::Result<T, AuthError>;
@@ -181,7 +185,9 @@ impl Auth {
         let expiration = Utc::now() + Duration::days(self.refresh_token_lifetime as i64);
         let claims = Claims {
             user_id,
-            exp: usize::try_from(expiration.timestamp()).unwrap(),
+            exp: usize::try_from(expiration.timestamp())
+                .map_err(|_| AuthError::TimestampConversionError)
+                .unwrap(),
             refresh_token_hash: None,
         };
         let token = encode(
@@ -278,7 +284,8 @@ impl Auth {
         let claims = Claims {
             user_id: claims.user_id,
             exp: usize::try_from(expiration.timestamp())
-                .map_err(|e| AuthError::AnyhowError(anyhow!("Failed to convert timestamp: {e}")))?,
+                .map_err(|_| AuthError::TimestampConversionError)
+                .unwrap(),
             refresh_token_hash: Some(refresh_token_hash),
         };
         let token = encode(
@@ -538,11 +545,7 @@ impl Auth {
             .map(|c| {
                 BASE64_URL_CHARSET
                     .find(c)
-                    .map(|index| {
-                        u8::try_from(index).map_err(|e| {
-                            AuthError::AnyhowError(anyhow!("Failed to convert index: {e}"))
-                        })
-                    })
+                    .map(|index| u8::try_from(index).map_err(AuthError::IntConversionError))
                     .unwrap()
                     .map(|index| (0..6).rev().map(move |i| index >> i & 1))
             })
