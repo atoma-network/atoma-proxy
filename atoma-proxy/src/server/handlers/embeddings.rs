@@ -70,22 +70,18 @@ pub struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
     fn new(request: &Value) -> Result<Self> {
-        let model =
-            request
-                .get(MODEL)
-                .and_then(|m| m.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Model field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
-        let input =
-            request
-                .get(INPUT)
-                .and_then(|i| i.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Input field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
+        let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
+            AtomaProxyError::InvalidBody {
+                message: "Model field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
+        let input = request.get(INPUT).and_then(|i| i.as_str()).ok_or_else(|| {
+            AtomaProxyError::InvalidBody {
+                message: "Input field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -195,7 +191,7 @@ pub async fn embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -300,7 +296,7 @@ pub async fn confidential_embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -356,7 +352,7 @@ async fn handle_embeddings_response(
     let time = Instant::now();
     // Send the request to the AI node
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
@@ -389,8 +385,7 @@ async fn handle_embeddings_response(
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
             .get("total_tokens")
-            .map(|u| u.as_u64().unwrap_or(0))
-            .unwrap_or(0) as i64
+            .map_or(0, |u| u.as_u64().unwrap_or(0)) as i64
     } else {
         num_input_compute_units
     };

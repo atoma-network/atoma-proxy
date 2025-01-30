@@ -152,18 +152,18 @@ pub async fn nodes_create(
             result_sender,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send GetNodeSuiAddress event: {:?}", err),
+            message: format!("Failed to send GetNodeSuiAddress event: {err:?}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let node_sui_address = result_receiver
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to receive GetNodeSuiAddress result: {:?}", err),
+            message: format!("Failed to receive GetNodeSuiAddress result: {err:?}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to get node Sui address: {:?}", err),
+            message: format!("Failed to get node Sui address: {err:?}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .ok_or_else(|| AtomaProxyError::NotFound {
@@ -187,7 +187,7 @@ pub async fn nodes_create(
             country: payload.data.country.clone(),
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send UpsertNodePublicAddress event: {:?}", err),
+            message: format!("Failed to send UpsertNodePublicAddress event: {err:?}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
@@ -275,7 +275,7 @@ pub async fn nodes_create_lock(
             endpoint: NODES_CREATE_LOCK_PATH.to_string(),
         })?;
     let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to receive node public key: {}", e),
+        message: format!("Failed to receive node public key: {e}"),
         endpoint: NODES_CREATE_LOCK_PATH.to_string(),
     })?;
 

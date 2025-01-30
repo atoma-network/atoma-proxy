@@ -74,7 +74,7 @@ pub fn update_state_manager(
             total_tokens,
         })
         .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Error updating stack num tokens: {}", e),
+            message: format!("Error updating stack num tokens: {e}"),
             endpoint: endpoint.to_string(),
         })?;
     Ok(())
@@ -126,7 +126,7 @@ pub fn verify_response_hash_and_signature(
 
     let signature =
         Signature::from_str(node_signature).map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to create signature: {}", e),
+            message: format!("Failed to create signature: {e}"),
             endpoint: "verify_signature".to_string(),
         })?;
 

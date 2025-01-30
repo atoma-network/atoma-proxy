@@ -115,7 +115,7 @@ pub async fn chat_completions_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
-            .and_then(|stream| stream.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or_default();
 
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
@@ -136,7 +136,7 @@ pub async fn chat_completions_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -352,7 +352,7 @@ pub async fn confidential_chat_completions_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
-            .and_then(|stream| stream.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or_default();
 
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
@@ -373,7 +373,7 @@ pub async fn confidential_chat_completions_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -476,13 +476,13 @@ async fn handle_non_streaming_response(
     let time = Instant::now();
 
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send OpenAI API request: {:?}", err),
+            message: format!("Failed to send OpenAI API request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -498,7 +498,7 @@ async fn handle_non_streaming_response(
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse OpenAI API response: {:?}", err),
+            message: format!("Failed to parse OpenAI API response: {err:?}"),
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -507,23 +507,20 @@ async fn handle_non_streaming_response(
     let total_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("total_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let input_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("completion_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let output_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("prompt_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
@@ -541,7 +538,7 @@ async fn handle_non_streaming_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating node throughput performance: {}", err),
+            message: format!("Error updating node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -660,7 +657,7 @@ async fn handle_streaming_response(
         .send()
         .await
         .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Error sending request to inference service: {}", e),
+            message: format!("Error sending request to inference service: {e:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -728,7 +725,7 @@ impl RequestModel for RequestModelChatCompletions {
 
         let max_completion_tokens = request
             .get(MAX_COMPLETION_TOKENS)
-            .or(request.get(MAX_TOKENS))
+            .or_else(|| request.get(MAX_TOKENS))
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(DEFAULT_MAX_TOKENS);
 
@@ -768,7 +765,7 @@ impl RequestModel for RequestModelChatCompletions {
             let num_tokens = tokenizer
                 .encode(content, true)
                 .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to encode message: {:?}", err),
+                    message: format!("Failed to encode message: {err:?}"),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?
                 .get_ids()
@@ -964,6 +961,7 @@ pub struct ChatCompletionChoice {
     pub logprobs: Option<Value>,
 }
 
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompletionUsage {
     /// Number of tokens in the prompt.

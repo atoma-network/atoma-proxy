@@ -577,8 +577,7 @@ pub mod auth {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
                     AtomaProxyError::InvalidBody {
                         message: format!(
-                            "Failed to parse body as chat completions request model: {}",
-                            e
+                            "Failed to parse body as chat completions request model: {e}"
                         ),
                         endpoint: endpoint.to_string(),
                     }
@@ -800,7 +799,7 @@ pub mod auth {
             .await
             .get_sui_signature(payload)
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get Sui signature: {:?}", err),
+                message: format!("Failed to get Sui signature: {err:?}"),
                 endpoint: endpoint.to_string(),
             })?;
 

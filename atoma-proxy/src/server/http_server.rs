@@ -227,7 +227,7 @@ pub async fn start_server(
             shutdown_receiver
                 .changed()
                 .await
-                .expect("Error receiving shutdown signal")
+                .expect("Error receiving shutdown signal");
         });
     server.await?;
     Ok(())

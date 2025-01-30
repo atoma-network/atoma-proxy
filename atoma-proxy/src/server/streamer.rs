@@ -1,4 +1,5 @@
 #![allow(clippy::cognitive_complexity)]
+#![allow(clippy::too_many_lines)]
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
