@@ -8,13 +8,13 @@ use crate::ProxyServiceState;
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// The path for the subscriptions endpoint.
-pub(crate) const SUBSCRIPTIONS_PATH: &str = "/subscriptions";
+pub const SUBSCRIPTIONS_PATH: &str = "/subscriptions";
 
 /// Returns a router with the subscriptions endpoint.
 ///
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the subscriptions endpoint
-pub(crate) fn subscriptions_router() -> Router<ProxyServiceState> {
+pub fn subscriptions_router() -> Router<ProxyServiceState> {
     Router::new().route(SUBSCRIPTIONS_PATH, get(get_all_subscriptions))
 }
 
@@ -25,7 +25,7 @@ pub(crate) fn subscriptions_router() -> Router<ProxyServiceState> {
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_all_subscriptions))]
-pub(crate) struct GetAllSubscriptionsOpenApi;
+pub struct GetAllSubscriptionsOpenApi;
 
 /// Retrieves all subscriptions.
 ///
@@ -58,7 +58,7 @@ pub(crate) struct GetAllSubscriptionsOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_all_subscriptions(
+pub async fn get_all_subscriptions(
     State(proxy_service_state): State<ProxyServiceState>,
 ) -> Result<Json<Vec<NodeSubscription>>> {
     Ok(Json(

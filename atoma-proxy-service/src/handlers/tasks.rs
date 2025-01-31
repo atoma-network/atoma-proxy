@@ -14,13 +14,13 @@ type Result<T> = std::result::Result<T, StatusCode>;
 type TasksWithModalities = Vec<(Task, Vec<ModelModality>)>;
 
 /// The path for the tasks endpoint.
-pub(crate) const TASKS_PATH: &str = "/tasks";
+pub const TASKS_PATH: &str = "/tasks";
 
 /// Returns a router with the tasks endpoint.
 ///
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the tasks endpoint
-pub(crate) fn tasks_router() -> Router<ProxyServiceState> {
+pub fn tasks_router() -> Router<ProxyServiceState> {
     Router::new()
         .route(&format!("{TASKS_PATH}/:id"), get(get_nodes_for_tasks))
         .route(TASKS_PATH, get(get_all_tasks))
@@ -61,7 +61,7 @@ pub(crate) fn tasks_router() -> Router<ProxyServiceState> {
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_nodes_for_tasks(
+pub async fn get_nodes_for_tasks(
     State(proxy_service_state): State<ProxyServiceState>,
     Path(task_id): Path<i64>,
 ) -> Result<Json<Vec<NodeSubscription>>> {
@@ -84,7 +84,7 @@ pub(crate) async fn get_nodes_for_tasks(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_all_tasks))]
-pub(crate) struct GetAllTasksOpenApi;
+pub struct GetAllTasksOpenApi;
 
 /// Retrieves all tasks from the state manager.
 ///
@@ -107,7 +107,7 @@ pub(crate) struct GetAllTasksOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_all_tasks(
+pub async fn get_all_tasks(
     State(proxy_service_state): State<ProxyServiceState>,
 ) -> Result<Json<TasksWithModalities>> {
     let all_tasks = proxy_service_state

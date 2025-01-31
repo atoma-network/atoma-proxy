@@ -1,3 +1,7 @@
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_wrap)]
+
 mod auth;
 mod config;
 #[cfg(feature = "google-oauth")]
