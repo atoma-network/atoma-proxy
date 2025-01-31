@@ -7,7 +7,6 @@ use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
-use dotenvy::dotenv;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use once_cell::sync::Lazy;
@@ -174,9 +173,6 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load environment variables from .env file
-    dotenv().context("Failed to load .env file")?;
-
     // Store both guards to keep logging active for the duration of the program
     let (_file_guard, _stdout_guard) = setup_logging(LOGS).context("Failed to setup logging")?;
 

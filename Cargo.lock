@@ -612,7 +612,6 @@ dependencies = [
  "blake2",
  "clap",
  "config",
- "dotenvy",
  "fastcrypto 0.1.8",
  "flume",
  "futures",
