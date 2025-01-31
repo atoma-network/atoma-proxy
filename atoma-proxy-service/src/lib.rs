@@ -1,4 +1,5 @@
 #![allow(clippy::doc_markdown)]
+#![allow(clippy::module_name_repetitions)]
 
 mod components;
 mod config;

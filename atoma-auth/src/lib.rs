@@ -1,6 +1,7 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::module_name_repetitions)]
 
 mod auth;
 mod config;
