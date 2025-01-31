@@ -1,7 +1,7 @@
 use std::{path::Path, str::FromStr};
 
 use anyhow::Result;
-use atoma_sui::{events::StackCreatedEvent, AtomaSuiConfig};
+use atoma_sui::{config::Config, events::StackCreatedEvent};
 use blake2::{
     digest::generic_array::{typenum::U32, GenericArray},
     Blake2b, Digest,
@@ -72,7 +72,7 @@ impl Sui {
     /// - Failed to create wallet context
     /// - Failed to parse configuration paths
     /// - Failed to establish connection with Sui network
-    pub fn new(sui_config: &AtomaSuiConfig) -> Result<Self> {
+    pub fn new(sui_config: &Config) -> Result<Self> {
         let sui_config_path = sui_config.sui_config_path();
         let sui_config_path = Path::new(&sui_config_path);
         let wallet_ctx = WalletContext::new(
