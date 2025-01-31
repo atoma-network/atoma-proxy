@@ -172,6 +172,7 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     // Store both guards to keep logging active for the duration of the program
     let (_file_guard, _stdout_guard) = setup_logging(LOGS).context("Failed to setup logging")?;
