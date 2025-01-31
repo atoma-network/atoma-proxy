@@ -42,6 +42,7 @@ mod server;
 const LOGS: &str = "./logs";
 /// The log file name.
 const LOG_FILE: &str = "atoma-proxy-service.log";
+const BASELIME_URL: &str = "https://otel-ingest.baselime.io:8443";
 
 static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
@@ -58,7 +59,7 @@ fn init_traces() -> Result<sdktrace::Tracer> {
 
     let exporter = new_exporter()
         .tonic()
-        .with_endpoint("https://otel-ingest.baselime.io:8443")
+        .with_endpoint(BASELIME_URL)
         .with_metadata(map)
         .build_span_exporter()?;
 
