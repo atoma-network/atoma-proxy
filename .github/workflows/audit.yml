@@ -1,4 +1,8 @@
 name: Security audit
+permissions:
+  checks: write
+  contents: read
+  security-events: write
 on:
   schedule:
     - cron: "0 0 * * *" # Run at midnight every day
