@@ -2,7 +2,6 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::doc_markdown)]
-#![allow(clippy::module_name_repetitions)]
 
 pub mod config;
 pub mod handlers;

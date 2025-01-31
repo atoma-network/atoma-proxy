@@ -2,7 +2,6 @@
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cognitive_complexity)]
-#![allow(clippy::module_name_repetitions)]
 
 pub mod components;
 mod config;
