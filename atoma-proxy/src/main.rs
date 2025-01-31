@@ -7,7 +7,7 @@ use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use once_cell::sync::Lazy;
