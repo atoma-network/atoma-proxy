@@ -17,6 +17,7 @@ base64 = { workspace = true }
 blake2.workspace = true
 clap.workspace = true
 config.workspace = true
+dotenv = "0.15"
 fastcrypto.workspace = true
 flume.workspace = true
 futures = { workspace = true }
@@ -42,6 +43,16 @@ tokenizers.workspace = true
 tower = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+opentelemetry = { version = "0.21", features = ["trace"] }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.14", features = [
+    "grpc-tonic",
+    "trace",
+    "tls",
+] }
+tonic = { version = "0.9", features = ["tls", "tls-roots", "prost"] }
+once_cell = "1.20"
+tracing-opentelemetry = "0.22"
 
 [features]
 google-oauth = ["atoma-auth/google-oauth", "atoma-proxy-service/google-oauth"]
