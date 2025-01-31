@@ -902,7 +902,7 @@ mod test {
     use std::{path::PathBuf, sync::Arc};
 
     use atoma_state::types::AtomaAtomaStateManagerEvent;
-    use atoma_sui::AtomaSuiConfig;
+    use atoma_sui::config::Config;
     use flume::Receiver;
     use tokio::sync::RwLock;
 
@@ -1005,7 +1005,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         );
         let (state_manager_sender, state_manager_receiver) = flume::unbounded();
 
-        let sui_config = AtomaSuiConfig::from_file_path(get_config_path());
+        let sui_config = Config::from_file_path(get_config_path());
         let sui = crate::Sui::new(&sui_config).unwrap();
         let auth = Auth::new(config, state_manager_sender, Arc::new(RwLock::new(sui)))
             .await
