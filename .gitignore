@@ -3,5 +3,8 @@ target/
 config.toml
 logs/
 cursor.toml
-
+client.yaml
+sui.aliases
+sui.keystore
+config.test.toml
 .env

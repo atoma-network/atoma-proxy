@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
-use atoma_sui::AtomaSuiConfig;
+use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
 use futures::future::try_join_all;
@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
     let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui)).await?;
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
+    let sui_subscriber = Subscriber::new(
         config.sui.clone(),
         event_subscriber_sender,
         stack_retrieve_receiver,
