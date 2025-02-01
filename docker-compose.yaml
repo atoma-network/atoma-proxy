@@ -52,7 +52,7 @@ services:
 
   db:
     profiles: ["local", "cloud"]
-    image: postgres:latest
+    image: postgres:13
     restart: always
     environment:
       - POSTGRES_DB=${POSTGRES_DB}

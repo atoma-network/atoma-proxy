@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:13
         env:
           POSTGRES_DB: atoma
           POSTGRES_USER: atoma
