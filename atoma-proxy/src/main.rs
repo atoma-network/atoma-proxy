@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use atoma_auth::{AtomaAuthConfig, Auth, Sui};
@@ -9,12 +9,6 @@ use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
-use once_cell::sync::Lazy;
-use opentelemetry::trace::TracerProvider;
-use opentelemetry::{global, KeyValue};
-use opentelemetry_otlp::{new_exporter, WithExportConfig};
-use opentelemetry_sdk::{trace as sdktrace, Resource};
-use server::{start_server, AtomaServiceConfig};
 use tokenizers::Tokenizer;
 use tokio::{
     net::TcpListener,
@@ -22,57 +16,11 @@ use tokio::{
     try_join,
 };
 use tracing::{error, info, instrument};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::{
-    non_blocking,
-    rolling::{RollingFileAppender, Rotation},
-};
-use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::{
-    fmt::{self, format::FmtSpan, time::UtcTime},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-    EnvFilter, Registry,
-};
+
+use crate::server::{start_server, AtomaServiceConfig};
 
 mod server;
-
-/// The directory where the logs are stored.
-const LOGS: &str = "./logs";
-/// The log file name.
-const LOG_FILE: &str = "atoma-proxy-service.log";
-const BASELIME_URL: &str = "https://otel-ingest.baselime.io:8443";
-
-static RESOURCE: Lazy<Resource> =
-    Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
-
-fn init_traces() -> Result<sdktrace::Tracer> {
-    let mut map = tonic::metadata::MetadataMap::new();
-    // Note: In production, this should be loaded from environment variables
-    map.insert(
-        "x-api-key",
-        std::env::var("BASELIME_API_KEY")
-            .context("BASELIME_API_KEY not set")?
-            .parse()?,
-    );
-
-    let exporter = new_exporter()
-        .tonic()
-        .with_endpoint(BASELIME_URL)
-        .with_metadata(map)
-        .build_span_exporter()?;
-
-    let config = sdktrace::config().with_resource(RESOURCE.clone());
-    let provider = sdktrace::TracerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_config(config)
-        .build();
-
-    let tracer = provider.tracer("atoma-proxy");
-    global::set_tracer_provider(provider);
-
-    Ok(tracer)
-}
+mod telemetry;
 
 /// Command line arguments for the Atoma node
 #[derive(Parser)]
@@ -116,66 +64,12 @@ impl Config {
     }
 }
 
-/// Configure logging with JSON formatting, file output, and console output
-fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
-    // Create logs directory if it doesn't exist
-    std::fs::create_dir_all(&log_dir).context("Failed to create logs directory")?;
-
-    // Set up file appender with rotation
-    let file_appender = RollingFileAppender::new(Rotation::DAILY, log_dir, LOG_FILE);
-
-    // Create non-blocking writers
-    let (non_blocking_appender, file_guard) = non_blocking(file_appender);
-    let (non_blocking_stdout, stdout_guard) = non_blocking(std::io::stdout());
-
-    // Initialize OpenTelemetry tracing
-    let tracer = init_traces()?;
-    let opentelemetry_layer = OpenTelemetryLayer::new(tracer);
-
-    // Create JSON formatter for file output
-    let file_layer = fmt::layer()
-        .json()
-        .with_timer(UtcTime::rfc_3339())
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_target(true)
-        .with_line_number(true)
-        .with_file(true)
-        .with_current_span(true)
-        .with_span_list(true)
-        .with_writer(non_blocking_appender);
-
-    // Create console formatter for development
-    let console_layer = fmt::layer()
-        .pretty()
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_line_number(true)
-        .with_file(true)
-        .with_span_events(FmtSpan::ENTER)
-        .with_writer(non_blocking_stdout);
-
-    // Create filter from environment variable or default to info
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,atoma_proxy=info"));
-
-    // Combine layers with filter
-    Registry::default()
-        .with(env_filter)
-        .with(console_layer)
-        .with(file_layer)
-        .with(opentelemetry_layer)
-        .init();
-
-    // Return both guards so they can be stored in main
-    Ok((file_guard, stdout_guard))
-}
-
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     // Store both guards to keep logging active for the duration of the program
-    let (_file_guard, _stdout_guard) = setup_logging(LOGS).context("Failed to setup logging")?;
+    let (_file_guard, _stdout_guard) =
+        telemetry::setup_logging("./logs").context("Failed to setup logging")?;
 
     info!(event = "startup", "Starting Atoma Proxy Service...");
 
@@ -295,7 +189,7 @@ async fn main() -> Result<()> {
     )?;
 
     // Before the program exits, ensure all spans are exported
-    global::shutdown_tracer_provider();
+    telemetry::shutdown();
     Ok(())
 }
 
@@ -312,7 +206,7 @@ async fn main() -> Result<()> {
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing a vector of Arc-wrapped tokenizers on success, or an error if:
+/// Returns a `Result<()>`, which is `Ok(())` if all tasks succeeded, or an error if:
 /// - Failed to fetch tokenizer configuration from HuggingFace
 /// - Failed to parse the tokenizer JSON
 /// - Any other network or parsing errors occur

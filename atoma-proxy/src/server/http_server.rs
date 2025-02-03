@@ -2,16 +2,13 @@ use std::sync::Arc;
 
 use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::{
     routing::{get, post},
     Json, Router,
 };
-
 use flume::Sender;
 use serde::Serialize;
-
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
 use tokio::{net::TcpListener, sync::RwLock};
@@ -31,6 +28,7 @@ use crate::server::{
         image_generations::IMAGE_GENERATIONS_PATH,
         models::{models_list, MODELS_PATH},
     },
+    middleware::{track_db_metrics, track_metrics},
     Result,
 };
 
@@ -174,6 +172,7 @@ pub fn create_router(state: &ProxyState) -> Router {
         .with_state(state.clone());
 
     Router::new()
+        .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
@@ -182,13 +181,14 @@ pub fn create_router(state: &ProxyState) -> Router {
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_list))
         .route(NODES_CREATE_PATH, post(nodes_create))
         .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
         .with_state(state.clone())
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
         .merge(openapi_routes())
+        .layer(from_fn_with_state(state.clone(), track_db_metrics))
+        .layer(from_fn(track_metrics))
 }
 
 /// Starts the atoma proxy server.
