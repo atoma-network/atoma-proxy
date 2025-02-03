@@ -26,7 +26,8 @@ use tracing_subscriber::{
 };
 
 const LOG_FILE: &str = "atoma-proxy-service.log";
-const BASELIME_URL: &str = "https://otel-ingest.baselime.io:8443";
+// Default Grafana OTLP endpoint if not specified in environment
+const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 
 static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
@@ -90,18 +91,12 @@ fn init_metrics() -> sdkmetrics::MeterProvider {
 
 /// Initialize tracing with OpenTelemetry SDK
 fn init_traces() -> Result<sdktrace::Tracer> {
-    let mut map = tonic::metadata::MetadataMap::new();
-    map.insert(
-        "x-api-key",
-        std::env::var("BASELIME_API_KEY")
-            .context("BASELIME_API_KEY not set")?
-            .parse()?,
-    );
+    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
 
     let exporter = new_exporter()
         .tonic()
-        .with_endpoint(BASELIME_URL)
-        .with_metadata(map)
+        .with_endpoint(otlp_endpoint)
         .build_span_exporter()?;
 
     let config = sdktrace::config().with_resource(RESOURCE.clone());
