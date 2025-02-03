@@ -42,7 +42,7 @@ tokenizers.workspace = true
 tower = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
-opentelemetry = { version = "0.21", features = ["trace"] }
+opentelemetry = { version = "0.27", features = ["trace"] }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "trace"] }
 opentelemetry-otlp = { version = "0.14", features = [
     "grpc-tonic",
