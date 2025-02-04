@@ -105,13 +105,13 @@ pub async fn nodes_create(
 ) -> Result<Json<NodesCreateResponse>, AtomaProxyError> {
     let base64_signature = &payload.signature;
     let body_bytes =
-        serde_json::to_vec(&payload.data).map_err(|e| AtomaProxyError::InvalidBody {
+        serde_json::to_vec(&payload.data).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to serialize payload to bytes, with error: {e}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
     let signature =
-        Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::InvalidBody {
+        Signature::from_str(base64_signature).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to parse signature, with error: {e}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
@@ -119,7 +119,7 @@ pub async fn nodes_create(
     let public_key_bytes = signature.public_key_bytes();
     let public_key =
         SuiPublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: format!("Failed to extract public key from bytes, with error: {e}"),
                 endpoint: NODES_CREATE_PATH.to_string(),
             }
@@ -132,12 +132,12 @@ pub async fn nodes_create(
     let body_blake2b_hash_bytes: [u8; BODY_HASH_SIZE] = body_blake2b_hash
         .as_slice()
         .try_into()
-        .map_err(|e| AtomaProxyError::InvalidBody {
+        .map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to convert blake2b hash to bytes, with error: {e}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
     verify_signature(base64_signature, &body_blake2b_hash_bytes).map_err(|e| {
-        AtomaProxyError::InvalidBody {
+        AtomaProxyError::RequestError {
             message: format!("Failed to verify signature, with error: {e}"),
             endpoint: NODES_CREATE_PATH.to_string(),
         }
@@ -173,7 +173,7 @@ pub async fn nodes_create(
 
     // Check if the address associated with the small ID in the request matches the Sui address in the signature.
     if node_sui_address != sui_address.to_string() {
-        return Err(AtomaProxyError::InvalidBody {
+        return Err(AtomaProxyError::RequestError {
             message: "The sui address associated with the node small ID does not match the signature sui address".to_string(),
             endpoint: NODES_CREATE_PATH.to_string(),
         });
@@ -348,8 +348,8 @@ pub async fn nodes_create_lock(
                     message: format!("Failed to receive DeductFromUsdc result: {e:?}"),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?
-                .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to deduct from usdc: {e:?}"),
+                .map_err(|e| AtomaProxyError::BalanceError {
+                    message: format!("Balance error : {e:?}"),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
 

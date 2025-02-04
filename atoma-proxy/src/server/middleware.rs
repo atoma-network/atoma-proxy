@@ -3,7 +3,7 @@ use atoma_utils::constants;
 use auth::{ProcessedRequest, SelectedNodeMetadata};
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{rejection::LengthLimitError, Request, State},
     http::{request::Parts, HeaderValue},
     middleware::Next,
     response::Response,
@@ -232,12 +232,22 @@ pub async fn authenticate_middleware(
     let endpoint = req_parts.uri.path().to_string();
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to convert body to bytes: {e}"),
-            endpoint: req_parts.uri.path().to_string(),
+        .map_err(|e| {
+            if let Some(source) = std::error::Error::source(&e) {
+                if source.is::<LengthLimitError>() {
+                    return AtomaProxyError::RequestError {
+                        message: format!("The body is too big: {e}"),
+                        endpoint: req_parts.uri.path().to_string(),
+                    };
+                }
+            }
+            AtomaProxyError::InternalError {
+                message: format!("Failed to convert body to bytes: {e}"),
+                endpoint: req_parts.uri.path().to_string(),
+            }
         })?;
     let body_json: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
+        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to parse body as JSON: {e}"),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -375,12 +385,22 @@ pub async fn confidential_compute_middleware(
     let endpoint = req_parts.uri.path().to_string();
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to convert body to bytes: {e}"),
-            endpoint: endpoint.clone(),
+        .map_err(|e| {
+            if let Some(source) = std::error::Error::source(&e) {
+                if source.is::<LengthLimitError>() {
+                    return AtomaProxyError::RequestError {
+                        message: format!("The body is too big: {e}"),
+                        endpoint: req_parts.uri.path().to_string(),
+                    };
+                }
+            }
+            AtomaProxyError::InternalError {
+                message: format!("Failed to convert body to bytes: {e}"),
+                endpoint: req_parts.uri.path().to_string(),
+            }
         })?;
     let confidential_compute_request: ConfidentialComputeRequest =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::InternalError {
+        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to parse body as JSON: {e}"),
             endpoint: req_parts.uri.path().to_string(),
         })?;
@@ -395,8 +415,8 @@ pub async fn confidential_compute_middleware(
 
     let plaintext_body_hash = STANDARD
         .decode(confidential_compute_request.plaintext_body_hash)
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to decode plaintext body hash: {e}"),
+        .map_err(|e| AtomaProxyError::RequestError {
+            message: format!("Hash is not base64: {e}"),
             endpoint: endpoint.clone(),
         })?;
     let plaintext_body_signature = state
@@ -409,8 +429,8 @@ pub async fn confidential_compute_middleware(
             endpoint: endpoint.clone(),
         })?;
     let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
-        AtomaProxyError::InternalError {
-            message: format!("Failed to convert signature to header value: {e}"),
+        AtomaProxyError::RequestError {
+            message: format!("Signed hash is not present as header value: {e}"),
             endpoint: endpoint.clone(),
         }
     })?;
@@ -567,7 +587,7 @@ pub mod auth {
         match endpoint {
             CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
+                    AtomaProxyError::RequestError {
                         message: format!(
                             "Failed to parse body as chat completions request model: {e}"
                         ),
@@ -578,7 +598,7 @@ pub mod auth {
             }
             EMBEDDINGS_PATH => {
                 let request_model = RequestModelEmbeddings::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
+                    AtomaProxyError::RequestError {
                         message: format!("Failed to parse body as embeddings request model: {e}"),
                         endpoint: endpoint.to_string(),
                     }
@@ -587,7 +607,7 @@ pub mod auth {
             }
             IMAGE_GENERATIONS_PATH => {
                 let request_model = RequestModelImageGenerations::new(body_json).map_err(|e| {
-                    AtomaProxyError::InvalidBody {
+                    AtomaProxyError::RequestError {
                         message: format!(
                             "Failed to parse body as image generations request model: {e}"
                         ),
@@ -876,7 +896,7 @@ pub mod auth {
             // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
             // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
             if total_tokens > STACK_SIZE_TO_BUY as u64 {
-                return Err(AtomaProxyError::InvalidBody {
+                return Err(AtomaProxyError::RequestError {
                     message: format!(
                         "Total tokens {total_tokens} exceed the maximum stack size of {STACK_SIZE_TO_BUY}"
                     ),
@@ -907,8 +927,8 @@ pub mod auth {
             let node: atoma_state::types::CheapestNode = match node {
                 Some(node) => node,
                 None => {
-                    return Err(AtomaProxyError::NotFound {
-                        message: format!("No tasks found for model {model}"),
+                    return Err(AtomaProxyError::RequestError {
+                        message: format!("No node found for model {model}"),
                         endpoint: endpoint.to_string(),
                     });
                 }
@@ -933,8 +953,8 @@ pub mod auth {
                     message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
                     endpoint: endpoint.to_string(),
                 })?
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to get DeductFromUsdc result: {err:?}"),
+                .map_err(|err| AtomaProxyError::BalanceError {
+                    message: format!("Balance error : {err:?}"),
                     endpoint: endpoint.to_string(),
                 })?;
             let StackEntryResponse {
@@ -1123,7 +1143,7 @@ pub mod utils {
         let request_model = body_json
             .get(MODEL)
             .and_then(|m| m.as_str())
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "{MODEL} not found".to_string(),
                 endpoint: req_parts.uri.path().to_string(),
             })?;
@@ -1225,12 +1245,12 @@ pub mod utils {
                 ),
                 endpoint: endpoint.to_string(),
             })?
-            .map_err(|e| AtomaProxyError::InternalError {
+            .map_err(|e| AtomaProxyError::RequestError {
                 message: format!("Failed to verify stack for confidential compute: {e:?}"),
                 endpoint: endpoint.to_string(),
             })?;
         if !is_valid {
-            return Err(AtomaProxyError::InternalError {
+            return Err(AtomaProxyError::RequestError {
                 message: "Stack is not valid for confidential compute".to_string(),
                 endpoint: endpoint.to_string(),
             });
@@ -1387,15 +1407,15 @@ pub mod utils {
                 message: format!("Failed to receive GetNodePublicAddress result: {e:?}"),
                 endpoint: endpoint.to_string(),
             })?
-            .map_err(|e| AtomaProxyError::InternalError {
+            .map_err(|e| AtomaProxyError::NotFound {
                 message: format!("Failed to get node public address: {e:?}"),
                 endpoint: endpoint.to_string(),
             })?;
         if let Some(node_address) = node_address {
             return Ok((node_address, node_small_id));
         }
-        Err(AtomaProxyError::InternalError {
-            message: "Failed to get node public address".to_string(),
+        Err(AtomaProxyError::NotFound {
+            message: "Node doesn't have public address".to_string(),
             endpoint: endpoint.to_string(),
         })
     }
