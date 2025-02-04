@@ -709,7 +709,7 @@ pub struct RequestModelChatCompletions {
 impl RequestModel for RequestModelChatCompletions {
     fn new(request: &Value) -> Result<Self> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Missing or invalid 'model' field".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             }
@@ -718,7 +718,7 @@ impl RequestModel for RequestModelChatCompletions {
         let messages = request
             .get(MESSAGES)
             .and_then(|m| m.as_array())
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Missing or invalid 'messages' field".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
@@ -745,7 +745,7 @@ impl RequestModel for RequestModelChatCompletions {
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Model not supported".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
@@ -757,7 +757,7 @@ impl RequestModel for RequestModelChatCompletions {
             let content = message
                 .get("content")
                 .and_then(|content| content.as_str())
-                .ok_or_else(|| AtomaProxyError::InvalidBody {
+                .ok_or_else(|| AtomaProxyError::RequestError {
                     message: "Missing or invalid message content".to_string(),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;

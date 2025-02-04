@@ -62,7 +62,7 @@ pub struct ImageGenerationsOpenApi;
 impl RequestModel for RequestModelImageGenerations {
     fn new(request: &Value) -> Result<Self> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Model field   is required".to_string(),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             }
@@ -70,12 +70,12 @@ impl RequestModel for RequestModelImageGenerations {
         let n = request
             .get(N)
             .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "N field is required".to_string(),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             })?;
         let size = request.get(SIZE).and_then(|s| s.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Size field is required".to_string(),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             }
@@ -101,7 +101,7 @@ impl RequestModel for RequestModelImageGenerations {
             .collect();
 
         if dimensions.len() != 2 {
-            return Err(AtomaProxyError::InvalidBody {
+            return Err(AtomaProxyError::RequestError {
                 message: format!("Invalid size format: {}", self.size),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             });
