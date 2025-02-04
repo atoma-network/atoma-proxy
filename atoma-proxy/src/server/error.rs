@@ -151,7 +151,7 @@ impl AtomaProxyError {
             Self::NotFound { .. } => "Resource not found".to_string(),
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
-            Self::BalanceError { .. } => format!("Insufficient balance"),
+            Self::BalanceError { .. } => "Insufficient balance".to_string(),
         }
     }
 
