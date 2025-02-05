@@ -1,4 +1,9 @@
-pub(crate) mod components;
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cognitive_complexity)]
+
+pub mod components;
 mod config;
 pub mod error;
 pub mod handlers;
@@ -18,17 +23,20 @@ use tracing::instrument;
 
 pub type Result<T> = std::result::Result<T, error::AtomaProxyError>;
 
-/// The max_tokens field in the request payload.
-pub(crate) const MAX_TOKENS: &str = "max_tokens";
+/// The max_tokens field in the request payload, currently deprecated by the OpenAI API, in favor of max_completion_tokens.
+pub const MAX_TOKENS: &str = "max_tokens";
+
+/// The max_completion_tokens field in the request payload.
+pub const MAX_COMPLETION_TOKENS: &str = "max_completion_tokens";
 
 /// The default max_tokens value.
-pub(crate) const DEFAULT_MAX_TOKENS: u64 = 4_096;
+pub const DEFAULT_MAX_TOKENS: u64 = 8_192;
 
 /// The one million constant.
-pub(crate) const ONE_MILLION: u64 = 1_000_000;
+pub const ONE_MILLION: u64 = 1_000_000;
 
 /// The model key
-pub(crate) const MODEL: &str = "model";
+pub const MODEL: &str = "model";
 
 /// Checks the authentication of the request.
 ///
@@ -73,17 +81,17 @@ async fn check_auth(
                         result_sender: sender,
                     })
                     .map_err(|err| AtomaProxyError::InternalError {
-                        message: format!("Failed to send IsApiTokenValid event: {:?}", err),
+                        message: format!("Failed to send IsApiTokenValid event: {err:?}"),
                         endpoint: endpoint.to_string(),
                     })?;
                 return receiver
                     .await
                     .map_err(|err| AtomaProxyError::InternalError {
-                        message: format!("Failed to receive IsApiTokenValid result: {:?}", err),
+                        message: format!("Failed to receive IsApiTokenValid result: {err:?}"),
                         endpoint: endpoint.to_string(),
                     })?
-                    .map_err(|err| AtomaProxyError::InternalError {
-                        message: format!("Failed to get IsApiTokenValid result: {:?}", err),
+                    .map_err(|err| AtomaProxyError::AuthError {
+                        auth_error: format!("Invalid or missing api token for request: {err:?}"),
                         endpoint: endpoint.to_string(),
                     });
             }

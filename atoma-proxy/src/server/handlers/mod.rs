@@ -10,6 +10,7 @@ use fastcrypto::{
     traits::{ToFromBytes, VerifyingKey},
 };
 use flume::Sender;
+use reqwest::StatusCode;
 use sui_sdk::types::crypto::{PublicKey, Signature, SignatureScheme, SuiSignature};
 use tracing::instrument;
 
@@ -24,10 +25,10 @@ pub mod nodes;
 pub mod request_model;
 
 /// Key for the response hash in the payload
-pub(crate) const RESPONSE_HASH_KEY: &str = "response_hash";
+pub const RESPONSE_HASH_KEY: &str = "response_hash";
 
 /// Key for the signature in the payload
-pub(crate) const SIGNATURE_KEY: &str = "signature";
+pub const SIGNATURE_KEY: &str = "signature";
 
 /// Updates the state manager with token usage and hash information for a stack.
 ///
@@ -73,7 +74,7 @@ pub fn update_state_manager(
             total_tokens,
         })
         .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Error updating stack num tokens: {}", e),
+            message: format!("Error updating stack num tokens: {e}"),
             endpoint: endpoint.to_string(),
         })?;
     Ok(())
@@ -125,7 +126,7 @@ pub fn verify_response_hash_and_signature(
 
     let signature =
         Signature::from_str(node_signature).map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to create signature: {}", e),
+            message: format!("Failed to create signature: {e}"),
             endpoint: "verify_signature".to_string(),
         })?;
 
@@ -133,7 +134,7 @@ pub fn verify_response_hash_and_signature(
     let public_key =
         PublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
             AtomaProxyError::InternalError {
-                message: format!("Failed to create public key: {}", e),
+                message: format!("Failed to create public key: {e}"),
                 endpoint: "verify_signature".to_string(),
             }
         })?;
@@ -142,35 +143,35 @@ pub fn verify_response_hash_and_signature(
         SignatureScheme::ED25519 => {
             let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create public key: {}", e),
+                    message: format!("Failed to create public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Ed25519Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create ed25519 signature: {}", e),
+                        message: format!("Failed to create ed25519 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
             public_key
                 .verify(response_hash.as_slice(), &signature)
                 .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to verify ed25519 signature: {}", e),
+                    message: format!("Failed to verify ed25519 signature: {e}"),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
         SignatureScheme::Secp256k1 => {
             let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create secp256k1 public key: {}", e),
+                    message: format!("Failed to create secp256k1 public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Secp256k1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create secp256k1 signature: {}", e),
+                        message: format!("Failed to create secp256k1 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -184,14 +185,14 @@ pub fn verify_response_hash_and_signature(
         SignatureScheme::Secp256r1 => {
             let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
-                    message: format!("Failed to create secp256r1 public key: {}", e),
+                    message: format!("Failed to create secp256r1 public key: {e}"),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
             let signature =
                 Secp256r1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
-                        message: format!("Failed to create secp256r1 signature: {}", e),
+                        message: format!("Failed to create secp256r1 signature: {e}"),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -213,6 +214,37 @@ pub fn verify_response_hash_and_signature(
     Ok(())
 }
 
+/// Verifies that a response hash matches the computed hash of the payload
+///
+/// This function computes a Blake2b hash of the payload (excluding the response_hash and signature fields)
+/// and compares it with the provided response hash to ensure data integrity.
+///
+/// # Arguments
+///
+/// * `value` - The JSON payload to verify, containing the full response data
+/// * `response_hash` - The expected Blake2b hash to verify against
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the computed hash matches the provided response hash,
+/// or an error if verification fails.
+///
+/// # Errors
+///
+/// Returns `AtomaProxyError::InternalError` if:
+/// - The computed Blake2b hash does not match the provided response hash
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let payload = serde_json::json!({
+///     "data": "example",
+///     "response_hash": "base64_encoded_hash",
+///     "signature": "signature_data"
+/// });
+/// let response_hash = decode_base64("base64_encoded_hash");
+/// verify_response_hash(&payload, &response_hash)?;
+/// ```
 #[instrument(level = "debug", skip_all)]
 fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Result<()> {
     let mut value_tmp = value.clone();
@@ -230,4 +262,43 @@ fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Resu
         });
     }
     Ok(())
+}
+
+/// Handles the status code returned by the inference service.
+///
+/// This function maps the status code to an appropriate error variant.
+///
+/// # Arguments
+///
+/// * `status_code` - The status code returned by the inference service
+/// * `endpoint` - The API endpoint path where the request was received
+/// * `error` - The error message returned by the inference service
+///
+/// # Returns
+///
+/// Returns an `AtomaServiceError` variant based on the status code.
+#[instrument(level = "info", skip_all, fields(endpoint))]
+pub fn handle_status_code_error(
+    status_code: StatusCode,
+    endpoint: &str,
+    error: &str,
+) -> Result<()> {
+    match status_code {
+        StatusCode::UNAUTHORIZED => Err(AtomaProxyError::AuthError {
+            auth_error: format!("Unauthorized response from inference service: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        StatusCode::INTERNAL_SERVER_ERROR => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned internal server error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        StatusCode::BAD_REQUEST => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned bad request error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        _ => Err(AtomaProxyError::InternalError {
+            message: format!("Inference service returned non-success error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+    }
 }

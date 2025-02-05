@@ -16,7 +16,7 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
-use super::verify_response_hash_and_signature;
+use super::{handle_status_code_error, verify_response_hash_and_signature};
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
 
@@ -57,33 +57,29 @@ pub struct RequestModelImageGenerations {
     paths(image_generations_create),
     components(schemas(CreateImageRequest, CreateImageResponse, ImageData))
 )]
-pub(crate) struct ImageGenerationsOpenApi;
+pub struct ImageGenerationsOpenApi;
 
 impl RequestModel for RequestModelImageGenerations {
     fn new(request: &Value) -> Result<Self> {
-        let model =
-            request
-                .get(MODEL)
-                .and_then(|m| m.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Model field   is required".to_string(),
-                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
-                })?;
+        let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Model field   is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            }
+        })?;
         let n = request
             .get(N)
-            .and_then(|n| n.as_u64())
-            .ok_or(AtomaProxyError::InvalidBody {
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "N field is required".to_string(),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             })?;
-        let size =
-            request
-                .get(SIZE)
-                .and_then(|s| s.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Size field is required".to_string(),
-                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
-                })?;
+        let size = request.get(SIZE).and_then(|s| s.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Size field is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            }
+        })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -105,7 +101,7 @@ impl RequestModel for RequestModelImageGenerations {
             .collect();
 
         if dimensions.len() != 2 {
-            return Err(AtomaProxyError::InvalidBody {
+            return Err(AtomaProxyError::RequestError {
                 message: format!("Invalid size format: {}", self.size),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             });
@@ -184,7 +180,7 @@ pub async fn image_generations_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -195,7 +191,7 @@ pub async fn image_generations_create(
     paths(confidential_image_generations_create),
     components(schemas(ConfidentialComputeRequest))
 )]
-pub(crate) struct ConfidentialImageGenerationsOpenApi;
+pub struct ConfidentialImageGenerationsOpenApi;
 
 /// Create confidential image
 ///
@@ -233,7 +229,7 @@ pub async fn confidential_image_generations_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let payload =
             serde_json::to_value(payload).map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to serialize payload: {}", e),
+                message: format!("Failed to serialize payload: {e}"),
                 endpoint: metadata.endpoint.clone(),
             })?;
         match handle_image_generation_response(
@@ -268,7 +264,7 @@ pub async fn confidential_image_generations_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -327,28 +323,29 @@ async fn handle_image_generation_response(
     let time = Instant::now();
     // Send the request to the AI node
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send image generation request: {:?}", err),
+            message: format!("Failed to send image generation request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse image generation response: {:?}", err),
+            message: format!("Failed to parse image generation response: {err:?}"),
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -370,7 +367,7 @@ async fn handle_image_generation_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {:?}", err),
+            message: format!("Failed to update node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -395,7 +392,7 @@ async fn handle_image_generation_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -406,33 +403,41 @@ async fn handle_image_generation_response(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageRequest {
     /// A text description of the desired image(s). The maximum length is 1000 characters.
+    #[schema(example = "A cute baby sea otter floating on its back")]
     pub prompt: String,
 
     /// The model to use for image generation.
+    #[schema(example = "black-forest-labs/FLUX.1-schnell")]
     pub model: String,
 
     /// The number of images to generate. Defaults to 1.
+    #[schema(example = 1)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
 
     /// The quality of the image that will be generated.
     /// `hd` creates images with finer details and greater consistency across the image.
+    #[schema(example = "hd")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<String>,
 
     /// The format in which the generated images are returned.
+    #[schema(example = "url")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<String>,
 
     /// The size of the generated images.
+    #[schema(example = "1024x1024")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<String>,
 
     /// The style of the generated images.
+    #[schema(example = "vivid")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<String>,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+    #[schema(example = "user-1234")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
@@ -441,6 +446,7 @@ pub struct CreateImageRequest {
 /// Response format for image generation
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageResponse {
+    #[schema(example = 1_677_649_420)]
     pub created: i64,
     pub data: Vec<ImageData>,
 }
@@ -448,7 +454,12 @@ pub struct CreateImageResponse {
 /// Individual image data in the response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ImageData {
+    #[schema(
+        example = "A stunning image of a baby sea otter floating on its back in crystal clear blue water, with gentle ripples surrounding it. The otter's fur appears soft and well-detailed, and its expression is peaceful and content."
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revised_prompt: Option<String>,
+
+    #[schema(example = "https://oaidalleapiprodscus.blob.core.windows.net/private/image.png")]
     pub url: String,
 }

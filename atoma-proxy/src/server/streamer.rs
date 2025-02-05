@@ -1,3 +1,6 @@
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::too_many_lines)]
+
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
@@ -11,7 +14,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
@@ -26,6 +29,9 @@ const DATA_PREFIX: &str = "data: ";
 
 /// The keep-alive chunk
 const KEEP_ALIVE_CHUNK: &[u8] = b": keep-alive\n\n";
+
+/// The keep-alive chunk as a string
+const KEEP_ALIVE_CHUNK_STR: &str = ": keep-alive\n\n";
 
 /// The choices key
 const CHOICES: &str = "choices";
@@ -57,6 +63,8 @@ pub struct Streamer {
     endpoint: String,
     /// A chunk buffer (needed as some chunks might be split into multiple parts)
     chunk_buffer: String,
+    /// The position in the keep-alive chunk buffer
+    keep_alive_pos: usize,
 }
 
 /// Represents the various states of a streaming process
@@ -97,6 +105,7 @@ impl Streamer {
             model_name,
             endpoint,
             chunk_buffer: String::new(),
+            keep_alive_pos: 0,
         }
     }
 
@@ -142,7 +151,7 @@ impl Streamer {
         // Get input tokens
         let input_tokens = usage
             .get("prompt_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -154,7 +163,7 @@ impl Streamer {
         // Get output tokens
         let output_tokens = usage
             .get("completion_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -166,7 +175,7 @@ impl Streamer {
         // Get total tokens
         let total_tokens = usage
             .get("total_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
                     target = "atoma-service-streamer",
@@ -190,12 +199,10 @@ impl Streamer {
             error!(
                 target = "atoma-service-streamer",
                 level = "error",
-                "Error updating node throughput performance: {}",
-                e
+                "Error updating node throughput performance: {e:?}"
             );
             return Err(Error::new(format!(
-                "Error updating node throughput performance: {}",
-                e
+                "Error updating node throughput performance: {e:?}"
             )));
         }
 
@@ -217,8 +224,7 @@ impl Streamer {
                 e
             );
             return Err(Error::new(format!(
-                "Error updating node decode performance: {}",
-                e
+                "Error updating node decode performance: {e:?}"
             )));
         }
         if let Err(e) = self.state_manager_sender.send(
@@ -231,12 +237,10 @@ impl Streamer {
             error!(
                 target = "atoma-service-streamer",
                 level = "error",
-                "Error updating node prefill performance: {}",
-                e
+                "Error updating node prefill performance: {e:?}"
             );
             return Err(Error::new(format!(
-                "Error updating node prefill performance: {}",
-                e
+                "Error updating node prefill performance: {e:?}"
             )));
         }
 
@@ -255,8 +259,7 @@ impl Streamer {
                 e
             );
             return Err(Error::new(format!(
-                "Error updating stack num tokens: {}",
-                e
+                "Error updating stack num tokens: {e:?}"
             )));
         }
 
@@ -292,11 +295,40 @@ impl Stream for Streamer {
                             e
                         );
                         return Poll::Ready(Some(Err(Error::new(format!(
-                            "Invalid UTF-8 sequence: {}",
-                            e
+                            "Invalid UTF-8 sequence: {e:?}"
                         )))));
                     }
                 };
+
+                if let Some(remaining) = KEEP_ALIVE_CHUNK_STR.get(self.keep_alive_pos..) {
+                    if remaining.starts_with(chunk_str) {
+                        self.keep_alive_pos += chunk_str.len();
+                        info!(
+                            target: "atoma-service-streamer",
+                            "Partial keep-alive received, current position: {}",
+                            self.keep_alive_pos
+                        );
+                        if self.keep_alive_pos >= KEEP_ALIVE_CHUNK_STR.len() {
+                            // Full keep-alive received
+                            self.keep_alive_pos = 0;
+                            info!(
+                                target: "atoma-service-streamer",
+                                "Full keep-alive received, resetting position"
+                            );
+                        }
+                        return Poll::Pending;
+                    } else if self.keep_alive_pos > 0 {
+                        // Reset position if we had partial match but current chunk doesn't continue it
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Keep-alive chunk interrupted by non-matching chunk, resetting position"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(format!(
+                            "Keep-alive chunk interrupted by non-matching chunk, {chunk_str}",
+                        )))));
+                    }
+                }
 
                 let chunk_str = chunk_str.strip_prefix(DATA_PREFIX).unwrap_or(chunk_str);
 
@@ -339,8 +371,7 @@ impl Stream for Streamer {
                                 e
                             );
                             return Poll::Ready(Some(Err(Error::new(format!(
-                                "Error parsing chunk: {}",
-                                e
+                                "Error parsing chunk: {e:?}"
                             )))));
                         }
 
@@ -370,14 +401,16 @@ impl Stream for Streamer {
                                 );
                                 self.chunk_buffer.clear();
                                 return Poll::Ready(Some(Err(Error::new(format!(
-                                    "Error parsing chunk: {}",
-                                    e
+                                    "Error parsing chunk: {e:?}"
                                 )))));
                             }
                         }
                     }
                 };
 
+                // We need to verify the hash when the endpoint is not confidential, as the node
+                // is not running within a secure enclave. Otherwise, the fact that the node can process requests
+                // with confidential data is proof of data integrity.
                 let verify_hash = self.endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
                 verify_response_hash_and_signature(&chunk, verify_hash).map_err(|e| {
                     error!(
@@ -386,7 +419,7 @@ impl Stream for Streamer {
                         "Error verifying response: {}",
                         e
                     );
-                    Error::new(format!("Error verifying and signing response: {}", e))
+                    Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
                 if self.start_decode.is_none() {
@@ -405,23 +438,21 @@ impl Stream for Streamer {
                                 "Error updating node latency performance: {}",
                                 e
                             );
-                            Error::new(format!("Error updating node latency performance: {}", e))
+                            Error::new(format!("Error updating node latency performance: {e:?}"))
                         })?;
                 }
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH {
-                    let choices = match chunk.get(CHOICES).and_then(|choices| choices.as_array()) {
-                        Some(choices) => choices,
-                        None => {
-                            error!(
-                                target = "atoma-service-streamer",
-                                level = "error",
-                                "Error getting choices from chunk"
-                            );
-                            return Poll::Ready(Some(Err(Error::new(
-                                "Error getting choices from chunk",
-                            ))));
-                        }
+                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
+                    else {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error getting choices from chunk"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(
+                            "Error getting choices from chunk",
+                        ))));
                     };
 
                     if choices.is_empty() {

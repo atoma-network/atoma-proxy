@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Ignoring these dependencies until we have more comprehensive testing
+    # See: https://github.com/atoma-network/atoma-node/pull/366
+    ignore:
+      - dependency-name: "sui-*"
+        # Ignore all Sui related packages
+
+  # Optionally keep Actions up to date too
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

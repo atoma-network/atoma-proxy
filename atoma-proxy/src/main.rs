@@ -8,11 +8,16 @@ use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_p2p::{AtomaP2pNode, AtomaP2pNodeConfig};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
-use atoma_sui::AtomaSuiConfig;
+use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+use once_cell::sync::Lazy;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::{global, KeyValue};
+use opentelemetry_otlp::{new_exporter, WithExportConfig};
+use opentelemetry_sdk::{trace as sdktrace, Resource};
 use server::{start_server, AtomaServiceConfig};
 use sui_keys::keystore::FileBasedKeystore;
 use tokenizers::Tokenizer;
@@ -21,12 +26,13 @@ use tokio::{
     sync::{watch, RwLock},
     try_join,
 };
-use tracing::{error, instrument};
+use tracing::{error, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{
     non_blocking,
     rolling::{RollingFileAppender, Rotation},
 };
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{
     fmt::{self, format::FmtSpan, time::UtcTime},
     layer::SubscriberExt,
@@ -40,6 +46,38 @@ mod server;
 const LOGS: &str = "./logs";
 /// The log file name.
 const LOG_FILE: &str = "atoma-proxy-service.log";
+const BASELIME_URL: &str = "https://otel-ingest.baselime.io:8443";
+
+static RESOURCE: Lazy<Resource> =
+    Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
+
+fn init_traces() -> Result<sdktrace::Tracer> {
+    let mut map = tonic::metadata::MetadataMap::new();
+    // Note: In production, this should be loaded from environment variables
+    map.insert(
+        "x-api-key",
+        std::env::var("BASELIME_API_KEY")
+            .context("BASELIME_API_KEY not set")?
+            .parse()?,
+    );
+
+    let exporter = new_exporter()
+        .tonic()
+        .with_endpoint(BASELIME_URL)
+        .with_metadata(map)
+        .build_span_exporter()?;
+
+    let config = sdktrace::config().with_resource(RESOURCE.clone());
+    let provider = sdktrace::TracerProvider::builder()
+        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_config(config)
+        .build();
+
+    let tracer = provider.tracer("atoma-proxy");
+    global::set_tracer_provider(provider);
+
+    Ok(tracer)
+}
 
 /// Command line arguments for the Atoma node
 #[derive(Parser)]
@@ -75,7 +113,7 @@ struct Config {
 }
 
 impl Config {
-    async fn load(path: String) -> Self {
+    fn load(path: String) -> Self {
         Self {
             sui: AtomaSuiConfig::from_file_path(path.clone()),
             service: AtomaServiceConfig::from_file_path(path.clone()),
@@ -98,6 +136,10 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
     // Create non-blocking writers
     let (non_blocking_appender, file_guard) = non_blocking(file_appender);
     let (non_blocking_stdout, stdout_guard) = non_blocking(std::io::stdout());
+
+    // Initialize OpenTelemetry tracing
+    let tracer = init_traces()?;
+    let opentelemetry_layer = OpenTelemetryLayer::new(tracer);
 
     // Create JSON formatter for file output
     let file_layer = fmt::layer()
@@ -131,6 +173,7 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
         .with(env_filter)
         .with(console_layer)
         .with(file_layer)
+        .with(opentelemetry_layer)
         .init();
 
     // Return both guards so they can be stored in main
@@ -138,16 +181,17 @@ fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     // Store both guards to keep logging active for the duration of the program
     let (_file_guard, _stdout_guard) = setup_logging(LOGS).context("Failed to setup logging")?;
 
-    tracing::info!("Starting Atoma Proxy Service...");
+    info!(event = "startup", "Starting Atoma Proxy Service...");
 
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
 
-    let config = Config::load(args.config_path).await;
+    let config = Config::load(args.config_path);
     tracing::info!("Configuration loaded successfully");
 
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
@@ -157,12 +201,12 @@ async fn main() -> Result<()> {
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
-    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
 
     let auth = Auth::new(config.auth, state_manager_sender.clone(), Arc::clone(&sui)).await?;
 
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let sui_subscriber = atoma_sui::SuiEventSubscriber::new(
+    let sui_subscriber = Subscriber::new(
         config.sui.clone(),
         event_subscriber_sender,
         stack_retrieve_receiver,
@@ -174,7 +218,7 @@ async fn main() -> Result<()> {
     let atoma_p2p_node =
         AtomaP2pNode::start(config.p2p, Arc::new(keystore), atoma_p2p_sender, true)?;
 
-    let sui = Arc::new(RwLock::new(Sui::new(&config.sui).await?));
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
 
     // Initialize the `AtomaStateManager` service
     let state_manager = AtomaStateManager::new_from_url(
@@ -245,6 +289,7 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
+    #[allow(clippy::redundant_pub_crate)]
     let ctrl_c = tokio::task::spawn(async move {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -262,7 +307,7 @@ async fn main() -> Result<()> {
         state_manager_result,
         proxy_service_result,
         atoma_p2p_node_result,
-        _,
+        (),
     ) = try_join!(
         sui_subscriber_handle,
         server_handle,
@@ -279,6 +324,9 @@ async fn main() -> Result<()> {
         proxy_service_result,
         atoma_p2p_node_result,
     )?;
+
+    // Before the program exits, ensure all spans are exported
+    global::shutdown_tracer_provider();
     Ok(())
 }
 
@@ -309,7 +357,7 @@ async fn main() -> Result<()> {
 /// async fn example() -> Result<()> {
 ///     let models = vec!["facebook/opt-125m".to_string()];
 ///     let revisions = vec!["main".to_string()];
-///     
+///
 ///     let tokenizers = initialize_tokenizers(&models, &revisions).await?;
 ///     Ok(())
 /// }

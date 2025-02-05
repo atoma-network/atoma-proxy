@@ -24,8 +24,8 @@ use crate::server::{
 };
 
 use super::{
-    request_model::RequestModel, update_state_manager, verify_response_hash_and_signature,
-    RESPONSE_HASH_KEY,
+    handle_status_code_error, request_model::RequestModel, update_state_manager,
+    verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -66,26 +66,22 @@ pub struct RequestModelEmbeddings {
         CreateEmbeddingResponse
     ))
 )]
-pub(crate) struct EmbeddingsOpenApi;
+pub struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
     fn new(request: &Value) -> Result<Self> {
-        let model =
-            request
-                .get(MODEL)
-                .and_then(|m| m.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Model field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
-        let input =
-            request
-                .get(INPUT)
-                .and_then(|i| i.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Input field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
+        let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Model field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
+        let input = request.get(INPUT).and_then(|i| i.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Input field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -102,7 +98,7 @@ impl RequestModel for RequestModelEmbeddings {
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Model not supported".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?;
@@ -111,7 +107,7 @@ impl RequestModel for RequestModelEmbeddings {
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to encode input: {:?}", err),
+                message: format!("Failed to encode input: {err:?}"),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
@@ -195,7 +191,7 @@ pub async fn embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -206,7 +202,7 @@ pub async fn embeddings_create(
     paths(confidential_embeddings_create),
     components(schemas(ConfidentialComputeRequest,))
 )]
-pub(crate) struct ConfidentialEmbeddingsOpenApi;
+pub struct ConfidentialEmbeddingsOpenApi;
 
 /// Create confidential embeddings
 ///
@@ -275,9 +271,8 @@ pub async fn confidential_embeddings_create(
                 let total_tokens = response
                     .get("usage")
                     .and_then(|usage| usage.get("total_tokens"))
-                    .and_then(|total_tokens| total_tokens.as_u64())
-                    .map(|n| n as i64)
-                    .unwrap_or(0);
+                    .and_then(serde_json::Value::as_u64)
+                    .map_or(0, |n| n as i64);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -301,7 +296,7 @@ pub async fn confidential_embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -357,21 +352,22 @@ async fn handle_embeddings_response(
     let time = Instant::now();
     // Send the request to the AI node
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send embeddings request: {:?}", err),
+            message: format!("Failed to send embeddings request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response =
@@ -379,7 +375,7 @@ async fn handle_embeddings_response(
             .json::<Value>()
             .await
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to parse embeddings response: {:?}", err),
+                message: format!("Failed to parse embeddings response: {err:?}"),
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -389,8 +385,7 @@ async fn handle_embeddings_response(
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
             .get("total_tokens")
-            .map(|u| u.as_u64().unwrap_or(0))
-            .unwrap_or(0) as i64
+            .map_or(0, |u| u.as_u64().unwrap_or(0)) as i64
     } else {
         num_input_compute_units
     };
@@ -409,7 +404,7 @@ async fn handle_embeddings_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {:?}", err),
+            message: format!("Failed to update node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -436,7 +431,7 @@ async fn handle_embeddings_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -447,6 +442,7 @@ async fn handle_embeddings_response(
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateEmbeddingRequest {
     /// ID of the model to use.
+    #[schema(example = "intfloat/multilingual-e5-large-instruct")]
     pub model: String,
 
     /// Input text to get embeddings for. Can be a string or array of strings.
@@ -454,16 +450,17 @@ pub struct CreateEmbeddingRequest {
     pub input: EmbeddingInput,
 
     /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+    #[schema(example = "user-1234")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 
     /// The format to return the embeddings in. Can be "float" or "base64".
     /// Defaults to "float"
+    #[schema(example = "float")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding_format: Option<String>,
 
     /// The number of dimensions the resulting output embeddings should have.
-    /// Only supported in text-embedding-3 models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dimensions: Option<u32>,
 }
@@ -471,7 +468,9 @@ pub struct CreateEmbeddingRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum EmbeddingInput {
+    #[schema(example = "The quick brown fox jumped over the lazy dog")]
     Single(String),
+    #[schema(example = "[\"The quick brown fox\", \"jumped over the lazy dog\"]")]
     Multiple(Vec<String>),
 }
 
@@ -479,9 +478,11 @@ pub enum EmbeddingInput {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateEmbeddingResponse {
     /// The object type, which is always "list"
+    #[schema(example = "list")]
     pub object: String,
 
     /// The model used for generating embeddings
+    #[schema(example = "intfloat/multilingual-e5-large-instruct")]
     pub model: String,
 
     /// List of embedding objects
@@ -495,12 +496,15 @@ pub struct CreateEmbeddingResponse {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingObject {
     /// The object type, which is always "embedding"
+    #[schema(example = "embedding")]
     pub object: String,
 
     /// The embedding vector
+    #[schema(example = "[0.0023064255, -0.009327292]")]
     pub embedding: Vec<f32>,
 
     /// Index of the embedding in the list of embeddings
+    #[schema(example = 0)]
     pub index: usize,
 }
 
@@ -508,8 +512,10 @@ pub struct EmbeddingObject {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingUsage {
     /// Number of tokens in the prompt
+    #[schema(example = 8)]
     pub prompt_tokens: u32,
 
     /// Total tokens used in the request
+    #[schema(example = 8)]
     pub total_tokens: u32,
 }

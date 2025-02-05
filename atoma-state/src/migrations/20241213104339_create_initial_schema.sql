@@ -17,11 +17,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     node_id TEXT NOT NULL,
     sui_address TEXT NOT NULL,
     public_address TEXT,
-<<<<<<< HEAD
-    timestamp BIGINT
-=======
     country TEXT
->>>>>>> main
 );
 
 -- Create node_subscriptions table

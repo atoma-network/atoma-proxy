@@ -4,7 +4,7 @@ x-atoma-proxy-base: &atoma-proxy-base
     context: .
     dockerfile: Dockerfile
     args: &atoma-proxy-base-build-args
-     TRACE_LEVEL: ${TRACE_LEVEL:-info}
+      TRACE_LEVEL: ${TRACE_LEVEL:-info}
   volumes:
     - ${CONFIG_PATH:-./config.toml}:/app/config.toml
     - ./logs:/app/logs
@@ -101,7 +101,6 @@ services:
       - "traefik.http.routers.credentials.tls.certresolver=myresolver"
       - "traefik.http.routers.credentials.service=credentials_service"
       - "traefik.http.services.credentials_service.loadbalancer.server.port=8081" # This is the internal port of the docker, this have to match the port in the config.toml
-
 
   backend:
     profiles: ["cloud"]
