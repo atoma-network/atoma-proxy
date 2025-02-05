@@ -21,7 +21,7 @@ use utoipa::{OpenApi, ToSchema};
 use super::metrics::{
     CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS, CHAT_COMPLETIONS_LATENCY_METRICS,
     CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
-    TOTAL_FAILED_CHAT_REQUESTS,
+    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
 use super::request_model::RequestModel;
 use super::{
@@ -127,10 +127,13 @@ pub async fn chat_completions_create(
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
-                TOTAL_FAILED_CHAT_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -374,10 +377,17 @@ pub async fn confidential_chat_completions_create(
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
-                TOTAL_FAILED_CHAT_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,

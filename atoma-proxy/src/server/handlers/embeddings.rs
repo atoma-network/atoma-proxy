@@ -9,6 +9,7 @@ use axum::{
     Extension, Json,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -24,8 +25,13 @@ use crate::server::{
 };
 
 use super::{
-    handle_status_code_error, request_model::RequestModel, update_state_manager,
-    verify_response_hash_and_signature, RESPONSE_HASH_KEY,
+    handle_status_code_error,
+    metrics::{
+        TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
+    },
+    request_model::RequestModel,
+    update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -171,13 +177,20 @@ pub async fn embeddings_create(
             payload,
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
         {
-            Ok(response) => Ok(Json(response).into_response()),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(Json(response).into_response())
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -259,7 +272,7 @@ pub async fn confidential_embeddings_create(
             payload,
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
@@ -280,9 +293,14 @@ pub async fn confidential_embeddings_create(
                     total_tokens,
                     &metadata.endpoint,
                 )?;
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 Ok(Json(response).into_response())
             }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -348,6 +366,12 @@ async fn handle_embeddings_response(
     model_name: String,
     stack_small_id: i64,
 ) -> Result<Value> {
+    // Record the request in the total text embedding requests metric
+    let model_label: String = model_name.clone();
+
+    // Record the request in the total failed requests metric
+    TEXT_EMBEDDINGS_NUM_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
@@ -434,6 +458,11 @@ async fn handle_embeddings_response(
             message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
+
+    TEXT_EMBEDDINGS_LATENCY_METRICS.record(
+        time.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
 
     Ok(response)
 }
