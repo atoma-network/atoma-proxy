@@ -11,10 +11,7 @@ use axum::{
 use base64::engine::{general_purpose::STANDARD, Engine};
 use reqwest::header::CONTENT_LENGTH;
 use serde_json::Value;
-use std::time::Instant;
 use tracing::instrument;
-
-use crate::telemetry::{record_db_operation, record_middleware_duration, record_request_duration};
 
 use super::{
     error::AtomaProxyError,
@@ -458,41 +455,6 @@ pub async fn confidential_compute_middleware(
     req_parts.extensions.insert(request_metadata);
     let req = Request::from_parts(req_parts, Body::from(body_bytes));
     Ok(next.run(req).await)
-}
-
-/// Middleware to track request latency and middleware timing
-#[instrument(skip_all)]
-pub async fn track_metrics(request: Request<Body>, next: Next) -> Result<Response> {
-    let start = Instant::now();
-
-    // Track the total request duration
-    let response = next.run(request).await;
-    let request_duration = start.elapsed().as_secs_f64();
-
-    // Record the metrics
-    record_request_duration(request_duration);
-
-    Ok(response)
-}
-
-/// Middleware to track database operations timing
-#[instrument(skip_all)]
-pub async fn track_db_metrics(
-    _: State<ProxyState>,
-    request: Request<Body>,
-    next: Next,
-) -> Result<Response> {
-    let start = Instant::now();
-
-    // Track middleware timing
-    let response = next.run(request).await;
-    let middleware_duration = start.elapsed().as_secs_f64();
-
-    // Record database operation metrics
-    record_db_operation(false, middleware_duration);
-    record_middleware_duration(middleware_duration);
-
-    Ok(response)
 }
 
 pub mod auth {

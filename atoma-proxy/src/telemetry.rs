@@ -1,11 +1,6 @@
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
-use opentelemetry::{
-    global,
-    metrics::{Counter, Histogram, Meter},
-    trace::TracerProvider,
-    KeyValue,
-};
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     metrics::{self as sdkmetrics},
@@ -28,61 +23,12 @@ use tracing_subscriber::{
 };
 
 const LOG_FILE: &str = "atoma-proxy-service.log";
+
 // Default Grafana OTLP endpoint if not specified in environment
 const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 
 static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
-
-// Add global metrics
-static GLOBAL_METER: Lazy<Meter> = Lazy::new(|| global::meter("atoma-proxy"));
-
-// Define metric instruments
-static REQUEST_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("request_duration")
-        .with_description("Total request latency in seconds")
-        .with_unit("s")
-        .build()
-});
-
-static MIDDLEWARE_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("middleware_duration")
-        .with_description("Middleware execution time in seconds")
-        .with_unit("s")
-        .build()
-});
-
-static DB_READ_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("db_read_duration")
-        .with_description("Database read operation duration in seconds")
-        .with_unit("s")
-        .build()
-});
-
-static DB_WRITE_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("db_write_duration")
-        .with_description("Database write operation duration in seconds")
-        .with_unit("s")
-        .build()
-});
-
-static DB_READ_COUNT: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("db_read_count")
-        .with_description("Number of database read operations")
-        .build()
-});
-
-static DB_WRITE_COUNT: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("db_write_count")
-        .with_description("Number of database write operations")
-        .build()
-});
 
 /// Initialize metrics with OpenTelemetry SDK
 fn init_metrics() -> sdkmetrics::SdkMeterProvider {
@@ -174,25 +120,6 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
 
     // Return both guards so they can be stored in main
     Ok((file_guard, stdout_guard))
-}
-
-/// Record a database operation metric
-pub fn record_db_operation(is_write: bool, duration: f64) {
-    if is_write {
-        DB_WRITE_DURATION.record(duration, &[]);
-        DB_WRITE_COUNT.add(1, &[]);
-    } else {
-        DB_READ_DURATION.record(duration, &[]);
-        DB_READ_COUNT.add(1, &[]);
-    }
-}
-
-pub fn record_request_duration(duration: f64) {
-    REQUEST_DURATION.record(duration, &[]);
-}
-
-pub fn record_middleware_duration(duration: f64) {
-    MIDDLEWARE_DURATION.record(duration, &[]);
 }
 
 /// Ensure all spans are exported before shutdown

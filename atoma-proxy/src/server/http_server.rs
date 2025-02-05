@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use axum::middleware::{from_fn, from_fn_with_state};
+use axum::middleware::from_fn_with_state;
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -28,7 +28,6 @@ use crate::server::{
         image_generations::IMAGE_GENERATIONS_PATH,
         models::{models_list, MODELS_PATH},
     },
-    middleware::{track_db_metrics, track_metrics},
     Result,
 };
 
@@ -187,8 +186,6 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
         .merge(openapi_routes())
-        .layer(from_fn_with_state(state.clone(), track_db_metrics))
-        .layer(from_fn(track_metrics))
 }
 
 /// Starts the atoma proxy server.
