@@ -77,13 +77,13 @@ pub struct EmbeddingsOpenApi;
 impl RequestModel for RequestModelEmbeddings {
     fn new(request: &Value) -> Result<Self> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Model field is required".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             }
         })?;
         let input = request.get(INPUT).and_then(|i| i.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Input field is required".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             }
@@ -104,7 +104,7 @@ impl RequestModel for RequestModelEmbeddings {
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Model not supported".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?;

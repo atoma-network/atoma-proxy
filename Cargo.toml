@@ -9,7 +9,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1.0.91"
-async-trait = "0.1.83"
+async-trait = "0.1.86"
 atoma-auth = { path = "./atoma-auth" }
 atoma-proxy-service = { path = "./atoma-proxy-service" }
 atoma-state = { path = "./atoma-state" }
