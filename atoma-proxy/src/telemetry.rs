@@ -25,6 +25,7 @@ use tracing_subscriber::{
 const LOG_FILE: &str = "atoma-proxy-service.log";
 
 // Default Grafana OTLP endpoint if not specified in environment
+
 const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 
 static RESOURCE: Lazy<Resource> =
