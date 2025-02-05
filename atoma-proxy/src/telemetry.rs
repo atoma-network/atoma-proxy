@@ -2,15 +2,17 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use opentelemetry::{
     global,
-    metrics::{Counter, Histogram, Meter, Unit},
+    metrics::{Counter, Histogram, Meter},
     trace::TracerProvider,
     KeyValue,
 };
-use opentelemetry_otlp::{new_exporter, WithExportConfig};
+use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     metrics::{self as sdkmetrics},
-    trace as sdktrace, Resource,
+    trace::{self as sdktrace, RandomIdGenerator, Sampler},
+    Resource,
 };
+
 use std::path::Path;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{
@@ -40,51 +42,51 @@ static REQUEST_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     GLOBAL_METER
         .f64_histogram("request_duration")
         .with_description("Total request latency in seconds")
-        .with_unit(Unit::new("s"))
-        .init()
+        .with_unit("s")
+        .build()
 });
 
 static MIDDLEWARE_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     GLOBAL_METER
         .f64_histogram("middleware_duration")
         .with_description("Middleware execution time in seconds")
-        .with_unit(Unit::new("s"))
-        .init()
+        .with_unit("s")
+        .build()
 });
 
 static DB_READ_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     GLOBAL_METER
         .f64_histogram("db_read_duration")
         .with_description("Database read operation duration in seconds")
-        .with_unit(Unit::new("s"))
-        .init()
+        .with_unit("s")
+        .build()
 });
 
 static DB_WRITE_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     GLOBAL_METER
         .f64_histogram("db_write_duration")
         .with_description("Database write operation duration in seconds")
-        .with_unit(Unit::new("s"))
-        .init()
+        .with_unit("s")
+        .build()
 });
 
 static DB_READ_COUNT: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
         .u64_counter("db_read_count")
         .with_description("Number of database read operations")
-        .init()
+        .build()
 });
 
 static DB_WRITE_COUNT: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
         .u64_counter("db_write_count")
         .with_description("Number of database write operations")
-        .init()
+        .build()
 });
 
 /// Initialize metrics with OpenTelemetry SDK
-fn init_metrics() -> sdkmetrics::MeterProvider {
-    sdkmetrics::MeterProvider::builder()
+fn init_metrics() -> sdkmetrics::SdkMeterProvider {
+    sdkmetrics::SdkMeterProvider::builder()
         .with_resource(RESOURCE.clone())
         .build()
 }
@@ -94,19 +96,23 @@ fn init_traces() -> Result<sdktrace::Tracer> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
 
-    let exporter = new_exporter()
-        .tonic()
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
         .with_endpoint(otlp_endpoint)
-        .build_span_exporter()?;
+        .build()?;
 
-    let config = sdktrace::config().with_resource(RESOURCE.clone());
-    let provider = sdktrace::TracerProvider::builder()
+    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_config(config)
+        .with_sampler(Sampler::AlwaysOn)
+        .with_id_generator(RandomIdGenerator::default())
+        .with_max_events_per_span(64)
+        .with_max_attributes_per_span(16)
+        .with_max_events_per_span(16)
+        .with_resource(RESOURCE.clone())
         .build();
 
-    let tracer = provider.tracer("atoma-proxy");
-    global::set_tracer_provider(provider);
+    let tracer = tracer_provider.tracer("atoma-proxy");
+    global::set_tracer_provider(tracer_provider);
 
     Ok(tracer)
 }
