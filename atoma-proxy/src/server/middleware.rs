@@ -14,9 +14,13 @@ use serde_json::Value;
 use tracing::instrument;
 
 use super::{
-    check_auth, error::AtomaProxyError, handlers::{
-        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, models::MODELS_PATH, nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager
-    }, http_server::ProxyState
+    check_auth,
+    error::AtomaProxyError,
+    handlers::{
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, models::MODELS_PATH,
+        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager,
+    },
+    http_server::ProxyState,
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
