@@ -180,9 +180,7 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-    environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=false
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+    env_file: .env
     networks:
       - atoma-network
     depends_on:
