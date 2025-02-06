@@ -144,7 +144,7 @@ services:
       - atoma-network
 
   otel-collector:
-    image: otel/opentelemetry-collector:latest
+    image: otel/opentelemetry-collector:0.119.0
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
@@ -156,9 +156,12 @@ services:
       - atoma-network
     depends_on:
       - prometheus
+      - grafana
+      - loki
+      - tempo
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -172,7 +175,7 @@ services:
       - atoma-network
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.5.1
     ports:
       - "3000:3000"
     volumes:
@@ -191,7 +194,7 @@ services:
       retries: 5
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:2.9.4
     ports:
       - "3100:3100"
     volumes:
@@ -202,7 +205,7 @@ services:
       - atoma-network
 
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.7.0
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml
