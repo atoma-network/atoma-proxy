@@ -808,7 +808,7 @@ pub async fn handle_node_registration_event(
 ) -> Result<()> {
     state_manager
         .state
-        .insert_new_node(event.node_small_id.inner as i64, address)
+        .insert_new_node(event.node_small_id.inner as i64, event.badge_id, address)
         .await?;
     Ok(())
 }

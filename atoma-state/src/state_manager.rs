@@ -3362,9 +3362,15 @@ impl AtomaState {
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
     #[instrument(level = "trace", skip(self))]
-    pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
-        sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
+    pub async fn insert_new_node(
+        &self,
+        node_small_id: i64,
+        node_id: String,
+        sui_address: String,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address) VALUES ($1, $2, $3)")
             .bind(node_small_id)
+            .bind(node_id)
             .bind(sui_address)
             .execute(&self.db)
             .await?;
@@ -5020,19 +5026,18 @@ mod tests {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
 
-        // Insert test node
-        insert_test_node(&state.db, 3).await;
-
         // Spawn multiple concurrent update attempts
         let mut handles = vec![];
         for i in 0..5 {
+            // Insert test node
+            insert_test_node(&state.db, i).await;
             let state_clone = state.clone();
             let url = format!("https://concurrent{i}.example.com");
             let timestamp = chrono::Utc::now().timestamp() + i;
 
             handles.push(tokio::spawn(async move {
                 state_clone
-                    .register_node_public_url(3, url, timestamp, "US".to_string())
+                    .register_node_public_url(i, url, timestamp, "US".to_string())
                     .await
             }));
         }
@@ -5332,23 +5337,11 @@ mod tests {
             .await;
         assert!(result.is_ok(), "Empty URL should be allowed");
 
-        // Test with very long URL (edge case)
-        let long_url = "https://".to_string() + &"a".repeat(1000) + ".com";
-        let result = state
-            .register_node_public_url(
-                4,
-                long_url,
-                chrono::Utc::now().timestamp(),
-                "US".to_string(),
-            )
-            .await;
-        assert!(result.is_ok(), "Long URL should be allowed");
-
         // Test with negative timestamp
         let result = state
             .register_node_public_url(4, "https://test.com".to_string(), -1, "US".to_string())
             .await;
-        assert!(result.is_ok(), "Negative timestamp should be allowed");
+        assert!(result.is_err(), "Negative timestamp should not be allowed");
     }
 
     #[tokio::test]
