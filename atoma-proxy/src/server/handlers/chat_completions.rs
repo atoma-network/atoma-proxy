@@ -11,15 +11,24 @@ use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
+use super::metrics::{
+    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS, CHAT_COMPLETIONS_LATENCY_METRICS,
+    CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
+    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+};
 use super::request_model::RequestModel;
-use super::{update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY};
-use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_TOKENS, MODEL};
+use super::{
+    handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
+    RESPONSE_HASH_KEY,
+};
+use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
 ///
@@ -58,7 +67,7 @@ const STREAM: &str = "stream";
         ChatCompletionChunkDelta
     ))
 )]
-pub(crate) struct ChatCompletionsOpenApi;
+pub struct ChatCompletionsOpenApi;
 
 /// Create chat completion
 ///
@@ -112,14 +121,19 @@ pub async fn chat_completions_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
-            .and_then(|stream| stream.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or_default();
 
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -133,7 +147,7 @@ pub async fn chat_completions_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -196,6 +210,14 @@ async fn handle_chat_completions_request(
     payload: Value,
     is_streaming: bool,
 ) -> Result<Response<Body>> {
+    // Record the estimated total tokens in the chat completions estimated total tokens metric
+    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS.add(
+        metadata.num_compute_units,
+        &[KeyValue::new("model", metadata.model_name.clone())],
+    );
+    // Record the request in the chat completions num requests metric
+    CHAT_COMPLETIONS_NUM_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+
     if is_streaming {
         handle_streaming_response(
             state,
@@ -242,7 +264,7 @@ async fn handle_chat_completions_request(
     )
 )]
 #[allow(dead_code)]
-pub async fn chat_completions_create_stream(
+pub fn chat_completions_create_stream(
     Extension(_metadata): Extension<RequestMetadataExtension>,
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
@@ -285,7 +307,7 @@ pub async fn chat_completions_create_stream(
     ),
     components(schemas(ConfidentialComputeRequest))
 )]
-pub(crate) struct ConfidentialChatCompletionsOpenApi;
+pub struct ConfidentialChatCompletionsOpenApi;
 
 /// Create confidential chat completion
 ///
@@ -301,7 +323,7 @@ pub(crate) struct ConfidentialChatCompletionsOpenApi;
 /// * A streaming SSE connection for real-time completions
 /// * An `AtomaProxyError` error if the request processing fails
 ///
-/// ## Errors   
+/// ## Errors
 ///
 /// Returns `AtomaProxyError::InvalidBody` if:
 /// * The 'stream' field is missing or invalid in the payload
@@ -349,14 +371,23 @@ pub async fn confidential_chat_completions_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
-            .and_then(|stream| stream.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or_default();
 
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -370,7 +401,7 @@ pub async fn confidential_chat_completions_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -392,7 +423,7 @@ pub async fn confidential_chat_completions_create(
     )
 )]
 #[allow(dead_code)]
-pub async fn confidential_chat_completions_create_stream(
+pub fn confidential_chat_completions_create_stream(
     Extension(_metadata): Extension<RequestMetadataExtension>,
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
@@ -472,29 +503,32 @@ async fn handle_non_streaming_response(
     let client = reqwest::Client::new();
     let time = Instant::now();
 
+    let model_label = model_name.clone();
+
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send OpenAI API request: {:?}", err),
+            message: format!("Failed to send OpenAI API request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse OpenAI API response: {:?}", err),
+            message: format!("Failed to parse OpenAI API response: {err:?}"),
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -503,23 +537,20 @@ async fn handle_non_streaming_response(
     let total_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("total_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let input_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("completion_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let output_tokens = response
         .get("usage")
         .and_then(|usage| usage.get("prompt_tokens"))
-        .and_then(|total_tokens| total_tokens.as_u64())
-        .map(|n| n as i64)
-        .unwrap_or(0);
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |n| n as i64);
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
@@ -537,7 +568,7 @@ async fn handle_non_streaming_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating node throughput performance: {}", err),
+            message: format!("Error updating node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -564,7 +595,7 @@ async fn handle_non_streaming_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -578,10 +609,15 @@ async fn handle_non_streaming_response(
         &endpoint,
     ) {
         return Err(AtomaProxyError::InternalError {
-            message: format!("Error updating state manager: {}", e),
+            message: format!("Error updating state manager: {e:?}"),
             endpoint: endpoint.to_string(),
         });
     }
+
+    CHAT_COMPLETIONS_LATENCY_METRICS.record(
+        time.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
 
     Ok(response.into_response())
 }
@@ -643,28 +679,28 @@ async fn handle_streaming_response(
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
-    // NOTE: If streaming is requested, add the include_usage option to the payload
-    // so that the atoma node state manager can be updated with the total number of tokens
-    // that were processed for this request.
-
     let client = reqwest::Client::new();
     let start = Instant::now();
+
+    let model_label: String = model_name.clone();
+
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Error sending request to inference service: {}", e),
+            message: format!("Error sending request to inference service: {e:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let stream = response.bytes_stream();
@@ -686,6 +722,12 @@ async fn handle_streaming_response(
             .text("keep-alive"),
     );
 
+    // Record the request in the chat completions num requests metric
+    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+        start.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
+
     Ok(stream.into_response())
 }
 
@@ -701,13 +743,13 @@ pub struct RequestModelChatCompletions {
 
     /// The maximum number of tokens to generate in the completion
     /// This limits the length of the model's response
-    max_tokens: u64,
+    max_completion_tokens: u64,
 }
 
 impl RequestModel for RequestModelChatCompletions {
     fn new(request: &Value) -> Result<Self> {
         let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
-            AtomaProxyError::InvalidBody {
+            AtomaProxyError::RequestError {
                 message: "Missing or invalid 'model' field".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             }
@@ -716,20 +758,21 @@ impl RequestModel for RequestModelChatCompletions {
         let messages = request
             .get(MESSAGES)
             .and_then(|m| m.as_array())
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Missing or invalid 'messages' field".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
 
-        let max_tokens = request
-            .get(MAX_TOKENS)
-            .and_then(|m| m.as_u64())
+        let max_completion_tokens = request
+            .get(MAX_COMPLETION_TOKENS)
+            .or_else(|| request.get(MAX_TOKENS))
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(DEFAULT_MAX_TOKENS);
 
         Ok(Self {
             model: model.to_string(),
-            messages: messages.to_vec(),
-            max_tokens,
+            messages: messages.clone(),
+            max_completion_tokens,
         })
     }
 
@@ -742,7 +785,7 @@ impl RequestModel for RequestModelChatCompletions {
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Model not supported".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             })?;
@@ -750,11 +793,11 @@ impl RequestModel for RequestModelChatCompletions {
 
         let mut total_num_tokens = 0;
 
-        for message in self.messages.iter() {
+        for message in &self.messages {
             let content = message
                 .get("content")
                 .and_then(|content| content.as_str())
-                .ok_or_else(|| AtomaProxyError::InvalidBody {
+                .ok_or_else(|| AtomaProxyError::RequestError {
                     message: "Missing or invalid message content".to_string(),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
@@ -762,7 +805,7 @@ impl RequestModel for RequestModelChatCompletions {
             let num_tokens = tokenizer
                 .encode(content, true)
                 .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to encode message: {:?}", err),
+                    message: format!("Failed to encode message: {err:?}"),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?
                 .get_ids()
@@ -774,7 +817,7 @@ impl RequestModel for RequestModelChatCompletions {
             // add 1 token as a safety margin, for the role name of the message
             total_num_tokens += 1;
         }
-        total_num_tokens += self.max_tokens;
+        total_num_tokens += self.max_completion_tokens;
         Ok(total_num_tokens)
     }
 }
@@ -835,9 +878,15 @@ pub struct ChatCompletionRequest {
     pub stop: Option<Vec<String>>,
 
     /// The maximum number of tokens to generate in the chat completion
-    #[schema(example = 2048)]
+    #[schema(example = 4096)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[deprecated = "It is recommended to use max_completion_tokens instead"]
     pub max_tokens: Option<i32>,
+
+    /// The maximum number of tokens to generate in the chat completion
+    #[schema(example = 4096)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<i32>,
 
     /// Number between -2.0 and 2.0. Positive values penalize new tokens based on
     /// whether they appear in the text so far
@@ -909,7 +958,7 @@ pub struct ChatCompletionResponse {
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chat completion was created.
-    #[schema(example = 1677652288)]
+    #[schema(example = 1_677_652_288)]
     pub created: i64,
 
     /// The model used for the chat completion.
@@ -952,6 +1001,7 @@ pub struct ChatCompletionChoice {
     pub logprobs: Option<Value>,
 }
 
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompletionUsage {
     /// Number of tokens in the prompt.
@@ -975,7 +1025,7 @@ pub struct ChatCompletionChunk {
     pub id: String,
 
     /// The Unix timestamp (in seconds) of when the chunk was created.
-    #[schema(example = 1677652288)]
+    #[schema(example = 1_677_652_288)]
     pub created: i64,
 
     /// The model used for the chat completion.

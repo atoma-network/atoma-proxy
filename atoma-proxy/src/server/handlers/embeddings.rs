@@ -9,6 +9,7 @@ use axum::{
     Extension, Json,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -24,8 +25,13 @@ use crate::server::{
 };
 
 use super::{
-    request_model::RequestModel, update_state_manager, verify_response_hash_and_signature,
-    RESPONSE_HASH_KEY,
+    handle_status_code_error,
+    metrics::{
+        TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
+    },
+    request_model::RequestModel,
+    update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -66,26 +72,22 @@ pub struct RequestModelEmbeddings {
         CreateEmbeddingResponse
     ))
 )]
-pub(crate) struct EmbeddingsOpenApi;
+pub struct EmbeddingsOpenApi;
 
 impl RequestModel for RequestModelEmbeddings {
     fn new(request: &Value) -> Result<Self> {
-        let model =
-            request
-                .get(MODEL)
-                .and_then(|m| m.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Model field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
-        let input =
-            request
-                .get(INPUT)
-                .and_then(|i| i.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Input field is required".to_string(),
-                    endpoint: EMBEDDINGS_PATH.to_string(),
-                })?;
+        let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Model field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
+        let input = request.get(INPUT).and_then(|i| i.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Input field is required".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            }
+        })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -102,7 +104,7 @@ impl RequestModel for RequestModelEmbeddings {
             .models
             .iter()
             .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::InvalidBody {
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "Model not supported".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?;
@@ -111,7 +113,7 @@ impl RequestModel for RequestModelEmbeddings {
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to encode input: {:?}", err),
+                message: format!("Failed to encode input: {err:?}"),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
@@ -175,13 +177,20 @@ pub async fn embeddings_create(
             payload,
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
         {
-            Ok(response) => Ok(Json(response).into_response()),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(Json(response).into_response())
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -195,7 +204,7 @@ pub async fn embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -206,7 +215,7 @@ pub async fn embeddings_create(
     paths(confidential_embeddings_create),
     components(schemas(ConfidentialComputeRequest,))
 )]
-pub(crate) struct ConfidentialEmbeddingsOpenApi;
+pub struct ConfidentialEmbeddingsOpenApi;
 
 /// Create confidential embeddings
 ///
@@ -263,7 +272,7 @@ pub async fn confidential_embeddings_create(
             payload,
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
@@ -275,9 +284,8 @@ pub async fn confidential_embeddings_create(
                 let total_tokens = response
                     .get("usage")
                     .and_then(|usage| usage.get("total_tokens"))
-                    .and_then(|total_tokens| total_tokens.as_u64())
-                    .map(|n| n as i64)
-                    .unwrap_or(0);
+                    .and_then(serde_json::Value::as_u64)
+                    .map_or(0, |n| n as i64);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -285,9 +293,14 @@ pub async fn confidential_embeddings_create(
                     total_tokens,
                     &metadata.endpoint,
                 )?;
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 Ok(Json(response).into_response())
             }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -301,7 +314,7 @@ pub async fn confidential_embeddings_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -353,25 +366,32 @@ async fn handle_embeddings_response(
     model_name: String,
     stack_small_id: i64,
 ) -> Result<Value> {
+    // Record the request in the total text embedding requests metric
+    let model_label: String = model_name.clone();
+
+    // Record the request in the total failed requests metric
+    TEXT_EMBEDDINGS_NUM_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send embeddings request: {:?}", err),
+            message: format!("Failed to send embeddings request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response =
@@ -379,7 +399,7 @@ async fn handle_embeddings_response(
             .json::<Value>()
             .await
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to parse embeddings response: {:?}", err),
+                message: format!("Failed to parse embeddings response: {err:?}"),
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -389,8 +409,7 @@ async fn handle_embeddings_response(
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
             .get("total_tokens")
-            .map(|u| u.as_u64().unwrap_or(0))
-            .unwrap_or(0) as i64
+            .map_or(0, |u| u.as_u64().unwrap_or(0)) as i64
     } else {
         num_input_compute_units
     };
@@ -409,7 +428,7 @@ async fn handle_embeddings_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {:?}", err),
+            message: format!("Failed to update node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -436,9 +455,14 @@ async fn handle_embeddings_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
+
+    TEXT_EMBEDDINGS_LATENCY_METRICS.record(
+        time.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
 
     Ok(response)
 }

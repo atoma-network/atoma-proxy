@@ -2,20 +2,19 @@ use std::sync::Arc;
 
 use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-
 use axum::middleware::from_fn_with_state;
 use axum::{
     routing::{get, post},
     Json, Router,
 };
-
 use flume::Sender;
+use reqwest::Method;
 use serde::Serialize;
-
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::instrument;
 
 pub use components::openapi::openapi_routes;
@@ -100,7 +99,7 @@ pub struct ProxyState {
 ///
 /// The health check endpoint is accessible at `/health` and returns a simple
 /// JSON response indicating the service status.
-pub(crate) struct HealthOpenApi;
+pub struct HealthOpenApi;
 
 #[derive(Serialize, ToSchema)]
 pub struct HealthResponse {
@@ -153,7 +152,7 @@ pub async fn health() -> Result<Json<HealthResponse>> {
 /// # Returns
 ///
 /// Returns an configured `Router` instance with all routes and middleware set up
-pub fn create_router(state: ProxyState) -> Router {
+pub fn create_router(state: &ProxyState) -> Router {
     let confidential_router = Router::new()
         .route(
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
@@ -173,7 +172,13 @@ pub fn create_router(state: ProxyState) -> Router {
         )))
         .with_state(state.clone());
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_headers(Any);
+
     Router::new()
+        .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
@@ -182,13 +187,13 @@ pub fn create_router(state: ProxyState) -> Router {
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_list))
         .route(NODES_CREATE_PATH, post(nodes_create))
         .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
         .with_state(state.clone())
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
         .merge(openapi_routes())
+        .layer(cors)
 }
 
 /// Starts the atoma proxy server.
@@ -221,13 +226,13 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
     };
-    let router = create_router(proxy_state);
+    let router = create_router(&proxy_state);
     let server =
         axum::serve(tcp_listener, router.into_make_service()).with_graceful_shutdown(async move {
             shutdown_receiver
                 .changed()
                 .await
-                .expect("Error receiving shutdown signal")
+                .expect("Error receiving shutdown signal");
         });
     server.await?;
     Ok(())

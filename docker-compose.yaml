@@ -4,7 +4,7 @@ x-atoma-proxy-base: &atoma-proxy-base
     context: .
     dockerfile: Dockerfile
     args: &atoma-proxy-base-build-args
-     TRACE_LEVEL: ${TRACE_LEVEL:-info}
+      TRACE_LEVEL: ${TRACE_LEVEL:-info}
   volumes:
     - ${CONFIG_PATH:-./config.toml}:/app/config.toml
     - ./logs:/app/logs
@@ -102,7 +102,6 @@ services:
       - "traefik.http.routers.credentials.service=credentials_service"
       - "traefik.http.services.credentials_service.loadbalancer.server.port=8081" # This is the internal port of the docker, this have to match the port in the config.toml
 
-
   backend:
     profiles: ["cloud"]
     image: mysten/zklogin:prover-stable
@@ -135,10 +134,32 @@ services:
     networks:
       - atoma-network
 
+  grafana-otel:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"  # Grafana UI
+      - "4317:4317"  # OTLP gRPC endpoint
+      - "4318:4318"  # OTLP HTTP endpoint
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true  # Enable anonymous access for development, remove for production
+      - OTEL_METRIC_EXPORT_INTERVAL=500 # Export metrics every 500ms, remove for production
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    networks:
+      - atoma-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-data:
   sui-config-volume:
   letsencrypt:
+  grafana_data:
 
 networks:
   atoma-network:

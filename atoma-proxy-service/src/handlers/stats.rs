@@ -15,19 +15,19 @@ use crate::{ComputeUnitsProcessedQuery, LatencyQuery, ProxyServiceState, StatsSt
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// The path for the compute_units_processed endpoint.
-pub(crate) const COMPUTE_UNITS_PROCESSED_PATH: &str = "/compute_units_processed";
+pub const COMPUTE_UNITS_PROCESSED_PATH: &str = "/compute_units_processed";
 /// The path for the compute_units_processed endpoint.
-pub(crate) const LATENCY_PATH: &str = "/latency";
+pub const LATENCY_PATH: &str = "/latency";
 /// The path for the get_stats_stacks endpoint.
-pub(crate) const GET_STATS_STACKS_PATH: &str = "/get_stats_stacks";
+pub const GET_STATS_STACKS_PATH: &str = "/get_stats_stacks";
 /// The path for the get_nodes_distribution endpoint.
-pub(crate) const GET_NODES_DISTRIBUTION_PATH: &str = "/get_nodes_distribution";
+pub const GET_NODES_DISTRIBUTION_PATH: &str = "/get_nodes_distribution";
 
 /// Returns a router with the stats endpoint.
 ///
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the stacks endpoint
-pub(crate) fn stats_router() -> Router<ProxyServiceState> {
+pub fn stats_router() -> Router<ProxyServiceState> {
     Router::new()
         .route(
             COMPUTE_UNITS_PROCESSED_PATH,
@@ -45,7 +45,7 @@ pub(crate) fn stats_router() -> Router<ProxyServiceState> {
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_compute_units_processed))]
-pub(crate) struct GetComputeUnitsProcessed;
+pub struct GetComputeUnitsProcessed;
 
 /// Get compute unit processed in the last `hours` hours per model.
 ///
@@ -106,7 +106,7 @@ async fn get_compute_units_processed(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_latency))]
-pub(crate) struct GetLatency;
+pub struct GetLatency;
 
 /// Get latency performance of the network for last 'query.hours' hours. E.g. get latency performance for last 2 hours.
 /// The response is vector of LatencyResponse objects.
@@ -168,7 +168,7 @@ async fn get_latency(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_stats_stacks))]
-pub(crate) struct GetStatsStacks;
+pub struct GetStatsStacks;
 
 /// Get all stacks.
 ///
@@ -227,7 +227,7 @@ async fn get_stats_stacks(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_nodes_distribution))]
-pub(crate) struct GetNodeDistribution;
+pub struct GetNodeDistribution;
 
 /// Get nodes distribution.
 ///

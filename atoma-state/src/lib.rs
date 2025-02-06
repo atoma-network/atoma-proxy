@@ -1,3 +1,8 @@
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::doc_markdown)]
+
 pub mod config;
 pub mod handlers;
 pub mod state_manager;
@@ -19,7 +24,7 @@ pub use state_manager::{AtomaState, AtomaStateManager, AtomaStateManagerError};
 ///
 /// # Returns
 /// A QueryBuilder configured with the IN clause and ready for additional bindings
-pub(crate) fn build_query_with_in<'a, T: sqlx::Type<Postgres> + sqlx::Encode<'a, Postgres>>(
+pub fn build_query_with_in<'a, T: sqlx::Type<Postgres> + sqlx::Encode<'a, Postgres>>(
     base_query: &str,
     column: &str,
     values: &'a [T],

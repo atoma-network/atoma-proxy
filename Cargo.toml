@@ -9,7 +9,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1.0.91"
-async-trait = "0.1.83"
+async-trait = "0.1.86"
 atoma-auth = { path = "./atoma-auth" }
 atoma-confidential = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-confidential", branch = "main", features = ["sev-snp", "tdx"] }
 atoma-proxy-service = { path = "./atoma-proxy-service" }
@@ -46,7 +46,7 @@ sqlx = { version = "0.8.2", features = ["postgres","runtime-tokio-native-tls"] }
 sui-keys = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.41.1" }
 sui-sdk = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.41.1" }
 sui-sdk-types = "0.0.2"
-thiserror = "1.0.65"
+thiserror = "2.0.11"
 tokenizers = "0.21.0"
 tokio = "1.41.0"
 toml = "0.8.19"

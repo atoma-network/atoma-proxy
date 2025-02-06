@@ -28,6 +28,7 @@ use crate::server::handlers::{
 };
 use crate::server::http_server::{HealthOpenApi, HEALTH_PATH};
 
+#[allow(clippy::too_many_lines)]
 pub fn openapi_routes() -> Router {
     #[derive(OpenApi)]
     #[openapi(
@@ -39,7 +40,7 @@ pub fn openapi_routes() -> Router {
             (path = CONFIDENTIAL_IMAGE_GENERATIONS_PATH, api = ConfidentialImageGenerationsOpenApi, tags = ["Confidential Images"]),
             (path = EMBEDDINGS_PATH, api = EmbeddingsOpenApi, tags = ["Embeddings"]),
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
-            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]), 
+            (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
             (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
@@ -118,7 +119,7 @@ pub fn openapi_routes() -> Router {
                 components.add_security_scheme(
                     "bearerAuth",
                     SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
-                )
+                );
             }
         }
     }
@@ -185,7 +186,7 @@ pub fn openapi_routes() -> Router {
         let spec_path = docs_dir.join("openapi.yml");
         fs::write(&spec_path, spec).expect("Failed to write OpenAPI spec to file");
 
-        println!("OpenAPI spec written to: {:?}", spec_path);
+        println!("OpenAPI spec written to: {spec_path:?}");
     }
 
     Router::new()

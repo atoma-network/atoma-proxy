@@ -340,8 +340,6 @@ paths:
                 $ref: '#/components/schemas/ModelList'
         '500':
           description: Failed to retrieve list of available models
-      security:
-      - bearerAuth: []
   /v1/nodes:
     post:
       tags:
@@ -568,13 +566,21 @@ components:
             format: float
           propertyNames:
             type: string
+        max_completion_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: The maximum number of tokens to generate in the chat completion
+          example: 4096
         max_tokens:
           type:
           - integer
           - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
-          example: 2048
+          deprecated: true
+          example: 4096
         messages:
           type: array
           items:

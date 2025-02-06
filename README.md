@@ -32,7 +32,7 @@ curl -X POST https://api.atoma.network/v1/chat/completions \
 -d '{
   "model": "meta-llama/Llama-3.3-70B-Instruct",
   "messages": [{"role": "user", "content": "Tell me a joke"}],
-  "max_tokens": 4096,
+  "max_completion_tokens": 4096,
   "stream": true
 }'
 ```
@@ -189,6 +189,29 @@ Stop services:
 ```bash
 docker compose --profile cloud down   # Cloud
 docker compose --profile local down # Local
+```
+
+#### Testing
+
+Since the `AtomaStateManager` instance relies on a PostgreSQL database, we need to have a local docker instance running to run the tests. You can spawn one using the `docker-compose.test.yaml` file:
+
+> **Note**
+> Please ensure that you don't have any other postgres instance running on your machine, as this might cause conflicts.
+
+```bash
+docker compose -f docker-compose.test.yaml up --build -d
+```
+
+It might be necessary that you clean up the database before or after running the tests. You can do so by running:
+
+```bash
+docker compose -f docker-compose.test.yaml down
+```
+
+and remove the specific postgres volumes:
+
+```bash
+docker system prune -af --volumes
 ```
 
 #### Troubleshooting

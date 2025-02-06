@@ -17,41 +17,41 @@ use crate::ProxyServiceState;
 use rand::{Rng, SeedableRng};
 
 /// The path for the register endpoint.
-pub(crate) const REGISTER_PATH: &str = "/register";
+pub const REGISTER_PATH: &str = "/register";
 
 /// The path for the login endpoint.
-pub(crate) const LOGIN_PATH: &str = "/login";
+pub const LOGIN_PATH: &str = "/login";
 
 /// The path for the generate_api_token endpoint.
-pub(crate) const GENERATE_API_TOKEN_PATH: &str = "/generate_api_token";
+pub const GENERATE_API_TOKEN_PATH: &str = "/generate_api_token";
 
 /// The path for the revoke_api_token endpoint.
-pub(crate) const REVOKE_API_TOKEN_PATH: &str = "/revoke_api_token";
+pub const REVOKE_API_TOKEN_PATH: &str = "/revoke_api_token";
 
 /// The path for the api_tokens endpoint.
-pub(crate) const GET_ALL_API_TOKENS_PATH: &str = "/api_tokens";
+pub const GET_ALL_API_TOKENS_PATH: &str = "/api_tokens";
 
 /// The path for the update_sui_address endpoint.
-pub(crate) const UPDATE_SUI_ADDRESS_PATH: &str = "/update_sui_address";
+pub const UPDATE_SUI_ADDRESS_PATH: &str = "/update_sui_address";
 
 /// The path for the usdc payment endpoint.
-pub(crate) const USDC_PAYMENT_PATH: &str = "/usdc_payment";
+pub const USDC_PAYMENT_PATH: &str = "/usdc_payment";
 
 /// The path for the get_sui_address endpoint.
-pub(crate) const GET_SUI_ADDRESS_PATH: &str = "/get_sui_address";
+pub const GET_SUI_ADDRESS_PATH: &str = "/get_sui_address";
 
 /// The path for the balance endpoint.
-pub(crate) const GET_BALANCE_PATH: &str = "/balance";
+pub const GET_BALANCE_PATH: &str = "/balance";
 
 /// Get user profile endpoint
-pub(crate) const GET_USER_PROFILE_PATH: &str = "/user_profile";
+pub const GET_USER_PROFILE_PATH: &str = "/user_profile";
 
 /// Set user's salt endpoint.
-pub(crate) const GET_SALT_PATH: &str = "/salt";
+pub const GET_SALT_PATH: &str = "/salt";
 
 #[cfg(feature = "google-oauth")]
 /// The path for the google_oauth endpoint.
-pub(crate) const GOOGLE_OAUTH_PATH: &str = "/google_oauth";
+pub const GOOGLE_OAUTH_PATH: &str = "/google_oauth";
 
 type Result<T> = std::result::Result<T, StatusCode>;
 
@@ -62,13 +62,13 @@ type Result<T> = std::result::Result<T, StatusCode>;
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_all_api_tokens))]
-pub(crate) struct GetAllApiTokensOpenApi;
+pub struct GetAllApiTokensOpenApi;
 
 /// Returns a router with the auth endpoints.
 ///
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the auth endpoints
-pub(crate) fn auth_router() -> Router<ProxyServiceState> {
+pub fn auth_router() -> Router<ProxyServiceState> {
     let router = Router::new()
         .route(GET_ALL_API_TOKENS_PATH, get(get_all_api_tokens))
         .route(GENERATE_API_TOKEN_PATH, get(generate_api_token))
@@ -118,7 +118,7 @@ fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn get_all_api_tokens(
+pub async fn get_all_api_tokens(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<String>>> {
@@ -142,7 +142,7 @@ pub(crate) async fn get_all_api_tokens(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(generate_api_token))]
-pub(crate) struct GenerateApiTokenOpenApi;
+pub struct GenerateApiTokenOpenApi;
 
 /// Generates an API token for the user.
 ///
@@ -167,7 +167,7 @@ pub(crate) struct GenerateApiTokenOpenApi;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn generate_api_token(
+pub async fn generate_api_token(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<String>> {
@@ -192,7 +192,7 @@ pub(crate) async fn generate_api_token(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(revoke_api_token))]
-pub(crate) struct RevokeApiTokenOpenApi;
+pub struct RevokeApiTokenOpenApi;
 
 /// Revokes an API token for the user.
 ///
@@ -218,7 +218,7 @@ pub(crate) struct RevokeApiTokenOpenApi;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn revoke_api_token(
+pub async fn revoke_api_token(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
     body: Json<RevokeApiTokenRequest>,
@@ -243,7 +243,7 @@ pub(crate) async fn revoke_api_token(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(register))]
-pub(crate) struct RegisterOpenApi;
+pub struct RegisterOpenApi;
 
 /// Registers a new user with the proxy service.
 ///
@@ -264,7 +264,7 @@ pub(crate) struct RegisterOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn register(
+pub async fn register(
     State(proxy_service_state): State<ProxyServiceState>,
     body: Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>> {
@@ -292,7 +292,7 @@ pub(crate) async fn register(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(login))]
-pub(crate) struct LoginOpenApi;
+pub struct LoginOpenApi;
 
 /// Logs in a user with the proxy service.
 ///
@@ -313,7 +313,7 @@ pub(crate) struct LoginOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn login(
+pub async fn login(
     State(proxy_service_state): State<ProxyServiceState>,
     body: Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>> {
@@ -342,7 +342,7 @@ pub(crate) async fn login(
 #[cfg(feature = "google-oauth")]
 #[derive(OpenApi)]
 #[openapi(paths(google_oauth))]
-pub(crate) struct GoogleOAuth;
+pub struct GoogleOAuth;
 
 /// Logs in a user with the proxy service using Google OAuth.
 /// This endpoint is used to verify a Google ID token and return an access token.
@@ -365,7 +365,7 @@ pub(crate) struct GoogleOAuth;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn google_oauth(
+pub async fn google_oauth(
     State(proxy_service_state): State<ProxyServiceState>,
     body: Json<String>,
 ) -> Result<Json<AuthResponse>> {
@@ -391,7 +391,7 @@ pub(crate) async fn google_oauth(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(update_sui_address))]
-pub(crate) struct UpdateSuiAddress;
+pub struct UpdateSuiAddress;
 
 /// Updates the sui address for the user.
 ///
@@ -417,7 +417,7 @@ pub(crate) struct UpdateSuiAddress;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn update_sui_address(
+pub async fn update_sui_address(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
     body: Json<ProofRequest>,
@@ -442,7 +442,7 @@ pub(crate) async fn update_sui_address(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(usdc_payment))]
-pub(crate) struct UsdcPayment;
+pub struct UsdcPayment;
 
 /// OpenAPI documentation for the usdc_payment endpoint.
 ///
@@ -468,7 +468,7 @@ pub(crate) struct UsdcPayment;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn usdc_payment(
+pub async fn usdc_payment(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
     body: Json<UsdcPaymentRequest>,
@@ -493,7 +493,7 @@ pub(crate) async fn usdc_payment(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_sui_address))]
-pub(crate) struct GetSuiAddress;
+pub struct GetSuiAddress;
 
 /// Retrieves the sui address for the user.
 ///
@@ -518,7 +518,7 @@ pub(crate) struct GetSuiAddress;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn get_sui_address(
+pub async fn get_sui_address(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<Option<String>>> {
@@ -542,7 +542,7 @@ pub(crate) async fn get_sui_address(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_balance))]
-pub(crate) struct GetBalance;
+pub struct GetBalance;
 
 /// Retrieves the balance for the user.
 ///
@@ -567,7 +567,7 @@ pub(crate) struct GetBalance;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn get_balance(
+pub async fn get_balance(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<i64>> {
@@ -600,7 +600,7 @@ pub(crate) async fn get_balance(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_user_profile))]
-pub(crate) struct GetUserProfile;
+pub struct GetUserProfile;
 
 /// Retrieves the user profile for the user.
 ///
@@ -630,7 +630,7 @@ pub(crate) struct GetUserProfile;
     )
 )]
 #[instrument(level = "info", skip_all)]
-pub(crate) async fn get_user_profile(
+pub async fn get_user_profile(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<UserProfile>> {
@@ -664,7 +664,7 @@ pub(crate) async fn get_user_profile(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_salt))]
-pub(crate) struct GetSalt;
+pub struct GetSalt;
 
 /// Gets the salt for the user. It creates a new salt if the user does not have one.
 ///
@@ -690,7 +690,7 @@ pub(crate) struct GetSalt;
 )]
 #[instrument(level = "info", skip_all)]
 #[axum::debug_handler]
-pub(crate) async fn get_salt(
+pub async fn get_salt(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<String>> {
@@ -714,22 +714,21 @@ pub(crate) async fn get_salt(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let salt = match salt {
-        Some(salt) => salt,
-        None => {
-            let mut rng = rand::rngs::StdRng::from_entropy();
-            let salt: [u8; 16] = rng.gen();
-            let salt = BASE64_STANDARD.encode(salt);
-            proxy_service_state
-                .atoma_state
-                .set_salt(user_id, &salt)
-                .await
-                .map_err(|e| {
-                    error!("Failed to set salt: {:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            salt
-        }
+    let salt = if let Some(salt) = salt {
+        salt
+    } else {
+        let mut rng = rand::rngs::StdRng::from_entropy();
+        let salt: [u8; 16] = rng.gen();
+        let salt = BASE64_STANDARD.encode(salt);
+        proxy_service_state
+            .atoma_state
+            .set_salt(user_id, &salt)
+            .await
+            .map_err(|e| {
+                error!("Failed to set salt: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        salt
     };
     Ok(Json(salt))
 }

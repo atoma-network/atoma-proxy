@@ -6,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -16,7 +17,11 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
-use super::verify_response_hash_and_signature;
+use super::metrics::{
+    IMAGE_GEN_LATENCY_METRICS, IMAGE_GEN_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS,
+};
+use super::{handle_status_code_error, verify_response_hash_and_signature};
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
 
@@ -57,33 +62,29 @@ pub struct RequestModelImageGenerations {
     paths(image_generations_create),
     components(schemas(CreateImageRequest, CreateImageResponse, ImageData))
 )]
-pub(crate) struct ImageGenerationsOpenApi;
+pub struct ImageGenerationsOpenApi;
 
 impl RequestModel for RequestModelImageGenerations {
     fn new(request: &Value) -> Result<Self> {
-        let model =
-            request
-                .get(MODEL)
-                .and_then(|m| m.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Model field   is required".to_string(),
-                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
-                })?;
+        let model = request.get(MODEL).and_then(|m| m.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Model field   is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            }
+        })?;
         let n = request
             .get(N)
-            .and_then(|n| n.as_u64())
-            .ok_or(AtomaProxyError::InvalidBody {
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| AtomaProxyError::RequestError {
                 message: "N field is required".to_string(),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             })?;
-        let size =
-            request
-                .get(SIZE)
-                .and_then(|s| s.as_str())
-                .ok_or(AtomaProxyError::InvalidBody {
-                    message: "Size field is required".to_string(),
-                    endpoint: IMAGE_GENERATIONS_PATH.to_string(),
-                })?;
+        let size = request.get(SIZE).and_then(|s| s.as_str()).ok_or_else(|| {
+            AtomaProxyError::RequestError {
+                message: "Size field is required".to_string(),
+                endpoint: IMAGE_GENERATIONS_PATH.to_string(),
+            }
+        })?;
 
         Ok(Self {
             model: model.to_string(),
@@ -105,7 +106,7 @@ impl RequestModel for RequestModelImageGenerations {
             .collect();
 
         if dimensions.len() != 2 {
-            return Err(AtomaProxyError::InvalidBody {
+            return Err(AtomaProxyError::RequestError {
                 message: format!("Invalid size format: {}", self.size),
                 endpoint: IMAGE_GENERATIONS_PATH.to_string(),
             });
@@ -164,13 +165,24 @@ pub async fn image_generations_create(
             payload,
             metadata.num_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
         {
-            Ok(response) => Ok(response.into_response()),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response.into_response())
+            }
             Err(e) => {
+                // Record the failed request in the image generations num requests metric
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
+                    .add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -184,7 +196,7 @@ pub async fn image_generations_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -195,7 +207,7 @@ pub async fn image_generations_create(
     paths(confidential_image_generations_create),
     components(schemas(ConfidentialComputeRequest))
 )]
-pub(crate) struct ConfidentialImageGenerationsOpenApi;
+pub struct ConfidentialImageGenerationsOpenApi;
 
 /// Create confidential image
 ///
@@ -233,7 +245,7 @@ pub async fn confidential_image_generations_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let payload =
             serde_json::to_value(payload).map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to serialize payload: {}", e),
+                message: format!("Failed to serialize payload: {e}"),
                 endpoint: metadata.endpoint.clone(),
             })?;
         match handle_image_generation_response(
@@ -244,7 +256,7 @@ pub async fn confidential_image_generations_create(
             payload,
             metadata.num_compute_units as i64,
             metadata.endpoint.clone(),
-            metadata.model_name,
+            metadata.model_name.clone(),
             metadata.selected_stack_small_id,
         )
         .await
@@ -252,9 +264,17 @@ pub async fn confidential_image_generations_create(
             Ok(response) => {
                 // NOTE: At this point, we do not need to update the stack num compute units,
                 // because the image generation response was correctly generated by a TEE node.
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 Ok(response.into_response())
             }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
+                    .add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -268,7 +288,7 @@ pub async fn confidential_image_generations_create(
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to spawn image generation task: {:?}", e),
+        message: format!("Failed to spawn image generation task: {e:?}"),
         endpoint,
     })?
 }
@@ -323,32 +343,37 @@ async fn handle_image_generation_response(
     model_name: String,
     stack_small_id: i64,
 ) -> Result<Response<Body>> {
+    // Record the request in the image generations num requests metric
+    let model_label: String = model_name.clone();
+    IMAGE_GEN_NUM_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
     let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
     let response = client
-        .post(format!("{}{}", node_address, endpoint))
+        .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
         .send()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to send image generation request: {:?}", err),
+            message: format!("Failed to send image generation request: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
     if !response.status().is_success() {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Inference service returned error: {}", response.status()),
-            endpoint: endpoint.to_string(),
-        });
+        let error = response
+            .status()
+            .canonical_reason()
+            .unwrap_or("Unknown error");
+        handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
     let response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse image generation response: {:?}", err),
+            message: format!("Failed to parse image generation response: {err:?}"),
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -370,7 +395,7 @@ async fn handle_image_generation_response(
             },
         )
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {:?}", err),
+            message: format!("Failed to update node throughput performance: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -395,9 +420,14 @@ async fn handle_image_generation_response(
             total_hash,
         })
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {}", err),
+            message: format!("Error updating stack total hash: {err:?}"),
             endpoint: endpoint.to_string(),
         })?;
+
+    IMAGE_GEN_LATENCY_METRICS.record(
+        time.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
 
     Ok(response.into_response())
 }
@@ -449,7 +479,7 @@ pub struct CreateImageRequest {
 /// Response format for image generation
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateImageResponse {
-    #[schema(example = 1677649420)]
+    #[schema(example = 1_677_649_420)]
     pub created: i64,
     pub data: Vec<ImageData>,
 }
