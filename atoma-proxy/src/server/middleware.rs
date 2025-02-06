@@ -14,12 +14,9 @@ use serde_json::Value;
 use tracing::instrument;
 
 use super::{
-    error::AtomaProxyError,
-    handlers::{
-        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager,
-    },
-    http_server::ProxyState,
+    check_auth, error::AtomaProxyError, handlers::{
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, models::MODELS_PATH, nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager
+    }, http_server::ProxyState
 };
 use super::{types::ConfidentialComputeRequest, Result};
 
@@ -230,6 +227,11 @@ pub async fn authenticate_middleware(
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
+    if endpoint == MODELS_PATH {
+        check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
+        let req = Request::from_parts(req_parts, body);
+        return Ok(next.run(req).await);
+    }
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|e| {
