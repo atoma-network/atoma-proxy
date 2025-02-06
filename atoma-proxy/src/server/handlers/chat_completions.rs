@@ -11,12 +11,18 @@ use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
+use super::metrics::{
+    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS, CHAT_COMPLETIONS_LATENCY_METRICS,
+    CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
+    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+};
 use super::request_model::RequestModel;
 use super::{
     handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
@@ -121,8 +127,13 @@ pub async fn chat_completions_create(
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -199,6 +210,14 @@ async fn handle_chat_completions_request(
     payload: Value,
     is_streaming: bool,
 ) -> Result<Response<Body>> {
+    // Record the estimated total tokens in the chat completions estimated total tokens metric
+    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS.add(
+        metadata.num_compute_units,
+        &[KeyValue::new("model", metadata.model_name.clone())],
+    );
+    // Record the request in the chat completions num requests metric
+    CHAT_COMPLETIONS_NUM_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+
     if is_streaming {
         handle_streaming_response(
             state,
@@ -358,8 +377,17 @@ pub async fn confidential_chat_completions_create(
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                Ok(response)
+            }
             Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -475,6 +503,8 @@ async fn handle_non_streaming_response(
     let client = reqwest::Client::new();
     let time = Instant::now();
 
+    let model_label = model_name.clone();
+
     let response = client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
@@ -584,6 +614,11 @@ async fn handle_non_streaming_response(
         });
     }
 
+    CHAT_COMPLETIONS_LATENCY_METRICS.record(
+        time.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
+    );
+
     Ok(response.into_response())
 }
 
@@ -644,12 +679,11 @@ async fn handle_streaming_response(
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
-    // NOTE: If streaming is requested, add the include_usage option to the payload
-    // so that the atoma node state manager can be updated with the total number of tokens
-    // that were processed for this request.
-
     let client = reqwest::Client::new();
     let start = Instant::now();
+
+    let model_label: String = model_name.clone();
+
     let response = client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
@@ -686,6 +720,12 @@ async fn handle_streaming_response(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_millis(STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS))
             .text("keep-alive"),
+    );
+
+    // Record the request in the chat completions num requests metric
+    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+        start.elapsed().as_secs_f64(),
+        &[KeyValue::new("model", model_label)],
     );
 
     Ok(stream.into_response())

@@ -7,11 +7,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-
 use flume::Sender;
 use reqwest::Method;
 use serde::Serialize;
-
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
 use tokio::{net::TcpListener, sync::RwLock};
@@ -180,6 +178,7 @@ pub fn create_router(state: &ProxyState) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
@@ -188,7 +187,6 @@ pub fn create_router(state: &ProxyState) -> Router {
                 .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                 .into_inner(),
         )
-        .route(MODELS_PATH, get(models_list))
         .route(NODES_CREATE_PATH, post(nodes_create))
         .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
         .with_state(state.clone())

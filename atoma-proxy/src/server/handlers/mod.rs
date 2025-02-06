@@ -20,6 +20,7 @@ use crate::server::Result;
 pub mod chat_completions;
 pub mod embeddings;
 pub mod image_generations;
+pub mod metrics;
 pub mod models;
 pub mod nodes;
 pub mod request_model;

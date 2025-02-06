@@ -23,9 +23,9 @@ flume.workspace = true
 futures = { workspace = true }
 hf-hub = { workspace = true }
 once_cell = "1.20"
-opentelemetry = { version = "0.21", features = ["trace"] }
-opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "trace"] }
-opentelemetry-otlp = { version = "0.14", features = [
+opentelemetry = { version = "0.27.1", features = ["trace"] }
+opentelemetry_sdk = { version = "0.27.1", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.27.0", features = [
     "grpc-tonic",
     "trace",
     "tls",
@@ -45,7 +45,7 @@ tonic = { version = "0.9", features = ["tls", "tls-roots", "prost"] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
 tracing-appender.workspace = true
-tracing-opentelemetry = "0.22"
+tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { workspace = true, features = [
     "env-filter",
     "json",
