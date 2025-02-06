@@ -192,7 +192,10 @@ impl AtomaStateManager {
                                 error = %e,
                                 "All p2p event senders have been dropped, we will not be able to handle any more events from the Atoma Network protocol"
                             );
-                            break;
+                            // NOTE: We continue the loop, as the inference service might be shutting down,
+                            // but we want to keep the state manager running
+                            // for event synchronization with the Atoma Network protocol.
+                            continue;
                         }
                     }
                 }
