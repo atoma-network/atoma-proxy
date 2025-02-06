@@ -43,13 +43,13 @@ fn init_traces() -> Result<sdktrace::Tracer> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
 
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
+    let tracing_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
         .build()?;
 
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_batch_exporter(tracing_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_sampler(Sampler::AlwaysOn)
         .with_id_generator(RandomIdGenerator::default())
         .with_max_events_per_span(64)
