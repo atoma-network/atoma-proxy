@@ -9,12 +9,14 @@ use axum::{
 };
 
 use flume::Sender;
+use reqwest::Method;
 use serde::Serialize;
 
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower::ServiceBuilder;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::instrument;
 
 pub use components::openapi::openapi_routes;
@@ -172,6 +174,11 @@ pub fn create_router(state: &ProxyState) -> Router {
         )))
         .with_state(state.clone());
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_headers(Any);
+
     Router::new()
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
@@ -188,6 +195,7 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(HEALTH_PATH, get(health))
         .merge(confidential_router)
         .merge(openapi_routes())
+        .layer(cors)
 }
 
 /// Starts the atoma proxy server.
