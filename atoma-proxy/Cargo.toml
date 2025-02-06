@@ -21,6 +21,14 @@ fastcrypto.workspace = true
 flume.workspace = true
 futures = { workspace = true }
 hf-hub = { workspace = true }
+once_cell = "1.20"
+opentelemetry = { version = "0.21", features = ["trace"] }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.14", features = [
+    "grpc-tonic",
+    "trace",
+    "tls",
+] }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
@@ -30,28 +38,21 @@ sqlx.workspace = true
 sui-keys.workspace = true
 sui-sdk.workspace = true
 thiserror = { workspace = true }
+tokenizers.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tonic = { version = "0.9", features = ["tls", "tls-roots", "prost"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["cors"] }
 tracing-appender.workspace = true
+tracing-opentelemetry = "0.22"
 tracing-subscriber = { workspace = true, features = [
     "env-filter",
     "json",
     "time",
 ] }
 tracing.workspace = true
-tokenizers.workspace = true
-tower = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
-opentelemetry = { version = "0.21", features = ["trace"] }
-opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "trace"] }
-opentelemetry-otlp = { version = "0.14", features = [
-    "grpc-tonic",
-    "trace",
-    "tls",
-] }
-tonic = { version = "0.9", features = ["tls", "tls-roots", "prost"] }
-once_cell = "1.20"
-tracing-opentelemetry = "0.22"
 
 [features]
 google-oauth = ["atoma-auth/google-oauth", "atoma-proxy-service/google-oauth"]
