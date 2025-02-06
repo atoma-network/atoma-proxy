@@ -11,10 +11,10 @@ license = "Apache-2.0"
 anyhow = "1.0.91"
 async-trait = "0.1.83"
 atoma-auth = { path = "./atoma-auth" }
-atoma-confidential = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-confidential", branch = "feat/sev-snp-support", features = ["sev-snp", "tdx"] }
+atoma-confidential = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-confidential", branch = "main", features = ["sev-snp", "tdx"] }
 atoma-proxy-service = { path = "./atoma-proxy-service" }
 atoma-state = { path = "./atoma-state" }
-atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "feat/sev-snp-support" }
+atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
 atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
 axum = "0.7.7"
 base64 = "0.22.1"
