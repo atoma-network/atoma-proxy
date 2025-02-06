@@ -4660,10 +4660,11 @@ mod tests {
     }
 
     async fn insert_test_node(db: &sqlx::PgPool, node_small_id: i64) {
-        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address) VALUES ($1, $2, $3)")
+        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address, public_address) VALUES ($1, $2, $3, $4)")
             .bind(node_small_id)
             .bind("test_node_id")
             .bind("test_sui_address")
+            .bind("test_public_address")
             .execute(db)
             .await
             .expect("Failed to insert test node");
@@ -4741,12 +4742,13 @@ mod tests {
 
     async fn create_test_node(pool: &sqlx::PgPool, node_small_id: i64) -> sqlx::Result<()> {
         sqlx::query(
-            "INSERT INTO nodes (node_small_id, sui_address, public_address, country) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO nodes (node_small_id, sui_address, public_address, country, node_id) VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(node_small_id)
         .bind(Uuid::new_v4().to_string())
         .bind("test_public_address")
         .bind("test_country")
+        .bind("asdfghjkl")
         .execute(pool)
         .await?;
         Ok(())
