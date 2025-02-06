@@ -15,6 +15,7 @@ use crate::{
     AtomaStateManager, AtomaStateManagerError,
 };
 
+#[cfg(feature = "confidential")]
 use atoma_confidential::types::TEEProvider;
 
 #[instrument(level = "trace", skip_all)]
@@ -1315,9 +1316,14 @@ pub(crate) async fn handle_node_key_rotation_event(
         node_id,
         new_public_key,
         tee_remote_attestation_bytes,
+        #[cfg(feature = "confidential")]
         tee_provider,
+        #[cfg(not(feature = "confidential"))]
+        tee_provider: _,
     } = event;
-    let is_valid = match tee_provider {
+
+    #[cfg(feature = "confidential")]
+    match event.tee_provider {
         atoma_confidential::types::TEEProvider::Tdx => {
             utils::tdx::verify_quote_v4_attestation(&tee_remote_attestation_bytes, &new_public_key)
                 .await
@@ -1340,14 +1346,14 @@ pub(crate) async fn handle_node_key_rotation_event(
             epoch as i64,
             key_rotation_counter as i64,
             new_public_key,
-            tee_remote_attestation_bytes,
-            is_valid,
+            tee_remote_attestation_bytes
         )
         .await?;
     Ok(())
 }
 
 mod utils {
+    #[cfg(feature = "confidential")]
     pub(crate) mod tdx {
         use super::*;
 
@@ -1410,50 +1416,51 @@ mod utils {
             new_public_key: &[u8],
         ) -> Result<()> {
             let quote = Quote::parse(quote_bytes)
-                .map_err(|e| AtomaStateManagerError::FailedToParseQuote(format!("{e:?}")))?;
+                .map_err(|e| crate::AtomaStateManagerError::FailedToParseQuote(format!("{e:?}")))?;
             let fmspc = quote
                 .fmspc()
-                .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
+                .map_err(|e| crate::AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
             let certification_tcb_url = format!(
                 "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc={:?}&update={TCB_UPDATE_MODE}",
                 fmspc
             );
             let collateral = get_collateral(&certification_tcb_url, quote_bytes, TIMEOUT)
                 .await
-                .map_err(|e| AtomaStateManagerError::FailedToRetrieveCollateral(format!("{e:?}")))?;
+                .map_err(|e| crate::AtomaStateManagerError::FailedToRetrieveCollateral(format!("{e:?}")))?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| AtomaStateManagerError::UnixTimeWentBackwards(e.to_string()))?
+                .map_err(|e| crate::AtomaStateManagerError::UnixTimeWentBackwards(e.to_string()))?
                 .as_secs();
             match quote.report {
                 Report::SgxEnclave(_) => {
-                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                    return Err(crate::AtomaStateManagerError::FailedToVerifyQuote(
                         "Report SGX type not supported".to_string(),
                     ));
                 }
                 Report::TD10(report) => {
                     if report.report_data != new_public_key {
-                        return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                        return Err(crate::AtomaStateManagerError::FailedToVerifyQuote(
                             "Report TD10 data does not match new public key".to_string(),
                         ));
                     }
                 }
                 Report::TD15(report) => {
                     if report.base.report_data != new_public_key {
-                        return Err(AtomaStateManagerError::FailedToVerifyQuote(
+                        return Err(crate::AtomaStateManagerError::FailedToVerifyQuote(
                             "Report TD15 data does not match new public key".to_string(),
                         ));
                     }
                 }
             }
             verify(quote_bytes, &collateral, now)
-                    .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
+                    .map_err(|e| crate::AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
                 
             Ok(())
         }
     }
 
     /// Module specifically made for SNP AttestationReport verification
+    #[cfg(feature = "confidential")]
     pub(crate) mod snp {
         use super::*;
         use atoma_confidential::sev_snp::SNPAttestationReport;
@@ -1484,6 +1491,8 @@ mod utils {
         }
     }
 
+    // TODO: Implement ARM attestation verification
+    // #[cfg(feature = "confidential")]
     // pub(crate) mod arm {
     //     use super::*;
 

@@ -5,13 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-atoma-confidential = { workspace = true, features = ["sev-snp", "tdx"] }
+atoma-confidential = { workspace = true, optional = true }
 atoma-sui = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
 dcap-qvl = { workspace = true }
 flume = { workspace = true }
-sev-snp-utils = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["chrono", "runtime-tokio-native-tls", "sqlite"] }
@@ -24,3 +23,7 @@ utoipa = { workspace = true }
 futures = { workspace = true }
 serial_test = { workspace = true }
 uuid = { workspace = true }
+
+[features]
+default = []
+confidential = ["dep:atoma-confidential"]

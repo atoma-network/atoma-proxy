@@ -3252,7 +3252,6 @@ impl AtomaState {
         key_rotation_counter: i64,
         new_public_key: Vec<u8>,
         tee_remote_attestation_bytes: Vec<u8>,
-        is_valid: bool,
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) VALUES ($1, $2, $3, $4, $5, $6)
@@ -3260,15 +3259,13 @@ impl AtomaState {
                 DO UPDATE SET epoch = $2, 
                               key_rotation_counter = $3,
                               public_key = $4, 
-                              tee_remote_attestation_bytes = $5,
-                              is_valid = $6",
+                              tee_remote_attestation_bytes = $5"
         )
         .bind(node_id)
         .bind(epoch)
         .bind(key_rotation_counter)
         .bind(new_public_key)
         .bind(tee_remote_attestation_bytes)
-        .bind(is_valid)
         .execute(&self.db)
         .await?;
         Ok(())
