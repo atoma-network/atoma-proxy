@@ -4568,20 +4568,19 @@ mod tests {
             let result = state.verify_node_small_id_ownership(node_id, address).await;
 
             match (should_succeed, result) {
-                (true, Ok(())) => {
-                    // Test passed - verification succeeded as expected
-                }
-                (false, Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed)) => {
-                    // Test passed - verification failed as expected
+                (true, Ok(()))
+                | (false, Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed)) => {
+                    // 1. Test passed - verification succeeded as expected
+                    // 2. Test passed - verification failed as expected
                 }
                 (true, Err(e)) => {
-                    panic!("Expected verification to succeed, but got error: {}", e);
+                    panic!("Expected verification to succeed, but got error: {e}");
                 }
                 (false, Ok(())) => {
                     panic!("Expected verification to fail, but it succeeded");
                 }
                 (_, Err(e)) => {
-                    panic!("Unexpected error: {}", e);
+                    panic!("Unexpected error: {e}");
                 }
             }
         }
@@ -4614,7 +4613,7 @@ mod tests {
         // Verify correct mappings
         for (node_id, address) in &test_nodes {
             let result = state
-                .verify_node_small_id_ownership(*node_id, address.to_string())
+                .verify_node_small_id_ownership(*node_id, (*address).to_string())
                 .await;
             assert!(
                 result.is_ok(),
@@ -4624,7 +4623,7 @@ mod tests {
 
         // Verify incorrect mappings
         for (node_id, address) in &test_nodes {
-            let wrong_address = format!("wrong_{}", address);
+            let wrong_address = format!("wrong_{address}");
             let result = state
                 .verify_node_small_id_ownership(*node_id, wrong_address)
                 .await;
@@ -5023,7 +5022,7 @@ mod tests {
         let mut handles = vec![];
         for i in 0..5 {
             let state_clone = state.clone();
-            let url = format!("https://concurrent{}.example.com", i);
+            let url = format!("https://concurrent{i}.example.com");
             let timestamp = chrono::Utc::now().timestamp() + i;
 
             handles.push(tokio::spawn(async move {
@@ -5042,7 +5041,7 @@ mod tests {
 
         // Verify all updates succeeded
         assert!(
-            results.iter().all(|r| r.is_ok()),
+            results.iter().all(std::result::Result::is_ok),
             "All updates should succeed"
         );
 
@@ -5321,7 +5320,7 @@ mod tests {
         let result = state
             .register_node_public_url(
                 4,
-                "".to_string(),
+                String::new(),
                 chrono::Utc::now().timestamp(),
                 "US".to_string(),
             )
