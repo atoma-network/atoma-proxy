@@ -12,6 +12,9 @@ x-atoma-proxy-base: &atoma-proxy-base
     - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
   env_file:
     - .env
+  environment:
+    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+
   depends_on:
     - db
   networks:
@@ -134,32 +137,84 @@ services:
     networks:
       - atoma-network
 
-  grafana-otel:
-    image: grafana/otel-lgtm:latest
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
-      - "3000:3000"  # Grafana UI
-      - "4317:4317"  # OTLP gRPC endpoint
-      - "4318:4318"  # OTLP HTTP endpoint
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP http receiver
+      - "8889:8889" # Prometheus metrics exporter
+    networks:
+      - atoma-network
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - atoma-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true  # Enable anonymous access for development, remove for production
-      - OTEL_METRIC_EXPORT_INTERVAL=500 # Export metrics every 500ms, remove for production
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ADMIN_PASSWORD=admin
     networks:
       - atoma-network
+    depends_on:
+      - prometheus
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki.yaml:/etc/loki/local.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - atoma-network
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+    networks:
+      - atoma-network
+    user: "0"
+
 volumes:
   postgres-data:
   sui-config-volume:
   letsencrypt:
   grafana_data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
 
 networks:
   atoma-network:
