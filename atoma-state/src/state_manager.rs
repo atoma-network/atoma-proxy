@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::build_query_with_in;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
@@ -3435,8 +3437,46 @@ impl AtomaState {
         // It might the (likely malicious) case that a node is publishing an url with a previous timestamp
         // to overwrite the previous url. In this case, all the retries will fail, but this is probably
         // fine.
-        const NUM_RETRIES: i32 = 3;
+        const NUM_RETRIES: u32 = 3;
+        const BASE_DELAY: Duration = Duration::from_millis(100);
+        const MAX_DELAY: Duration = Duration::from_secs(2);
+
+        validation::validate_timestamp(timestamp)?;
+        validation::validate_country(&country)?;
+        validation::validate_url(&public_url)?;
+
         let mut retries = 0;
+
+        for retry in 0..NUM_RETRIES {
+            let result = sqlx::query(
+                "UPDATE nodes 
+                    SET public_address = $2, 
+                        timestamp = $3,
+                        country = $4
+                    WHERE node_small_id = $1 
+                    AND (timestamp IS NULL OR timestamp < $3)",
+            )
+            .bind(node_small_id)
+            .bind(&public_url)
+            .bind(timestamp)
+            .bind(&country)
+            .execute(&self.db)
+            .await?;
+
+            if result.rows_affected() > 0 {
+                return Ok(());
+            }
+
+            if retry < NUM_RETRIES - 1 {
+                // Calculate exponential backoff with jitter
+                let backoff = BASE_DELAY * 2u32.pow(retry);
+                let with_jitter = std::cmp::min(
+                    MAX_DELAY,
+                    backoff + Duration::from_millis(fastrand::u64(0..=100)),
+                );
+                tokio::time::sleep(with_jitter).await;
+            }
+        }
 
         loop {
             let result = sqlx::query(
@@ -4512,6 +4552,92 @@ pub enum AtomaStateManagerError {
     FailedToRetrieveFmspc(String),
     #[error("Insufficient balance")]
     InsufficientBalance,
+    #[error("Country is not a valid ISO 3166-1 alpha-2 code: {0}")]
+    InvalidCountry(String),
+    #[error("URL is not valid: {0}")]
+    InvalidUrl(String),
+}
+
+pub mod validation {
+    use tracing::{error, instrument};
+
+    use crate::AtomaStateManagerError;
+
+    /// Validates that the timestamp is not in the future.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - The timestamp to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The timestamp is in the future.
+    #[instrument(level = "debug")]
+    pub fn validate_timestamp(timestamp: i64) -> Result<(), AtomaStateManagerError> {
+        // Max timestamp drift in milliseconds, to account for clock drift between nodes
+        const MAX_TIMESTAMP_DRIFT: i64 = 250; // 250 milliseconds
+                                              // Validate timestamp is not in the future
+        let current_time = chrono::Utc::now().timestamp_millis();
+        if timestamp > (current_time + MAX_TIMESTAMP_DRIFT) / 1000 {
+            error!("Timestamp is in the future: {timestamp}");
+            return Err(AtomaStateManagerError::InvalidTimestamp);
+        }
+        Ok(())
+    }
+
+    /// Validates that the country is a valid ISO 3166-1 alpha-2 code.
+    ///
+    /// # Arguments
+    ///
+    /// * `country` - The country to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The country is not a valid ISO 3166-1 alpha-2 code.
+    #[instrument(level = "debug")]
+    pub fn validate_country(country: &str) -> Result<(), AtomaStateManagerError> {
+        if isocountry::CountryCode::for_alpha2(country).is_err() {
+            error!("Country is not a valid ISO 3166-1 alpha-2 code: {country}");
+            return Err(AtomaStateManagerError::InvalidCountry(country.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Validates that the url is valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The url to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The url is not valid.
+    #[instrument(level = "debug")]
+    pub fn validate_url(url: &str) -> Result<(), AtomaStateManagerError> {
+        if url::Url::parse(url).is_err() {
+            error!("URL is not valid: {url}");
+            return Err(AtomaStateManagerError::InvalidUrl(url.to_string()));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

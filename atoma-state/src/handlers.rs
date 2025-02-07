@@ -159,6 +159,12 @@ pub async fn handle_atoma_event(
 ///     if let Err(e) = handle_p2p_event(state_manager, event, Some(tx)).await {
 ///         eprintln!("Failed to handle P2P event: {}", e);
 ///     }
+///     let result = rx.await.unwrap();
+///     if result {
+///         println!("P2P event handled successfully");
+///     } else {
+///         println!("P2P event handling failed");
+///     }
 /// }
 /// ```
 ///
