@@ -33,7 +33,23 @@ static RESOURCE: Lazy<Resource> =
 
 /// Initialize metrics with OpenTelemetry SDK
 fn init_metrics() -> sdkmetrics::SdkMeterProvider {
+    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+
+    let metrics_exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_tonic()
+        .with_endpoint(otlp_endpoint)
+        .build()
+        .unwrap();
+
+    let reader =
+        sdkmetrics::PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
+            .with_interval(std::time::Duration::from_secs(3))
+            .with_timeout(std::time::Duration::from_secs(10))
+            .build();
+
     sdkmetrics::SdkMeterProvider::builder()
+        .with_reader(reader)
         .with_resource(RESOURCE.clone())
         .build()
 }
