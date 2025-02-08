@@ -5,17 +5,21 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+atoma-p2p = { workspace = true }
 atoma-sui = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
 dcap-qvl = { workspace = true }
+fastrand = "2.3.0"
 flume = { workspace = true }
+isocountry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["chrono", "runtime-tokio-native-tls", "sqlite"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
+url = { workspace = true }
 utoipa = { workspace = true }
 
 [dev-dependencies]

@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use atoma_auth::{AtomaAuthConfig, Auth, Sui};
+use atoma_p2p::{AtomaP2pNode, AtomaP2pNodeConfig};
 use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
@@ -9,12 +10,9 @@ use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
 use futures::future::try_join_all;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+use sui_keys::keystore::FileBasedKeystore;
 use tokenizers::Tokenizer;
-use tokio::{
-    net::TcpListener,
-    sync::{watch, RwLock},
-    try_join,
-};
+use tokio::{net::TcpListener, sync::watch, sync::RwLock, try_join};
 use tracing::{error, info, instrument};
 
 use crate::server::{start_server, AtomaServiceConfig};
@@ -50,6 +48,9 @@ struct Config {
 
     /// Configuration for the authentication component.
     auth: AtomaAuthConfig,
+
+    /// Configuration for the P2P component.
+    p2p: AtomaP2pNodeConfig,
 }
 
 impl Config {
@@ -59,7 +60,8 @@ impl Config {
             service: AtomaServiceConfig::from_file_path(path.clone()),
             state: AtomaStateManagerConfig::from_file_path(path.clone()),
             proxy_service: AtomaProxyServiceConfig::from_file_path(path.clone()),
-            auth: AtomaAuthConfig::from_file_path(path),
+            auth: AtomaAuthConfig::from_file_path(path.clone()),
+            p2p: AtomaP2pNodeConfig::from_file_path(path),
         }
     }
 }
@@ -82,6 +84,7 @@ async fn main() -> Result<()> {
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
     let (event_subscriber_sender, event_subscriber_receiver) = flume::unbounded();
     let (state_manager_sender, state_manager_receiver) = flume::unbounded();
+    let (atoma_p2p_sender, atoma_p2p_receiver) = flume::unbounded();
     let (confidential_compute_service_sender, _confidential_compute_service_receiver) =
         tokio::sync::mpsc::unbounded_channel();
 
@@ -98,11 +101,18 @@ async fn main() -> Result<()> {
         shutdown_receiver.clone(),
     );
 
-    // Initialize your StateManager here
+    let keystore = FileBasedKeystore::new(&PathBuf::from(&config.sui.sui_keystore_path()))?;
+    let atoma_p2p_node =
+        AtomaP2pNode::start(config.p2p, Arc::new(keystore), atoma_p2p_sender, true)?;
+
+    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
+
+    // Initialize the `AtomaStateManager` service
     let state_manager = AtomaStateManager::new_from_url(
         &config.state.database_url,
         event_subscriber_receiver,
         state_manager_receiver,
+        atoma_p2p_receiver,
         sui.write().await.get_wallet_address()?.to_string(),
     )
     .await?;
@@ -161,6 +171,11 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
+    let atoma_p2p_node_handle = spawn_with_shutdown(
+        atoma_p2p_node.run(shutdown_receiver.clone()),
+        shutdown_sender.clone(),
+    );
+
     #[allow(clippy::redundant_pub_crate)]
     let ctrl_c = tokio::task::spawn(async move {
         tokio::select! {
@@ -173,11 +188,19 @@ async fn main() -> Result<()> {
         }
     });
 
-    let (sui_subscriber_result, server_result, state_manager_result, proxy_service_result, ()) = try_join!(
+    let (
+        sui_subscriber_result,
+        server_result,
+        state_manager_result,
+        proxy_service_result,
+        atoma_p2p_node_result,
+        (),
+    ) = try_join!(
         sui_subscriber_handle,
         server_handle,
         state_manager_handle,
         proxy_service_handle,
+        atoma_p2p_node_handle,
         ctrl_c
     )?;
 
@@ -186,6 +209,7 @@ async fn main() -> Result<()> {
         state_manager_result,
         server_result,
         proxy_service_result,
+        atoma_p2p_node_result,
     )?;
 
     // Before the program exits, ensure all spans are exported
@@ -288,6 +312,7 @@ fn handle_tasks_results(
     state_manager_result: Result<()>,
     server_result: Result<()>,
     proxy_service_result: Result<()>,
+    atoma_p2p_node_result: Result<()>,
 ) -> Result<()> {
     let result_handler = |result: Result<()>, message: &str| {
         if let Err(e) = result {
@@ -305,5 +330,6 @@ fn handle_tasks_results(
     result_handler(state_manager_result, "State manager terminated abruptly")?;
     result_handler(server_result, "Server terminated abruptly")?;
     result_handler(proxy_service_result, "Proxy service terminated abruptly")?;
+    result_handler(atoma_p2p_node_result, "Atoma P2P node terminated abruptly")?;
     Ok(())
 }

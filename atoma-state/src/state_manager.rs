@@ -1,21 +1,27 @@
+use std::time::Duration;
+
 use crate::build_query_with_in;
-use crate::handlers::{handle_atoma_event, handle_state_manager_event};
+use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
     NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
     StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
+use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::AtomaEvent;
 use chrono::{DateTime, Timelike, Utc};
 use flume::Receiver as FlumeReceiver;
 use sqlx::PgPool;
 use sqlx::{FromRow, Row};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tokio::sync::watch::Receiver;
 use tracing::instrument;
 
 pub type Result<T> = std::result::Result<T, AtomaStateManagerError>;
+
+type AtomaP2pData = (AtomaP2pEvent, Option<oneshot::Sender<bool>>);
 
 /// AtomaStateManager is a wrapper around a Postgres connection pool, responsible for managing the state of the Atoma system.
 ///
@@ -28,6 +34,8 @@ pub struct AtomaStateManager {
     pub event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
     /// Atoma service receiver
     pub state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
+    /// Atoma p2p event receiver
+    pub p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
     /// Sui address
     pub sui_address: String,
 }
@@ -39,12 +47,14 @@ impl AtomaStateManager {
         db: PgPool,
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
         state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
+        p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
         sui_address: String,
     ) -> Self {
         Self {
             state: AtomaState::new(db),
             event_subscriber_receiver,
             state_manager_receiver,
+            p2p_event_receiver,
             sui_address,
         }
     }
@@ -69,6 +79,7 @@ impl AtomaStateManager {
         database_url: &str,
         event_subscriber_receiver: FlumeReceiver<AtomaEvent>,
         state_manager_receiver: FlumeReceiver<AtomaAtomaStateManagerEvent>,
+        p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
         sui_address: String,
     ) -> Result<Self> {
         let db = PgPool::connect(database_url).await?;
@@ -78,6 +89,7 @@ impl AtomaStateManager {
             state: AtomaState::new(db),
             event_subscriber_receiver,
             state_manager_receiver,
+            p2p_event_receiver,
             sui_address,
         })
     }
@@ -162,6 +174,25 @@ impl AtomaStateManager {
                                 event = "state_manager_receiver_error",
                                 error = %e,
                                 "All state manager senders have been dropped, we will not be able to handle any more events from the Atoma node inference service"
+                            );
+                            // NOTE: We continue the loop, as the inference service might be shutting down,
+                            // but we want to keep the state manager running
+                            // for event synchronization with the Atoma Network protocol.
+                            continue;
+                        }
+                    }
+                }
+                p2p_event = self.p2p_event_receiver.recv_async() => {
+                    match p2p_event {
+                        Ok((p2p_event, sender)) => {
+                            handle_p2p_event(&self, p2p_event, sender).await?;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                target = "atoma-state-manager",
+                                event = "p2p_event_receiver_error",
+                                error = %e,
+                                "All p2p event senders have been dropped, we will not be able to handle any more events from the Atoma Network protocol"
                             );
                             // NOTE: We continue the loop, as the inference service might be shutting down,
                             // but we want to keep the state manager running
@@ -3333,12 +3364,189 @@ impl AtomaState {
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
     #[instrument(level = "trace", skip(self))]
-    pub async fn insert_new_node(&self, node_small_id: i64, sui_address: String) -> Result<()> {
-        sqlx::query("INSERT INTO nodes (node_small_id, sui_address) VALUES ($1, $2)")
+    pub async fn insert_new_node(
+        &self,
+        node_small_id: i64,
+        node_id: String,
+        sui_address: String,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address) VALUES ($1, $2, $3)")
             .bind(node_small_id)
+            .bind(node_id)
             .bind(sui_address)
             .execute(&self.db)
             .await?;
+        Ok(())
+    }
+
+    /// Registers or updates a node's public URL in the database.
+    ///
+    /// This method updates the `nodes` table with a node's public URL and timestamp. Since nodes must first
+    /// register on the network before registering their public URL, this method implements a retry mechanism
+    /// to handle race conditions where the node registration event hasn't been processed yet.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique small identifier of the node.
+    /// * `public_url` - The public URL where the node can be reached.
+    /// * `timestamp` - The Unix timestamp when this registration/update occurred.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - After 3 retries, the node is still not found in the database (`AtomaStateManagerError::NodeNotFound`).
+    ///
+    /// # Retries
+    ///
+    /// The method will retry the update operation up to 3 times with a 500ms delay between attempts if the
+    /// node is not found. This helps handle race conditions where the node registration event hasn't been
+    /// processed yet.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn register_url(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_small_id = 1;
+    ///     let public_url = "https://node1.example.com".to_string();
+    ///     let timestamp = chrono::Utc::now().timestamp();
+    ///
+    ///     state_manager.register_node_public_url(node_small_id, public_url, timestamp).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn register_node_public_url(
+        &self,
+        node_small_id: i64,
+        public_url: String,
+        timestamp: i64,
+        country: String,
+    ) -> Result<()> {
+        // NOTE: We expect that the `nodes` already contains the entry for the current `node_small_id`
+        // as each is supposed to first register on the network and only then register the public url,
+        // with its available registration metadata (i.e. the `node_small_id`). The only exception
+        // is the case when the node registration event was not received yet. In this case, we should
+        // retry after some short delay.
+        //
+        // It might the (likely malicious) case that a node is publishing an url with a previous timestamp
+        // to overwrite the previous url. In this case, all the retries will fail, but this is probably
+        // fine.
+        const NUM_RETRIES: u32 = 3;
+        const BASE_DELAY: Duration = Duration::from_millis(100);
+        const MAX_DELAY: Duration = Duration::from_secs(2);
+
+        validation::validate_timestamp(timestamp)?;
+        validation::validate_country(&country)?;
+        validation::validate_url(&public_url)?;
+
+        let mut retries = 0;
+
+        for retry in 0..NUM_RETRIES {
+            let result = sqlx::query(
+                "UPDATE nodes 
+                    SET public_address = $2, 
+                        timestamp = $3,
+                        country = $4
+                    WHERE node_small_id = $1 
+                    AND (timestamp IS NULL OR timestamp < $3)",
+            )
+            .bind(node_small_id)
+            .bind(&public_url)
+            .bind(timestamp)
+            .bind(&country)
+            .execute(&self.db)
+            .await?;
+
+            if result.rows_affected() > 0 {
+                return Ok(());
+            }
+
+            if retry < NUM_RETRIES - 1 {
+                // Calculate exponential backoff with jitter
+                let backoff = BASE_DELAY * 2u32.pow(retry);
+                let with_jitter = std::cmp::min(
+                    MAX_DELAY,
+                    backoff + Duration::from_millis(fastrand::u64(0..=100)),
+                );
+                tokio::time::sleep(with_jitter).await;
+            }
+        }
+
+        loop {
+            let result = sqlx::query(
+                "UPDATE nodes 
+                    SET public_address = $2, 
+                        timestamp = $3,
+                        country = $4
+                    WHERE node_small_id = $1 
+                    AND (timestamp IS NULL OR timestamp < $3)",
+            )
+            .bind(node_small_id)
+            .bind(&public_url)
+            .bind(timestamp)
+            .bind(&country)
+            .execute(&self.db)
+            .await?;
+            if result.rows_affected() == 0 {
+                if retries >= NUM_RETRIES {
+                    return Err(AtomaStateManagerError::NodeNotFound);
+                }
+                retries += 1;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Verifies the ownership of a node's small ID by checking the Sui address.
+    ///
+    /// This method fetches the node's small ID from the database and checks if the provided Sui address
+    /// matches the address stored in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The small ID of the node to verify.
+    /// * `sui_address` - The Sui address to verify against the node's small ID.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails to execute.
+    #[tracing::instrument(
+        level = "trace",
+        skip_all,
+        fields(node_small_id = %node_small_id, sui_address = %sui_address)
+    )]
+    pub async fn verify_node_small_id_ownership(
+        &self,
+        node_small_id: i64,
+        sui_address: String,
+    ) -> Result<()> {
+        let exists = sqlx::query(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE node_small_id = $1 AND public_address = $2)",
+        )
+        .bind(node_small_id)
+        .bind(sui_address)
+        .fetch_one(&self.db)
+        .await?
+        .get::<bool, _>(0);
+
+        if !exists {
+            return Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed);
+        }
+
         Ok(())
     }
 
@@ -4328,6 +4536,10 @@ pub enum AtomaStateManagerError {
     InvalidTimestamp,
     #[error("Failed to run migrations")]
     FailedToRunMigrations(#[from] sqlx::migrate::MigrateError),
+    #[error("Node not found")]
+    NodeNotFound,
+    #[error("Node small id ownership verification failed")]
+    NodeSmallIdOwnershipVerificationFailed,
     #[error("Failed to verify quote: `{0}`")]
     FailedToVerifyQuote(String),
     #[error("Failed to parse quote: `{0}`")]
@@ -4340,6 +4552,92 @@ pub enum AtomaStateManagerError {
     FailedToRetrieveFmspc(String),
     #[error("Insufficient balance")]
     InsufficientBalance,
+    #[error("Country is not a valid ISO 3166-1 alpha-2 code: {0}")]
+    InvalidCountry(String),
+    #[error("URL is not valid: {0}")]
+    InvalidUrl(String),
+}
+
+pub mod validation {
+    use tracing::{error, instrument};
+
+    use crate::AtomaStateManagerError;
+
+    /// Validates that the timestamp is not in the future.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - The timestamp to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The timestamp is in the future.
+    #[instrument(level = "debug")]
+    pub fn validate_timestamp(timestamp: i64) -> Result<(), AtomaStateManagerError> {
+        // Max timestamp drift in milliseconds, to account for clock drift between nodes
+        const MAX_TIMESTAMP_DRIFT: i64 = 250; // 250 milliseconds
+                                              // Validate timestamp is not in the future
+        let current_time = chrono::Utc::now().timestamp_millis();
+        if timestamp > (current_time + MAX_TIMESTAMP_DRIFT) / 1000 {
+            error!("Timestamp is in the future: {timestamp}");
+            return Err(AtomaStateManagerError::InvalidTimestamp);
+        }
+        Ok(())
+    }
+
+    /// Validates that the country is a valid ISO 3166-1 alpha-2 code.
+    ///
+    /// # Arguments
+    ///
+    /// * `country` - The country to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The country is not a valid ISO 3166-1 alpha-2 code.
+    #[instrument(level = "debug")]
+    pub fn validate_country(country: &str) -> Result<(), AtomaStateManagerError> {
+        if isocountry::CountryCode::for_alpha2(country).is_err() {
+            error!("Country is not a valid ISO 3166-1 alpha-2 code: {country}");
+            return Err(AtomaStateManagerError::InvalidCountry(country.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Validates that the url is valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The url to validate.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The url is not valid.
+    #[instrument(level = "debug")]
+    pub fn validate_url(url: &str) -> Result<(), AtomaStateManagerError> {
+        if url::Url::parse(url).is_err() {
+            error!("URL is not valid: {url}");
+            return Err(AtomaStateManagerError::InvalidUrl(url.to_string()));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -4373,6 +4671,145 @@ mod tests {
         .execute(db)
         .await
         .expect("Failed to truncate tables");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_node_small_id_ownership() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test node data
+        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address, public_address) VALUES ($1, $2, $3, $4)")
+            .bind(1i64)
+            .bind("0xa12...beef")
+            .bind("0x123...456")
+            .bind("test_address_1")
+            .execute(&state.db)
+            .await
+            .expect("Failed to insert test node");
+
+        // Test cases
+        let test_cases = vec![
+            // Valid case
+            (1i64, "test_address_1".to_string(), true),
+            // Wrong address
+            (1i64, "wrong_address".to_string(), false),
+            // Non-existent node
+            (999i64, "test_address_1".to_string(), false),
+        ];
+
+        for (node_id, address, should_succeed) in test_cases {
+            let result = state.verify_node_small_id_ownership(node_id, address).await;
+
+            match (should_succeed, result) {
+                (true, Ok(()))
+                | (false, Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed)) => {
+                    // 1. Test passed - verification succeeded as expected
+                    // 2. Test passed - verification failed as expected
+                }
+                (true, Err(e)) => {
+                    panic!("Expected verification to succeed, but got error: {e}");
+                }
+                (false, Ok(())) => {
+                    panic!("Expected verification to fail, but it succeeded");
+                }
+                (_, Err(e)) => {
+                    panic!("Unexpected error: {e}");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_node_small_id_ownership_with_multiple_nodes() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert multiple test nodes
+        let test_nodes = vec![
+            (1i64, "test_address_1"),
+            (2i64, "test_address_2"),
+            (3i64, "test_address_3"),
+        ];
+
+        for (node_id, address) in &test_nodes {
+            sqlx::query("INSERT INTO nodes (node_small_id, public_address, sui_address, node_id) VALUES ($1, $2, $3, $4)")
+                .bind(*node_id)
+                .bind(*address)
+                .bind("0x123...456")
+                .bind("0xa12...beef")
+                .execute(&state.db)
+                .await
+                .expect("Failed to insert test node");
+        }
+
+        // Verify correct mappings
+        for (node_id, address) in &test_nodes {
+            let result = state
+                .verify_node_small_id_ownership(*node_id, (*address).to_string())
+                .await;
+            assert!(
+                result.is_ok(),
+                "Verification should succeed for valid node-address pair"
+            );
+        }
+
+        // Verify incorrect mappings
+        for (node_id, address) in &test_nodes {
+            let wrong_address = format!("wrong_{address}");
+            let result = state
+                .verify_node_small_id_ownership(*node_id, wrong_address)
+                .await;
+            assert!(
+                matches!(
+                    result,
+                    Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed)
+                ),
+                "Verification should fail for invalid address"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_verify_node_small_id_ownership_with_empty_db() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let result = state
+            .verify_node_small_id_ownership(1, "any_address".to_string())
+            .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(AtomaStateManagerError::NodeSmallIdOwnershipVerificationFailed)
+            ),
+            "Verification should fail when database is empty"
+        );
+    }
+
+    async fn insert_test_node(db: &sqlx::PgPool, node_small_id: i64) {
+        sqlx::query("INSERT INTO nodes (node_small_id, node_id, sui_address, public_address) VALUES ($1, $2, $3, $4)")
+            .bind(node_small_id)
+            .bind("test_node_id")
+            .bind("test_sui_address")
+            .bind("test_public_address")
+            .execute(db)
+            .await
+            .expect("Failed to insert test node");
+    }
+
+    async fn get_node_public_url(db: &sqlx::PgPool, node_small_id: i64) -> Option<(String, i64)> {
+        sqlx::query_as::<_, (String, i64)>(
+            "SELECT public_address, timestamp FROM nodes WHERE node_small_id = $1",
+        )
+        .bind(node_small_id)
+        .fetch_optional(db)
+        .await
+        .expect("Failed to fetch node public URL")
     }
 
     /// Helper function to create a test task
@@ -4437,12 +4874,13 @@ mod tests {
 
     async fn create_test_node(pool: &sqlx::PgPool, node_small_id: i64) -> sqlx::Result<()> {
         sqlx::query(
-            "INSERT INTO nodes (node_small_id, sui_address, public_address, country) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO nodes (node_small_id, sui_address, public_address, country, node_id) VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(node_small_id)
         .bind(Uuid::new_v4().to_string())
         .bind("test_public_address")
         .bind("test_country")
+        .bind("asdfghjkl")
         .execute(pool)
         .await?;
         Ok(())
@@ -4522,6 +4960,65 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn test_register_node_public_url_success() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test node
+        insert_test_node(&state.db, 1).await;
+
+        let public_url = "https://test.example.com".to_string();
+        let timestamp = chrono::Utc::now().timestamp();
+
+        // Test registration
+        let result = state
+            .register_node_public_url(1, public_url.clone(), timestamp, "US".to_string())
+            .await;
+        assert!(result.is_ok(), "Registration should succeed");
+
+        // Verify the registration
+        let stored_data = get_node_public_url(&state.db, 1)
+            .await
+            .expect("Node should exist");
+        assert_eq!(stored_data.0, public_url);
+        assert_eq!(stored_data.1, timestamp);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_register_node_public_url_update_existing() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test node with initial URL
+        insert_test_node(&state.db, 1).await;
+        let initial_url = "https://initial.example.com".to_string();
+        let initial_timestamp = chrono::Utc::now().timestamp();
+        state
+            .register_node_public_url(1, initial_url, initial_timestamp, "US".to_string())
+            .await
+            .unwrap();
+
+        // Update with new URL
+        let new_url = "https://updated.example.com".to_string();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let new_timestamp = chrono::Utc::now().timestamp();
+        let result = state
+            .register_node_public_url(1, new_url.clone(), new_timestamp, "US".to_string())
+            .await;
+        result.unwrap();
+        // assert!(result.is_ok(), "URL update should succeed");
+
+        // Verify the update
+        let stored_data = get_node_public_url(&state.db, 1)
+            .await
+            .expect("Node should exist");
+        assert_eq!(stored_data.0, new_url);
+        assert_eq!(stored_data.1, new_timestamp);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn test_get_cheapest_node_basic() {
         let state = setup_test_db().await;
         truncate_tables(&state.db).await;
@@ -4547,6 +5044,68 @@ mod tests {
         assert_eq!(node.price_per_one_million_compute_units, 100);
         assert_eq!(node.max_num_compute_units, 1000);
         assert_eq!(node.node_small_id, 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_register_node_public_url_nonexistent_node() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let start_time = std::time::Instant::now();
+        let result = state
+            .register_node_public_url(
+                999, // Non-existent node
+                "https://test.example.com".to_string(),
+                chrono::Utc::now().timestamp(),
+                "US".to_string(),
+            )
+            .await;
+
+        // Verify error and retry behavior
+        assert!(matches!(result, Err(AtomaStateManagerError::NodeNotFound)));
+
+        // Verify that it took at least the expected retry time
+        // 3 retries * 500ms = 1500ms minimum
+        let elapsed = start_time.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(1500),
+            "Should have waited for at least 1500ms, but only waited for {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_register_node_public_url_delayed_node_creation() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Spawn a task to insert the node after a delay
+        let db_clone = state.db.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+            insert_test_node(&db_clone, 2).await;
+        });
+
+        // Attempt to register URL (should succeed after retry)
+        let public_url = "https://delayed.example.com".to_string();
+        let timestamp = chrono::Utc::now().timestamp();
+        let result = state
+            .register_node_public_url(2, public_url.clone(), timestamp, "US".to_string())
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Registration should succeed after node creation"
+        );
+
+        // Verify the registration
+        let stored_data = get_node_public_url(&state.db, 2)
+            .await
+            .expect("Node should exist");
+        assert_eq!(stored_data.0, public_url);
+        assert_eq!(stored_data.1, timestamp);
     }
 
     #[tokio::test]
@@ -4587,6 +5146,48 @@ mod tests {
         let node = result.unwrap();
         assert_eq!(node.price_per_one_million_compute_units, 50);
         assert_eq!(node.node_small_id, 2);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_register_node_public_url_concurrent_updates() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Spawn multiple concurrent update attempts
+        let mut handles = vec![];
+        for i in 0..5 {
+            // Insert test node
+            insert_test_node(&state.db, i).await;
+            let state_clone = state.clone();
+            let url = format!("https://concurrent{i}.example.com");
+            let timestamp = chrono::Utc::now().timestamp();
+
+            handles.push(tokio::spawn(async move {
+                state_clone
+                    .register_node_public_url(i, url, timestamp, "US".to_string())
+                    .await
+            }));
+        }
+
+        // Wait for all updates to complete
+        let results: Vec<Result<()>> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
+
+        // Verify all updates succeeded
+        assert!(
+            results.iter().all(std::result::Result::is_ok),
+            "All updates should succeed"
+        );
+
+        // Verify final state (should be the last update)
+        let stored_data = get_node_public_url(&state.db, 3)
+            .await
+            .expect("Node should exist");
+        assert!(stored_data.0.starts_with("https://concurrent"));
     }
 
     #[tokio::test]
@@ -4842,6 +5443,34 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_register_node_public_url_invalid_inputs() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test node
+        insert_test_node(&state.db, 4).await;
+
+        // Test with empty URL
+        let result = state
+            .register_node_public_url(
+                4,
+                "https://test.com".to_string(),
+                chrono::Utc::now().timestamp(),
+                "US".to_string(),
+            )
+            .await;
+        assert!(result.is_ok(), "Empty URL should be allowed");
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // Test with negative timestamp
+        let result = state
+            .register_node_public_url(4, "https://test.com".to_string(), -4, "US".to_string())
+            .await;
+        assert!(result.is_err(), "Negative timestamp should not be allowed");
     }
 
     #[tokio::test]

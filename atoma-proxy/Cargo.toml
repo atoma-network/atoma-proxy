@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 atoma-auth.workspace = true
+atoma-p2p.workspace = true
 atoma-proxy-service.workspace = true
 atoma-state.workspace = true
 atoma-sui.workspace = true
