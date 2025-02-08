@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+atoma-confidential = { workspace = true, optional = true }
 atoma-sui = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
@@ -22,3 +23,7 @@ utoipa = { workspace = true }
 futures = { workspace = true }
 serial_test = { workspace = true }
 uuid = { workspace = true }
+
+[features]
+default = []
+confidential = ["dep:atoma-confidential"]
