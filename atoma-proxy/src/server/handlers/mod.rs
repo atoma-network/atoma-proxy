@@ -233,13 +233,13 @@ pub fn verify_and_sign_response(
         Keystore::File(keystore) => keystore
             .sign_hashed(&keystore.addresses()[0], &response_hash_bytes)
             .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to create proxy signature: {}", e),
+                message: format!("Failed to create proxy signature: {e}"),
                 endpoint: "verify_signature".to_string(),
             })?,
         Keystore::InMem(keystore) => keystore
             .sign_hashed(&keystore.addresses()[0], &response_hash_bytes)
             .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to create proxy signature: {}", e),
+                message: format!("Failed to create proxy signature: {e}"),
                 endpoint: "verify_signature".to_string(),
             })?,
     };

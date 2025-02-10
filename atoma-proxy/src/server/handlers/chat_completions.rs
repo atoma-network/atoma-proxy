@@ -489,6 +489,7 @@ pub fn confidential_chat_completions_create_stream(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
@@ -554,7 +555,7 @@ async fn handle_non_streaming_response(
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 
-    let guard = state.sui.read().await;
+    let guard: tokio::sync::RwLockReadGuard<'_, atoma_auth::Sui> = state.sui.blocking_read();
     let keystore = guard.get_keystore();
     let proxy_signature = verify_and_sign_response(&response.0, verify_hash, keystore)?;
 

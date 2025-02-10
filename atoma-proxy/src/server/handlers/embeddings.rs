@@ -355,6 +355,7 @@ pub async fn confidential_embeddings_create(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_embeddings_response(
     state: &ProxyState,
     node_address: String,
@@ -402,7 +403,8 @@ async fn handle_embeddings_response(
                 message: format!("Failed to parse embeddings response: {err:?}"),
                 endpoint: endpoint.to_string(),
             })?;
-    let guard = state.sui.read().await;
+
+    let guard = state.sui.blocking_read();
     let keystore = guard.get_keystore();
     let verify_hash = endpoint != CONFIDENTIAL_EMBEDDINGS_PATH;
 
