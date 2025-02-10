@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
-use opentelemetry::{global, trace::TracerProvider, KeyValue};
+use opentelemetry::{global, logs::Logger, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     metrics::{self as sdkmetrics},
@@ -32,10 +32,7 @@ static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
 
 /// Initialize metrics with OpenTelemetry SDK
-fn init_metrics() -> sdkmetrics::SdkMeterProvider {
-    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
-
+fn init_metrics(otlp_endpoint: &str) -> sdkmetrics::SdkMeterProvider {
     let metrics_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
@@ -55,10 +52,7 @@ fn init_metrics() -> sdkmetrics::SdkMeterProvider {
 }
 
 /// Initialize tracing with OpenTelemetry SDK
-fn init_traces() -> Result<sdktrace::Tracer> {
-    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
-
+fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::Tracer> {
     let tracing_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
@@ -82,11 +76,13 @@ fn init_traces() -> Result<sdktrace::Tracer> {
 
 /// Configure logging with JSON formatting, file output, and console output
 pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
+    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
     // Create logs directory if it doesn't exist
     std::fs::create_dir_all(&log_dir).context("Failed to create logs directory")?;
 
     // Set up metrics
-    let metrics_provider = init_metrics();
+    let metrics_provider = init_metrics(&otlp_endpoint);
     global::set_meter_provider(metrics_provider);
 
     // Set up file appender with rotation
@@ -97,8 +93,18 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
     let (non_blocking_stdout, stdout_guard) = non_blocking(std::io::stdout());
 
     // Initialize OpenTelemetry tracing
-    let tracer = init_traces()?;
+    let tracer = init_traces(&otlp_endpoint)?;
     let opentelemetry_layer = OpenTelemetryLayer::new(tracer);
+
+    let logs_exporter = opentelemetry_otlp::LogExporter::builder()
+        .with_tonic()
+        .with_endpoint(otlp_endpoint)
+        .build()?;
+
+    let _ = opentelemetry_sdk::logs::LoggerProvider::builder()
+        .with_batch_exporter(logs_exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_resource(RESOURCE.clone())
+        .build();
 
     // Create JSON formatter for file output
     let file_layer = fmt::layer()

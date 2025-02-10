@@ -195,10 +195,10 @@ services:
     image: grafana/loki:2.9.4
     ports:
       - "3100:3100"
+    command: -config.file=/etc/loki/loki.yaml
     volumes:
-      - ./loki.yaml:/etc/loki/local.yaml
+      - ./loki.yaml:/etc/loki/loki.yaml
       - loki-data:/loki
-    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - atoma-network
 
