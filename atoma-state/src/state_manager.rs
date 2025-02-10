@@ -3613,7 +3613,7 @@ impl AtomaState {
             )
             SELECT 
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19
+                $11, $12, $13, $14, $15, $16, $17, $18
             WHERE NOT EXISTS (
                 SELECT 1 FROM latest_timestamp 
                 WHERE max_ts >= $2
@@ -5205,11 +5205,11 @@ mod tests {
         assert!(matches!(result, Err(AtomaStateManagerError::NodeNotFound)));
 
         // Verify that it took at least the expected retry time
-        // 3 retries * 500ms = 1500ms minimum
+        // 3 retries * 100ms = 300ms minimum
         let elapsed = start_time.elapsed();
         assert!(
-            elapsed >= std::time::Duration::from_millis(1500),
-            "Should have waited for at least 1500ms, but only waited for {}ms",
+            elapsed >= std::time::Duration::from_millis(300),
+            "Should have waited for at least 300ms, but only waited for {}ms",
             elapsed.as_millis()
         );
     }
@@ -5223,7 +5223,7 @@ mod tests {
         // Spawn a task to insert the node after a delay
         let db_clone = state.db.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             insert_test_node(&db_clone, 2).await;
         });
 
