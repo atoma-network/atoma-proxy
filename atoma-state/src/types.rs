@@ -167,6 +167,29 @@ pub struct Task {
     pub minimum_reputation_score: Option<i16>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct NodeMetrics {
+    pub node_small_id: i64,
+    pub timestamp: i64,
+    pub cpu_usage: f32,
+    pub num_cpus: i32,
+    pub ram_used: i64,
+    pub ram_total: i64,
+    pub ram_swap_used: i64,
+    pub ram_swap_total: i64,
+    pub network_rx: i64,
+    pub network_tx: i64,
+    pub num_gpus: i32,
+    pub gpu_utilizations: Vec<f64>,
+    pub gpu_memory_used: Vec<i64>,
+    pub gpu_memory_total: Vec<i64>,
+    pub gpu_memory_free: Vec<i64>,
+    pub gpu_percentage_time_read_write: Vec<f64>,
+    pub gpu_percentage_time_execution: Vec<f64>,
+    pub gpu_temperatures: Vec<f64>,
+    pub gpu_power_usages: Vec<f64>,
+}
+
 impl From<TaskRegisteredEvent> for Task {
     fn from(event: TaskRegisteredEvent) -> Self {
         Self {
