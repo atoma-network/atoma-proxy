@@ -10,11 +10,12 @@ use futures::Stream;
 use reqwest;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
-use tokio::sync::RwLockReadGuard;
+use tokio::sync::RwLock;
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
 use super::handlers::verify_and_sign_response;
+use std::sync::Arc;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -43,7 +44,7 @@ const CHOICES: &str = "choices";
 const USAGE: &str = "usage";
 
 /// A structure for streaming chat completion chunks.
-pub struct Streamer<'a> {
+pub struct Streamer {
     /// The stream of bytes currently being processed
     stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     /// Current status of the stream
@@ -51,7 +52,7 @@ pub struct Streamer<'a> {
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
     /// Keystore
-    keystore: RwLockReadGuard<'a, Sui>,
+    sui: Arc<RwLock<Sui>>,
     /// Stack small id
     stack_small_id: i64,
     /// State manager sender
@@ -85,7 +86,7 @@ pub enum StreamStatus {
     Failed(String),
 }
 
-impl<'a> Streamer<'a> {
+impl Streamer {
     /// Creates a new Streamer instance
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -93,7 +94,7 @@ impl<'a> Streamer<'a> {
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         stack_small_id: i64,
         estimated_total_tokens: i64,
-        keystore: RwLockReadGuard<'a, Sui>,
+        sui: Arc<RwLock<Sui>>,
         start: Instant,
         node_id: i64,
         model_name: String,
@@ -103,7 +104,7 @@ impl<'a> Streamer<'a> {
             stream: Box::pin(stream),
             status: StreamStatus::NotStarted,
             estimated_total_tokens,
-            keystore,
+            sui,
             stack_small_id,
             state_manager_sender,
             start,
@@ -274,7 +275,7 @@ impl<'a> Streamer<'a> {
     }
 }
 
-impl<'a> Stream for Streamer<'a> {
+impl Stream for Streamer {
     type Item = Result<Event, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -461,8 +462,11 @@ impl<'a> Stream for Streamer<'a> {
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;
-                    verify_and_sign_response(&chunk, verify_hash, self.keystore.get_keystore())
-                        .map_err(|e| Error::new(e.to_string()))?;
+                    let _ = {
+                        let guard = self.sui.blocking_read();
+                        verify_and_sign_response(&chunk, verify_hash, guard.get_keystore())
+                            .map_err(|e| Error::new(e.to_string()))?
+                    }; // guard is dropped immediately after signature is created
                     self.handle_final_chunk(usage)?;
                 }
 

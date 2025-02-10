@@ -710,14 +710,13 @@ async fn handle_streaming_response(
 
     let stream = response.bytes_stream();
 
-    let guard = state.sui.read().await;
     // Create the SSE stream
     let stream = Sse::new(Streamer::new(
         stream,
         state.state_manager_sender.clone(),
         selected_stack_small_id,
         estimated_total_tokens,
-        guard,
+        state.sui.clone(),
         start,
         node_id,
         model_name,
