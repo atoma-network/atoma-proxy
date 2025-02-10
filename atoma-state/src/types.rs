@@ -180,7 +180,6 @@ pub struct NodeMetrics {
     pub network_rx: i64,
     pub network_tx: i64,
     pub num_gpus: i32,
-    pub gpu_utilizations: Vec<f64>,
     pub gpu_memory_used: Vec<i64>,
     pub gpu_memory_total: Vec<i64>,
     pub gpu_memory_free: Vec<i64>,

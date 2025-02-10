@@ -3510,7 +3510,7 @@ impl AtomaState {
     /// * `gpu_memory_total` - Vector of total GPU memory (in bytes) for each GPU.
     /// * `gpu_memory_free` - Vector of free GPU memory (in bytes) for each GPU.
     /// * `gpu_percentage_time_read_write` - Vector of GPU memory read/write time percentages for each GPU.
-    /// * `gpu_percentage_time_gpu_execution` - Vector of GPU execution time percentages for each GPU.
+    /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages for each GPU.
     /// * `gpu_temperatures` - Vector of GPU temperatures (in Celsius) for each GPU.
     /// * `gpu_power_usages` - Vector of GPU power consumption (in watts) for each GPU.
     ///
@@ -3577,12 +3577,11 @@ impl AtomaState {
         network_rx: i64,
         network_tx: i64,
         num_gpus: i32,
-        gpu_utilizations: Vec<f64>,
         gpu_memory_used: Vec<i64>,
         gpu_memory_total: Vec<i64>,
         gpu_memory_free: Vec<i64>,
         gpu_percentage_time_read_write: Vec<f64>,
-        gpu_percentage_time_gpu_execution: Vec<f64>,
+        gpu_percentage_time_execution: Vec<f64>,
         gpu_temperatures: Vec<f64>,
         gpu_power_usages: Vec<f64>,
     ) -> Result<()> {
@@ -3604,7 +3603,6 @@ impl AtomaState {
                 network_rx,
                 network_tx,
                 num_gpus,
-                gpu_utilizations,
                 gpu_memory_used,
                 gpu_memory_total,
                 gpu_memory_free,
@@ -3632,12 +3630,11 @@ impl AtomaState {
         .bind(network_rx)
         .bind(network_tx)
         .bind(num_gpus)
-        .bind(gpu_utilizations)
         .bind(gpu_memory_used)
         .bind(gpu_memory_total)
         .bind(gpu_memory_free)
         .bind(gpu_percentage_time_read_write)
-        .bind(gpu_percentage_time_gpu_execution)
+        .bind(gpu_percentage_time_execution)
         .bind(gpu_temperatures)
         .bind(gpu_power_usages)
         .execute(&self.db)
@@ -6157,7 +6154,6 @@ mod tests {
                 1_000_000,           // Network RX
                 500_000,             // Network TX
                 1,                   // Number of GPUs
-                vec![80.0],          // GPU utilization
                 vec![6_442_450_944], // GPU memory used (6GB)
                 vec![8_589_934_592], // GPU memory total (8GB)
                 vec![2_147_483_648], // GPU memory free (2GB)
@@ -6188,7 +6184,6 @@ mod tests {
         assert_eq!(metrics.network_rx, 1_000_000);
         assert_eq!(metrics.network_tx, 500_000);
         assert_eq!(metrics.num_gpus, 1);
-        assert_eq!(metrics.gpu_utilizations, vec![80.0f64]);
         assert_eq!(metrics.gpu_memory_used, vec![6_442_450_944i64]);
         assert_eq!(metrics.gpu_memory_total, vec![8_589_934_592i64]);
         assert_eq!(metrics.gpu_memory_free, vec![2_147_483_648i64]);
@@ -6229,7 +6224,6 @@ mod tests {
                 2_000_000,                            // Network RX
                 1_000_000,                            // Network TX
                 2,                                    // Number of GPUs
-                vec![85.0, 90.0],                     // GPU utilizations
                 vec![12_884_901_888, 12_884_901_888], // GPU memory used (12GB each)
                 vec![17_179_869_184, 17_179_869_184], // GPU memory total (16GB each)
                 vec![4_294_967_296, 4_294_967_296],   // GPU memory free (4GB each)
@@ -6250,7 +6244,6 @@ mod tests {
                 .expect("Failed to fetch node metrics");
 
         assert_eq!(metrics.num_gpus, 2);
-        assert_eq!(metrics.gpu_utilizations, vec![85.0f64, 90.0f64]);
         assert_eq!(
             metrics.gpu_memory_used,
             vec![12_884_901_888i64, 12_884_901_888i64]
@@ -6309,7 +6302,6 @@ mod tests {
                 1_000_000,
                 500_000,
                 1,
-                vec![80.0],
                 vec![6_442_450_944],
                 vec![8_589_934_592],
                 vec![2_147_483_648],
@@ -6335,7 +6327,6 @@ mod tests {
                 1_000_000,
                 500_000,
                 1,
-                vec![85.0],
                 vec![7_442_450_944],
                 vec![8_589_934_592],
                 vec![1_147_483_648],
@@ -6368,7 +6359,6 @@ mod tests {
 
         assert_eq!(metrics.timestamp, initial_timestamp);
         assert_eq!((metrics.cpu_usage * 10.0) as i32, 755);
-        assert_eq!(metrics.gpu_utilizations, vec![80.0f64]);
 
         Ok(())
     }
@@ -6404,7 +6394,6 @@ mod tests {
                 1_000_000,      // Network RX
                 500_000,        // Network TX
                 0,              // Number of GPUs
-                vec![],         // Empty GPU metrics
                 vec![],
                 vec![],
                 vec![],
@@ -6425,7 +6414,6 @@ mod tests {
                 .expect("Failed to fetch node metrics");
 
         assert_eq!(metrics.num_gpus, 0);
-        assert!(metrics.gpu_utilizations.is_empty());
         assert!(metrics.gpu_memory_used.is_empty());
         assert!(metrics.gpu_memory_total.is_empty());
         assert!(metrics.gpu_memory_free.is_empty());

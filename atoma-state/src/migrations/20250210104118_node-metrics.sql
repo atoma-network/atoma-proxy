@@ -19,7 +19,6 @@ CREATE TABLE node_metrics (
     
     -- GPU metrics
     num_gpus                       INTEGER NOT NULL,
-    gpu_utilizations               FLOAT[] NOT NULL,    -- Percentage (0-100)
     gpu_memory_used                BIGINT[] NOT NULL,   -- Bytes
     gpu_memory_total               BIGINT[] NOT NULL,   -- Bytes
     gpu_memory_free                BIGINT[] NOT NULL,   -- Bytes

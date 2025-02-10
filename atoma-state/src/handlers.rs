@@ -1536,7 +1536,6 @@ pub(crate) async fn handle_node_metrics_registration_event(
     } = node_metrics;
 
     // Collect each metric using iterators
-    let gpu_utilizations: Vec<_> = gpus.iter().map(|gpu| gpu.utilization).collect();
     let gpu_memory_used: Vec<_> = gpus.iter().map(|gpu| gpu.memory_used).collect();
     let gpu_memory_total: Vec<_> = gpus.iter().map(|gpu| gpu.memory_total).collect();
     let gpu_memory_free: Vec<_> = gpus.iter().map(|gpu| gpu.memory_free).collect();
@@ -1544,7 +1543,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
         .iter()
         .map(|gpu| gpu.percentage_time_read_write)
         .collect();
-    let gpu_percentage_time_gpu_execution: Vec<_> = gpus
+    let gpu_percentage_time_execution: Vec<_> = gpus
         .iter()
         .map(|gpu| gpu.percentage_time_gpu_execution)
         .collect();
@@ -1569,7 +1568,6 @@ pub(crate) async fn handle_node_metrics_registration_event(
             network_rx as i64,
             network_tx as i64,
             num_gpus as i32,
-            gpu_utilizations.iter().map(|&x| f64::from(x)).collect(),
             gpu_memory_used.iter().map(|&x| x as i64).collect(),
             gpu_memory_total.iter().map(|&x| x as i64).collect(),
             gpu_memory_free.iter().map(|&x| x as i64).collect(),
@@ -1577,7 +1575,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
                 .iter()
                 .map(|&x| f64::from(x) / 100.0)
                 .collect(),
-            gpu_percentage_time_gpu_execution
+            gpu_percentage_time_execution
                 .iter()
                 .map(|&x| f64::from(x) / 100.0)
                 .collect(),
