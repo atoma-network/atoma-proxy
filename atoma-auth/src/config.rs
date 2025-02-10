@@ -11,19 +11,26 @@ pub struct AtomaAuthConfig {
     pub access_token_lifetime: usize,
     /// The refresh token lifetime in days.
     pub refresh_token_lifetime: usize,
+    /// Google client id.
+    #[cfg(feature = "google-oauth")]
+    pub google_client_id: String,
 }
 
 impl AtomaAuthConfig {
     /// Constructor
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         secret_key: String,
         access_token_lifetime: usize,
         refresh_token_lifetime: usize,
+        #[cfg(feature = "google-oauth")] google_client_id: String,
     ) -> Self {
         Self {
             secret_key,
             access_token_lifetime,
             refresh_token_lifetime,
+            #[cfg(feature = "google-oauth")]
+            google_client_id,
         }
     }
 

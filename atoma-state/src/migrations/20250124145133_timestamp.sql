@@ -1,0 +1,3 @@
+-- Add migration script here
+ALTER TABLE users ADD COLUMN creation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE api_tokens ADD COLUMN creation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP;

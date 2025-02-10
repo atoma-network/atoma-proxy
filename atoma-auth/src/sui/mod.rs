@@ -1,7 +1,7 @@
 use std::{path::Path, str::FromStr};
 
 use anyhow::Result;
-use atoma_sui::{events::StackCreatedEvent, AtomaSuiConfig};
+use atoma_sui::{config::Config, events::StackCreatedEvent};
 use blake2::{
     digest::generic_array::{typenum::U32, GenericArray},
     Blake2b, Digest,
@@ -48,7 +48,7 @@ pub struct StackEntryResponse {
 /// This struct is used to interact with the Sui contract.
 pub struct Sui {
     /// Sui wallet context
-    wallet_ctx: WalletContext,
+    pub wallet_ctx: WalletContext,
     /// Atoma package object ID
     atoma_package_id: ObjectID,
     /// Atoma DB object ID
@@ -62,8 +62,17 @@ pub struct Sui {
 }
 
 impl Sui {
-    /// Constructor
-    pub async fn new(sui_config: &AtomaSuiConfig) -> Result<Self> {
+    /// Creates a new Sui client instance.
+    ///
+    /// # Arguments
+    /// * `sui_config` - Configuration for the Sui client
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Failed to create wallet context
+    /// - Failed to parse configuration paths
+    /// - Failed to establish connection with Sui network
+    pub fn new(sui_config: &Config) -> Result<Self> {
         let sui_config_path = sui_config.sui_config_path();
         let sui_config_path = Path::new(&sui_config_path);
         let wallet_ctx = WalletContext::new(
@@ -129,7 +138,7 @@ impl Sui {
                 .coin_read_api()
                 .get_coins(address, coin_type.clone(), cursor, None)
                 .await?;
-            for coin in coins.iter() {
+            for coin in &coins {
                 total_balance += coin.balance;
                 selected_coins.push(coin.clone());
                 if total_balance >= value {
@@ -256,7 +265,7 @@ impl Sui {
             .parsed_json;
         Ok(StackEntryResponse {
             transaction_digest: response.digest,
-            stack_created_event: serde_json::from_value(stack_created_event.clone())?,
+            stack_created_event: serde_json::from_value(stack_created_event)?,
             timestamp_ms: response.timestamp_ms,
         })
     }
@@ -399,6 +408,7 @@ impl Sui {
     /// # Returns
     ///
     /// Returns the keystore.
+    #[must_use]
     pub fn get_keystore(&self) -> &Keystore {
         &self.wallet_ctx.config.keystore
     }
@@ -436,7 +446,7 @@ impl Sui {
     ///
     /// # Returns
     ///
-    /// Returns a tuple containing the timestamp of the transaction and the balance changes
+    /// Returns the balance changes
     ///
     /// # Errors
     ///
@@ -446,7 +456,7 @@ impl Sui {
     pub async fn get_balance_changes(
         &self,
         transaction_digest: &str,
-    ) -> Result<(Option<u64>, Option<Vec<BalanceChange>>)> {
+    ) -> Result<Option<Vec<BalanceChange>>> {
         let transaction_digest = TransactionDigest::from_str(transaction_digest).unwrap();
         let client = self.wallet_ctx.get_client().await?;
         let transaction = client
@@ -459,6 +469,6 @@ impl Sui {
                 },
             )
             .await?;
-        Ok((transaction.timestamp_ms, transaction.balance_changes))
+        Ok(transaction.balance_changes)
     }
 }

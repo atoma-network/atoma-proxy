@@ -320,6 +320,59 @@ paths:
           description: Failed to get balance
       security:
       - bearerAuth: []
+  /user_profile:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the user profile for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the user profile
+
+        # Errors
+
+        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+      operationId: get_user_profile
+      responses:
+        '200':
+          description: Retrieves the user profile for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to get user profile
+      security:
+      - bearerAuth: []
+  /salt:
+    get:
+      tags:
+      - Auth
+      summary: Gets the salt for the user. It creates a new salt if the user does not have one.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<()>>` - A JSON response indicating the success of the operation
+      operationId: get_salt
+      responses:
+        '200':
+          description: Sets the salt for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to set salt
+      security:
+      - bearerAuth: []
   /tasks:
     get:
       tags:
@@ -574,6 +627,10 @@ components:
       required:
       - transaction_digest
       properties:
+        proof_signature:
+          type:
+          - string
+          - 'null'
         transaction_digest:
           type: string
   securitySchemes:

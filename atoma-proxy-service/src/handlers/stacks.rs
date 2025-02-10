@@ -15,15 +15,15 @@ type Result<T> = std::result::Result<T, StatusCode>;
 type StackWithTimeStamp = (Stack, DateTime<Utc>);
 
 /// The path for the get_current_stacks endpoint.
-pub(crate) const GET_CURRENT_STACKS_PATH: &str = "/current_stacks";
+pub const GET_CURRENT_STACKS_PATH: &str = "/current_stacks";
 
-pub(crate) const GET_ALL_STACKS_FOR_USER_PATH: &str = "/all_stacks";
+pub const GET_ALL_STACKS_FOR_USER_PATH: &str = "/all_stacks";
 
 /// Returns a router with the stacks endpoint.
 ///
 /// # Returns
 /// * `Router<ProxyServiceState>` - A router with the stacks endpoint
-pub(crate) fn stacks_router() -> Router<ProxyServiceState> {
+pub fn stacks_router() -> Router<ProxyServiceState> {
     Router::new()
         .route(
             &format!("{GET_CURRENT_STACKS_PATH}/:id"),
@@ -40,7 +40,7 @@ pub(crate) fn stacks_router() -> Router<ProxyServiceState> {
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_current_stacks))]
-pub(crate) struct GetCurrentStacksOpenApi;
+pub struct GetCurrentStacksOpenApi;
 
 /// Retrieves all stacks that are not settled.
 ///
@@ -60,7 +60,7 @@ pub(crate) struct GetCurrentStacksOpenApi;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_current_stacks(
+pub async fn get_current_stacks(
     State(proxy_service_state): State<ProxyServiceState>,
 ) -> Result<Json<Vec<Stack>>> {
     Ok(Json(
@@ -100,7 +100,7 @@ pub(crate) async fn get_current_stacks(
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_node_stacks(
+pub async fn get_node_stacks(
     State(proxy_service_state): State<ProxyServiceState>,
     Path(node_small_id): Path<i64>,
 ) -> Result<Json<Vec<Stack>>> {
@@ -123,7 +123,7 @@ pub(crate) async fn get_node_stacks(
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
 #[openapi(paths(get_all_stacks_for_user))]
-pub(crate) struct GetStacksByUserId;
+pub struct GetStacksByUserId;
 
 /// Retrieves all stacks for the user based on the access token.
 ///
@@ -150,7 +150,7 @@ pub(crate) struct GetStacksByUserId;
     )
 )]
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn get_all_stacks_for_user(
+pub async fn get_all_stacks_for_user(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<StackWithTimeStamp>>> {

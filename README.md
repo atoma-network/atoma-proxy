@@ -1,10 +1,10 @@
 # Atoma Proxy Infrastructure
 
-<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
+![Atoma Banner](https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png)
 
-[![Discord](https://img.shields.io/discord/1172593757586214964?label=Discord&logo=discord&logoColor=white)]
+[![Discord](https://img.shields.io/discord/1172593757586214964?label=Discord&logo=discord&logoColor=white)](https://discord.com/channels/1172593757586214964/1258484557083054081)
 [![Twitter](https://img.shields.io/twitter/follow/Atoma_Network?style=social)](https://x.com/Atoma_Network)
-[![Documentation](https://img.shields.io/badge/docs-gitbook-blue)](https://atoma.gitbook.io/atoma-docs)
+[![Documentation](https://img.shields.io/badge/docs-mintify-blue?logo=mintify)](https://docs.atoma.network)
 [![License](https://img.shields.io/github/license/atoma-network/atoma-node)](LICENSE)
 
 ## Introduction
@@ -15,29 +15,29 @@ Atoma Proxy is a critical component of the Atoma Network that enables:
 - **Request Routing**: Intelligent routing of inference requests to the most suitable nodes based on model availability, load, and performance
 - **High Availability**: Ensuring continuous service through redundancy and failover mechanisms
 - **Network Optimization**: Minimizing latency and maximizing throughput for AI inference requests
+- **Security**: Secure authentication and authorization of API requests
 
 This repository contains the proxy infrastructure that helps coordinate and optimize the Atoma Network's distributed compute resources. By deploying an Atoma proxy, you can:
 
 1. Help manage and distribute AI workloads efficiently across the network;
-2. Contribute to the network's reliability and performance;
-3. Support the development of a more resilient and scalable AI infrastructure.
+1. Contribute to the network's reliability and performance;
+1. Support the development of a more resilient and scalable AI infrastructure.
 
-Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [atomacloud.com](https://atomacloud.com). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
+Currently, the Atoma Proxy is powering Atoma's cloud web service, available at [cloud.atoma.network](https://cloud.atoma.network). By registering an account, you can obtain an API key and start using Atoma's AI services. For example, to request a chat completions from a `meta-llama/Llama-3.3-70B-Instruct` model, you can use the following request:
 
 ```bash
-curl -X POST https://api.atomacloud.com/v1/chat/completions \
+curl -X POST https://api.atoma.network/v1/chat/completions \
 -H "Authorization: Bearer YOUR_API_KEY" \
 -H "Content-Type: application/json" \
 -d '{
   "model": "meta-llama/Llama-3.3-70B-Instruct",
   "messages": [{"role": "user", "content": "Tell me a joke"}],
-  "max_tokens": 4096,
+  "max_completion_tokens": 4096,
   "stream": true
 }'
 ```
 
 You can further deploy your own Atoma Proxy locally to power your own AI services. Please refer to the [Deployment Guide](#deploying-an-atoma-proxy) section for more information.
-
 
 ### Community Links
 
@@ -56,6 +56,10 @@ Once you have the Sui client installed, locally, you need to connect to a Sui RP
 
 You then need to create a wallet and fund it with some testnet SUI. Please refer to the [Sui wallet guide](https://docs.sui.io/guides/developer/getting-started/get-address) for more information. If you are plan to run the Atoma node on Sui's testnet, you can request testnet SUI tokens by following the [docs](https://docs.sui.io/guides/developer/getting-started/get-coins).
 
+### Register with the Atoma Testnet smart contract
+
+Please refer to the [setup script](https://github.com/atoma-network/atoma-contracts/blob/main/sui/dev/setup.py) to register with the Atoma Testnet smart contract. This will assign you a node badge and a package ID, which you'll need to configure in the `config.toml` file.
+
 ### Docker Deployment
 
 #### Prerequisites
@@ -72,7 +76,7 @@ git clone https://github.com/atoma-network/atoma-proxy.git
 cd atoma-proxy
 ```
 
-2. Configure environment variables by creating `.env` file, use `.env.example` for reference:
+1. Configure environment variables by creating `.env` file. Please ensure you have created the requisite user and database in your postgres instance. Once you've done that, you can use `.env.example` as template for your `.env` file.
 
 ```bash
 POSTGRES_DB=<YOUR_DB_NAME>
@@ -82,7 +86,7 @@ POSTGRES_PASSWORD=<YOUR_DB_PASSWORD>
 TRACE_LEVEL=info
 ```
 
-3. Configure `config.toml`, using `config.example.toml` as template:
+1. Configure `config.toml`, using `config.example.toml` as template:
 
 ```toml
 [atoma_sui]
@@ -115,15 +119,16 @@ service_bind_address = "0.0.0.0:8081"
 secret_key = "secret_key" # Secret key for the tokens generation
 access_token_lifetime = 1 # In minutes
 refresh_token_lifetime = 1 # In days
+google_client_id="" # Google client id for google login (In case google-oauth feature is enabled)
 ```
 
-4. Create required directories
+1. Create required directories
 
 ```bash
 mkdir -p data logs
 ```
 
-5. Start the containers with the desired inference services
+1. Start the containers with the desired inference services
 
 ```bash
 # Build and start all services
@@ -140,12 +145,17 @@ The deployment consists of two main services:
 - **PostgreSQL**: Manages the database for the Atoma Proxy
 - **Atoma Proxy**: Manages the proxy operations and connects to the Atoma Network
 
+#### Profiles
+
+- local - this is for targeting the local deployment of the proxy
+- cloud - this is when the proxy is being deployed as a service. It has a zklogin (google oauth) feature enabled, which is not available for the local option.
+
 #### Service URLs
 
 - Atoma Proxy: `http://localhost:8080` (configured via ATOMA_PROXY_PORT). This is the main service that you will use to interact with the Atoma Network, via an
-OpenAI-compatible API.
+  OpenAI-compatible API.
 - Atoma Proxy Service: `http://localhost:8081` (configured via ATOMA_SERVICE_PORT). You can use this URL to authenticate locally. If you plan to have a custom
-service (with custom domain), this service allows users to register, authenticate and get an API keys to the Atoma Proxy.
+  service (with custom domain), this service allows users to register, authenticate and get an API keys to the Atoma Proxy.
 
 #### Volume Mounts
 
@@ -177,8 +187,31 @@ docker compose logs -f
 Stop services:
 
 ```bash
-docker compose down --profile cloud # Cloud
-docker compose down --profile local # Local
+docker compose --profile cloud down   # Cloud
+docker compose --profile local down # Local
+```
+
+#### Testing
+
+Since the `AtomaStateManager` instance relies on a PostgreSQL database, we need to have a local docker instance running to run the tests. You can spawn one using the `docker-compose.test.yaml` file:
+
+> **Note**
+> Please ensure that you don't have any other postgres instance running on your machine, as this might cause conflicts.
+
+```bash
+docker compose -f docker-compose.test.yaml up --build -d
+```
+
+It might be necessary that you clean up the database before or after running the tests. You can do so by running:
+
+```bash
+docker compose -f docker-compose.test.yaml down
+```
+
+and remove the specific postgres volumes:
+
+```bash
+docker system prune -af --volumes
 ```
 
 #### Troubleshooting
@@ -189,17 +222,17 @@ docker compose down --profile local # Local
 docker compose ps
 ```
 
-2. Test Atoma Proxy service:
+1. Test Atoma Proxy service:
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-5. View container networks:
+1. View container networks:
 
 ```bash
 docker network ls
-docker network inspect atoma-network
+docker network inspect <NETWORK_NAME>
 ```
 
 #### Security Considerations
@@ -211,13 +244,13 @@ docker network inspect atoma-network
 sudo ufw allow 8080/tcp
 ```
 
-2. HuggingFace Token
+1. HuggingFace Token
 
 - Store HF_TOKEN in .env file
 - Never commit .env file to version control
 - Consider using Docker secrets for production deployments
 
-3. Sui Configuration
+1. Sui Configuration
 
 - Ensure Sui configuration files have appropriate permissions
 - Keep keystore file secure and never commit to version control

@@ -36,27 +36,9 @@ pub struct ErrorDetails {
 /// tokens that were processed before the error occurred.
 #[derive(Debug, Error)]
 pub enum AtomaProxyError {
-    /// Error returned when a required HTTP header is missing from the request
-    #[error("Missing required header: {header}")]
-    MissingHeader {
-        /// The name of the missing header
-        header: String,
-        /// The endpoint that the error occurred on
-        endpoint: String,
-    },
-
-    /// Error returned when an HTTP header contains an invalid value
-    #[error("Invalid header value: {message}")]
-    InvalidHeader {
-        /// Description of why the header value is invalid
-        message: String,
-        /// The endpoint that the error occurred on
-        endpoint: String,
-    },
-
     /// Error returned when the request body is malformed or contains invalid data
-    #[error("Invalid request body: {message}")]
-    InvalidBody {
+    #[error("Invalid request: {message}")]
+    RequestError {
         /// Description of why the request body is invalid
         message: String,
         /// The endpoint that the error occurred on
@@ -76,6 +58,15 @@ pub enum AtomaProxyError {
     #[error("Internal server error: {message}")]
     InternalError {
         /// Description of the internal error
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
+
+    /// Error returned when there is not enough balance to complete a transaction
+    #[error("Insufficient balance: {message}")]
+    BalanceError {
+        /// Description of the balance error
         message: String,
         /// The endpoint that the error occurred on
         endpoint: String,
@@ -125,16 +116,15 @@ impl AtomaProxyError {
     /// - `"MODEL_ERROR"` for ML model errors
     /// - `"AUTH_ERROR"` for authentication failures
     /// - `"INTERNAL_ERROR"` for unexpected server errors
-    fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
-            Self::MissingHeader { .. } => "MISSING_HEADER",
-            Self::InvalidHeader { .. } => "INVALID_HEADER",
-            Self::InvalidBody { .. } => "INVALID_BODY",
+            Self::RequestError { .. } => "REQUEST_ERROR",
             Self::AuthError { .. } => "AUTH_ERROR",
             Self::InternalError { .. } => "INTERNAL_ERROR",
             Self::NotFound { .. } => "NOT_FOUND",
             Self::NotImplemented { .. } => "NOT_IMPLEMENTED",
             Self::ServiceUnavailable { .. } => "SERVICE_UNAVAILABLE",
+            Self::BalanceError { .. } => "BALANCE_ERROR",
         }
     }
 
@@ -155,14 +145,13 @@ impl AtomaProxyError {
     /// - For internal errors: A generic server error message
     fn client_message(&self) -> String {
         match self {
-            Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
-            Self::InvalidHeader { .. } => "Invalid header value provided".to_string(),
-            Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
+            Self::RequestError { message, .. } => format!("Request error: {message}"),
             Self::AuthError { .. } => "Authentication failed".to_string(),
             Self::InternalError { .. } => "Internal server error occurred".to_string(),
             Self::NotFound { .. } => "Resource not found".to_string(),
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
+            Self::BalanceError { .. } => "Insufficient balance".to_string(),
         }
     }
 
@@ -176,16 +165,15 @@ impl AtomaProxyError {
     /// # Returns
     ///
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
-    pub fn status_code(&self) -> StatusCode {
+    pub const fn status_code(&self) -> StatusCode {
         match self {
-            Self::MissingHeader { .. } | Self::InvalidHeader { .. } | Self::InvalidBody { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::RequestError { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            Self::BalanceError { .. } => StatusCode::PAYMENT_REQUIRED,
         }
     }
 
@@ -199,14 +187,13 @@ impl AtomaProxyError {
     /// A `String` containing the API endpoint path where the error was encountered.
     fn endpoint(&self) -> String {
         match self {
-            Self::MissingHeader { endpoint, .. } => endpoint.clone(),
-            Self::InvalidHeader { endpoint, .. } => endpoint.clone(),
-            Self::InvalidBody { endpoint, .. } => endpoint.clone(),
-            Self::AuthError { endpoint, .. } => endpoint.clone(),
-            Self::InternalError { endpoint, .. } => endpoint.clone(),
-            Self::NotFound { endpoint, .. } => endpoint.clone(),
-            Self::NotImplemented { endpoint, .. } => endpoint.clone(),
-            Self::ServiceUnavailable { endpoint, .. } => endpoint.clone(),
+            Self::RequestError { endpoint, .. }
+            | Self::AuthError { endpoint, .. }
+            | Self::InternalError { endpoint, .. }
+            | Self::NotFound { endpoint, .. }
+            | Self::NotImplemented { endpoint, .. }
+            | Self::ServiceUnavailable { endpoint, .. }
+            | Self::BalanceError { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -227,14 +214,13 @@ impl AtomaProxyError {
     /// - For internal errors: The detailed internal error message
     fn message(&self) -> String {
         match self {
-            Self::MissingHeader { header, .. } => format!("Missing required header: {}", header),
-            Self::InvalidHeader { message, .. } => format!("Invalid header value: {}", message),
-            Self::InvalidBody { message, .. } => format!("Invalid request body: {}", message),
-            Self::AuthError { auth_error, .. } => format!("Authentication error: {}", auth_error),
-            Self::InternalError { message, .. } => format!("Internal server error: {}", message),
+            Self::RequestError { message, .. } => format!("Request error: {message}"),
+            Self::AuthError { auth_error, .. } => format!("Authentication error: {auth_error}"),
+            Self::InternalError { message, .. } => format!("Internal server error: {message}"),
             Self::NotFound { .. } => "Resource not found".to_string(),
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
-            Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {}", message),
+            Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {message}"),
+            Self::BalanceError { message, .. } => format!("Insufficient balance: {message}"),
         }
     }
 }

@@ -1,9 +1,5 @@
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::Instant,
-};
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::too_many_lines)]
 
 use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
@@ -15,11 +11,18 @@ use reqwest;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tokio::sync::RwLockReadGuard;
-use tracing::{error, instrument};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
 use super::handlers::verify_and_sign_response;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Instant,
+};
+use tracing::{error, info, instrument, warn};
+
+use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -29,6 +32,9 @@ const DATA_PREFIX: &str = "data: ";
 
 /// The keep-alive chunk
 const KEEP_ALIVE_CHUNK: &[u8] = b": keep-alive\n\n";
+
+/// The keep-alive chunk as a string
+const KEEP_ALIVE_CHUNK_STR: &str = ": keep-alive\n\n";
 
 /// The choices key
 const CHOICES: &str = "choices";
@@ -60,6 +66,10 @@ pub struct Streamer<'a> {
     model_name: String,
     /// Endpoint
     endpoint: String,
+    /// A chunk buffer (needed as some chunks might be split into multiple parts)
+    chunk_buffer: String,
+    /// The position in the keep-alive chunk buffer
+    keep_alive_pos: usize,
 }
 
 /// Represents the various states of a streaming process
@@ -101,6 +111,8 @@ impl<'a> Streamer<'a> {
             node_id,
             model_name,
             endpoint,
+            chunk_buffer: String::new(),
+            keep_alive_pos: 0,
         }
     }
 
@@ -146,25 +158,37 @@ impl<'a> Streamer<'a> {
         // Get input tokens
         let input_tokens = usage
             .get("prompt_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
-                error!("Error getting prompt tokens from usage");
+                error!(
+                    target = "atoma-service-streamer",
+                    level = "error",
+                    "Error getting prompt tokens from usage"
+                );
                 Error::new("Error getting prompt tokens from usage")
             })?;
         // Get output tokens
         let output_tokens = usage
             .get("completion_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
-                error!("Error getting completion tokens from usage");
+                error!(
+                    target = "atoma-service-streamer",
+                    level = "error",
+                    "Error getting completion tokens from usage"
+                );
                 Error::new("Error getting completion tokens from usage")
             })?;
         // Get total tokens
         let total_tokens = usage
             .get("total_tokens")
-            .and_then(|t| t.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
-                error!("Error getting total tokens from usage");
+                error!(
+                    target = "atoma-service-streamer",
+                    level = "error",
+                    "Error getting total tokens from usage"
+                );
                 Error::new("Error getting total tokens from usage")
             })?;
 
@@ -179,10 +203,13 @@ impl<'a> Streamer<'a> {
                 time: self.start.elapsed().as_secs_f64(),
             },
         ) {
-            error!("Error updating node throughput performance: {}", e);
+            error!(
+                target = "atoma-service-streamer",
+                level = "error",
+                "Error updating node throughput performance: {e:?}"
+            );
             return Err(Error::new(format!(
-                "Error updating node throughput performance: {}",
-                e
+                "Error updating node throughput performance: {e:?}"
             )));
         }
 
@@ -197,10 +224,14 @@ impl<'a> Streamer<'a> {
                     .as_secs_f64(),
             },
         ) {
-            error!("Error updating node decode performance: {}", e);
-            return Err(Error::new(format!(
+            error!(
+                target = "atoma-service-streamer",
+                level = "error",
                 "Error updating node decode performance: {}",
                 e
+            );
+            return Err(Error::new(format!(
+                "Error updating node decode performance: {e:?}"
             )));
         }
         if let Err(e) = self.state_manager_sender.send(
@@ -210,10 +241,13 @@ impl<'a> Streamer<'a> {
                 time: (self.start_decode.unwrap() - self.start).as_secs_f64(),
             },
         ) {
-            error!("Error updating node prefill performance: {}", e);
+            error!(
+                target = "atoma-service-streamer",
+                level = "error",
+                "Error updating node prefill performance: {e:?}"
+            );
             return Err(Error::new(format!(
-                "Error updating node prefill performance: {}",
-                e
+                "Error updating node prefill performance: {e:?}"
             )));
         }
 
@@ -225,10 +259,14 @@ impl<'a> Streamer<'a> {
             total_tokens,
             &self.endpoint,
         ) {
-            error!("Error updating stack num tokens: {}", e);
-            return Err(Error::new(format!(
+            error!(
+                target = "atoma-service-streamer",
+                level = "error",
                 "Error updating stack num tokens: {}",
                 e
+            );
+            return Err(Error::new(format!(
+                "Error updating stack num tokens: {e:?}"
             )));
         }
 
@@ -264,11 +302,40 @@ impl<'a> Stream for Streamer<'a> {
                             e
                         );
                         return Poll::Ready(Some(Err(Error::new(format!(
-                            "Invalid UTF-8 sequence: {}",
-                            e
+                            "Invalid UTF-8 sequence: {e:?}"
                         )))));
                     }
                 };
+
+                if let Some(remaining) = KEEP_ALIVE_CHUNK_STR.get(self.keep_alive_pos..) {
+                    if remaining.starts_with(chunk_str) {
+                        self.keep_alive_pos += chunk_str.len();
+                        info!(
+                            target: "atoma-service-streamer",
+                            "Partial keep-alive received, current position: {}",
+                            self.keep_alive_pos
+                        );
+                        if self.keep_alive_pos >= KEEP_ALIVE_CHUNK_STR.len() {
+                            // Full keep-alive received
+                            self.keep_alive_pos = 0;
+                            info!(
+                                target: "atoma-service-streamer",
+                                "Full keep-alive received, resetting position"
+                            );
+                        }
+                        return Poll::Pending;
+                    } else if self.keep_alive_pos > 0 {
+                        // Reset position if we had partial match but current chunk doesn't continue it
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Keep-alive chunk interrupted by non-matching chunk, resetting position"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(format!(
+                            "Keep-alive chunk interrupted by non-matching chunk, {chunk_str}",
+                        )))));
+                    }
+                }
 
                 let chunk_str = chunk_str.strip_prefix(DATA_PREFIX).unwrap_or(chunk_str);
 
@@ -278,15 +345,80 @@ impl<'a> Stream for Streamer<'a> {
                     return Poll::Ready(None);
                 }
 
-                let chunk = serde_json::from_str::<Value>(chunk_str).map_err(|e| {
-                    error!(
-                        target = "atoma-service",
-                        level = "error",
-                        "Error parsing chunk {chunk_str}: {}",
-                        e
-                    );
-                    Error::new(format!("Error parsing chunk: {}", e))
-                })?;
+                let chunk = match serde_json::from_str::<Value>(chunk_str) {
+                    Ok(chunk) => {
+                        if !self.chunk_buffer.is_empty() {
+                            error!(
+                                target = "atoma-service-streamer",
+                                level = "error",
+                                "Error parsing previous chunk(s), as chunk buffer is not empty: {}",
+                                self.chunk_buffer
+                            );
+                            self.chunk_buffer.clear();
+                        }
+                        chunk
+                    }
+                    Err(e) => {
+                        if e.is_eof() {
+                            info!(
+                                target = "atoma-service-streamer",
+                                parse_chunk = "eof_chunk",
+                                "EOF reached, pushing chunk to buffer: {}",
+                                chunk_str
+                            );
+                            self.chunk_buffer.push_str(chunk_str);
+                            return Poll::Pending;
+                        }
+
+                        if self.chunk_buffer.is_empty() {
+                            error!(
+                                target = "atoma-service-streamer",
+                                level = "error",
+                                "Error parsing chunk {chunk_str}: {}",
+                                e
+                            );
+                            return Poll::Ready(Some(Err(Error::new(format!(
+                                "Error parsing chunk: {e:?}"
+                            )))));
+                        }
+
+                        self.chunk_buffer.push_str(chunk_str);
+                        match serde_json::from_str::<Value>(&self.chunk_buffer) {
+                            Ok(chunk) => {
+                                info!(
+                                    target = "atoma-service-streamer",
+                                    parse_chunk = "eof_chunk",
+                                    "Chunk parsed successfully, clearing buffer: {}",
+                                    self.chunk_buffer
+                                );
+                                self.chunk_buffer.clear();
+                                chunk
+                            }
+                            Err(e) => {
+                                if e.is_eof() {
+                                    // NOTE: We don't need to push the chunk to the buffer, as it was pushed already
+                                    return Poll::Pending;
+                                }
+                                error!(
+                                    target = "atoma-service-streamer",
+                                    level = "error",
+                                    "Error parsing chunk {}: {}",
+                                    self.chunk_buffer,
+                                    e
+                                );
+                                self.chunk_buffer.clear();
+                                return Poll::Ready(Some(Err(Error::new(format!(
+                                    "Error parsing chunk: {e:?}"
+                                )))));
+                            }
+                        }
+                    }
+                };
+
+                // We need to verify the hash when the endpoint is not confidential, as the node
+                // is not running within a secure enclave. Otherwise, the fact that the node can process requests
+                // with confidential data is proof of data integrity.
+                let verify_hash = self.endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 
                 if self.start_decode.is_none() {
                     self.start_decode = Some(Instant::now());
@@ -298,20 +430,27 @@ impl<'a> Stream for Streamer<'a> {
                             latency,
                         })
                         .map_err(|e| {
-                            error!("Error updating node latency performance: {}", e);
-                            Error::new(format!("Error updating node latency performance: {}", e))
+                            error!(
+                                target = "atoma-service-streamer",
+                                level = "error",
+                                "Error updating node latency performance: {}",
+                                e
+                            );
+                            Error::new(format!("Error updating node latency performance: {e:?}"))
                         })?;
                 }
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH {
-                    let choices = match chunk.get(CHOICES).and_then(|choices| choices.as_array()) {
-                        Some(choices) => choices,
-                        None => {
-                            error!("Error getting choices from chunk");
-                            return Poll::Ready(Some(Err(Error::new(
-                                "Error getting choices from chunk",
-                            ))));
-                        }
+                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
+                    else {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error getting choices from chunk"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(
+                            "Error getting choices from chunk",
+                        ))));
                     };
 
                     if choices.is_empty() {
@@ -322,7 +461,7 @@ impl<'a> Stream for Streamer<'a> {
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;
-                    verify_and_sign_response(&chunk, self.keystore.get_keystore())
+                    verify_and_sign_response(&chunk, verify_hash, self.keystore.get_keystore())
                         .map_err(|e| Error::new(e.to_string()))?;
                     self.handle_final_chunk(usage)?;
                 }
@@ -334,6 +473,14 @@ impl<'a> Stream for Streamer<'a> {
                 Poll::Ready(None)
             }
             Poll::Ready(None) => {
+                if !self.chunk_buffer.is_empty() {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Stream ended, but the chunk buffer is not empty, this should not happen: {}",
+                        self.chunk_buffer
+                    );
+                }
                 self.status = StreamStatus::Completed;
                 Poll::Ready(None)
             }

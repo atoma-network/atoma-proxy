@@ -1,3 +1,4 @@
+use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::{
     AtomaEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
     NodePublicKeyCommittmentEvent, NodeRegisteredEvent, NodeSubscribedToTaskEvent,
@@ -6,12 +7,13 @@ use atoma_sui::events::{
     StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
 use chrono::{DateTime, Utc};
-use tracing::{info, instrument, trace};
+use tokio::sync::oneshot;
+use tracing::{error, info, instrument, trace};
 
 use crate::{
     state_manager::Result,
     timestamp_to_datetime_or_now,
-    types::{AtomaAtomaStateManagerEvent, Stack},
+    types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
     AtomaStateManager, AtomaStateManagerError,
 };
 
@@ -120,6 +122,126 @@ pub async fn handle_atoma_event(
     }
 }
 
+/// Handles peer-to-peer (P2P) events in the Atoma network by processing node registration and verification events.
+///
+/// This function serves as a central handler for P2P events, specifically dealing with:
+/// - Node public URL registration events
+/// - Node small ID ownership verification events
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+/// * `event` - An `AtomaP2pEvent` enum representing the P2P event to be processed
+/// * `sender` - An optional oneshot channel sender to communicate the result of the event handling
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the event was processed successfully, or an error if the operation failed
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The underlying handlers fail to process the event
+/// * Database operations fail during event processing
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+/// use atoma_p2p::AtomaP2pEvent;
+/// use tokio::sync::oneshot;
+///
+/// async fn process_p2p_event(
+///     state_manager: &AtomaStateManager,
+///     event: AtomaP2pEvent,
+/// ) {
+///     let (tx, rx) = oneshot::channel();
+///     if let Err(e) = handle_p2p_event(state_manager, event, Some(tx)).await {
+///         eprintln!("Failed to handle P2P event: {}", e);
+///     }
+///     let result = rx.await.unwrap();
+///     if result {
+///         println!("P2P event handled successfully");
+///     } else {
+///         println!("P2P event handling failed");
+///     }
+/// }
+/// ```
+///
+/// # Event Types
+///
+/// ## NodePublicUrlRegistrationEvent
+/// Registers or updates a node's public URL in the network. This allows other nodes to discover
+/// and communicate with the node. Includes:
+/// - `public_url`: The URL where the node can be reached
+/// - `node_small_id`: The node's unique identifier
+/// - `timestamp`: When the registration occurred
+///
+/// ## VerifyNodeSmallIdOwnership
+/// Verifies that a node's small ID is properly owned by associating it with a Sui blockchain
+/// address. Includes:
+/// - `node_small_id`: The ID to verify
+/// - `sui_address`: The blockchain address claiming ownership
+///
+/// # Notes
+///
+/// The function uses the `#[instrument]` attribute for tracing, with `skip_all` to prevent
+/// logging of potentially sensitive parameters. The actual event processing is delegated to
+/// specialized handler functions for each event type.
+#[instrument(level = "trace", skip_all)]
+pub async fn handle_p2p_event(
+    state_manager: &AtomaStateManager,
+    event: AtomaP2pEvent,
+    sender: Option<oneshot::Sender<bool>>,
+) -> Result<()> {
+    match event {
+        AtomaP2pEvent::NodePublicUrlRegistrationEvent {
+            public_url,
+            node_small_id,
+            timestamp,
+            country,
+        } => {
+            handle_node_public_url_registration_event(
+                state_manager,
+                public_url,
+                node_small_id as i64,
+                timestamp as i64,
+                country,
+            )
+            .await
+        }
+        AtomaP2pEvent::VerifyNodeSmallIdOwnership {
+            node_small_id,
+            sui_address,
+        } => {
+            let result = handle_node_small_id_ownership_verification_event(
+                state_manager,
+                node_small_id as i64,
+                sui_address,
+            )
+            .await;
+            if let Some(sender) = sender {
+                sender.send(result.is_ok()).map_err(|_| {
+                    error!(
+                        target = "atoma-state-handlers",
+                        event = "handle-node-small-id-ownership-verification-event",
+                        "Failed to send result to sender"
+                    );
+                    AtomaStateManagerError::ChannelSendError
+                })?;
+            } else {
+                error!(
+                    target = "atoma-state-handlers",
+                    event = "handle-node-small-id-ownership-verification-event",
+                    "No sender provided for node small id ownership verification event, this should never happen"
+                );
+                return Err(AtomaStateManagerError::ChannelSendError);
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Handles a new task event by processing and inserting it into the database.
 ///
 /// This function takes a serialized `TaskRegisteredEvent`, deserializes it, and
@@ -140,7 +262,7 @@ pub async fn handle_atoma_event(
 /// * The `value` cannot be deserialized into a `TaskRegisteredEvent`.
 /// * The `AtomaStateManager` fails to insert the new task into the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_new_task_event(
+pub async fn handle_new_task_event(
     state_manager: &AtomaStateManager,
     event: TaskRegisteredEvent,
 ) -> Result<()> {
@@ -181,7 +303,7 @@ pub(crate) async fn handle_new_task_event(
 /// 2. Extracts the `task_small_id` and `epoch` from the event.
 /// 3. Calls the `deprecate_task` method on the `AtomaStateManager` to update the task's status in the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_task_deprecation_event(
+pub async fn handle_task_deprecation_event(
     state_manager: &AtomaStateManager,
     event: TaskDeprecationEvent,
 ) -> Result<()> {
@@ -225,7 +347,7 @@ pub(crate) async fn handle_task_deprecation_event(
 /// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `subscribe_node_to_task` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_task_subscription_event(
+pub async fn handle_node_task_subscription_event(
     state_manager: &AtomaStateManager,
     event: NodeSubscribedToTaskEvent,
 ) -> Result<()> {
@@ -276,7 +398,7 @@ pub(crate) async fn handle_node_task_subscription_event(
 /// 1. Extracts the `node_small_id`, `task_small_id`, `price_per_one_million_compute_units`, and `max_num_compute_units` from the event.
 /// 2. Calls the `update_node_subscription` method on the `AtomaStateManager` to update the node's subscription in the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_task_subscription_updated_event(
+pub async fn handle_node_task_subscription_updated_event(
     state_manager: &AtomaStateManager,
     event: NodeSubscriptionUpdatedEvent,
 ) -> Result<()> {
@@ -327,7 +449,7 @@ pub(crate) async fn handle_node_task_subscription_updated_event(
 /// 1. Extracts the `node_small_id` and `task_small_id` from the event.
 /// 2. Calls the `unsubscribe_node_from_task` method on the `AtomaStateManager` to update the node's subscription status in the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_task_unsubscription_event(
+pub async fn handle_node_task_unsubscription_event(
     state_manager: &AtomaStateManager,
     event: NodeUnsubscribedFromTaskEvent,
 ) -> Result<()> {
@@ -375,7 +497,7 @@ pub(crate) async fn handle_node_task_unsubscription_event(
 /// 2. Checks if the `selected_node_id` is present in the `node_small_ids` slice.
 /// 3. If the node is valid, it converts the event into a stack object and inserts it into the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_stack_created_event(
+pub async fn handle_stack_created_event(
     state_manager: &AtomaStateManager,
     event: StackCreatedEvent,
     already_computed_units: i64,
@@ -418,7 +540,7 @@ pub(crate) async fn handle_stack_created_event(
 /// * The database operation to insert the new stack fails.
 ///
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_create_stack_stats(
+pub async fn handle_create_stack_stats(
     state_manager: &AtomaStateManager,
     event: StackCreatedEvent,
     timestamp: DateTime<Utc>,
@@ -457,7 +579,7 @@ pub(crate) async fn handle_create_stack_stats(
 /// 1. Converts the `StackTrySettleEvent` into a stack settlement ticket.
 /// 2. Calls the `insert_new_stack_settlement_ticket` method on the `AtomaStateManager` to insert the ticket into the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_stack_try_settle_event(
+pub async fn handle_stack_try_settle_event(
     state_manager: &AtomaStateManager,
     event: StackTrySettleEvent,
     timestamp: DateTime<Utc>,
@@ -467,7 +589,7 @@ pub(crate) async fn handle_stack_try_settle_event(
         event = "handle-stack-try-settle-event",
         "Processing stack try settle event"
     );
-    let stack_settlement_ticket = event.into();
+    let stack_settlement_ticket = StackSettlementTicket::try_from(event)?;
     state_manager
         .state
         .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
@@ -501,7 +623,7 @@ pub(crate) async fn handle_stack_try_settle_event(
 /// 1. Extracts the `stack_small_id`, `attestation_node_id`, `committed_stack_proof`, and `stack_merkle_leaf` from the event.
 /// 2. Calls the `update_stack_settlement_ticket_with_attestation_commitments` method on the `AtomaStateManager` to update the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_new_stack_settlement_attestation_event(
+pub async fn handle_new_stack_settlement_attestation_event(
     state_manager: &AtomaStateManager,
     event: NewStackSettlementAttestationEvent,
 ) -> Result<()> {
@@ -553,7 +675,7 @@ pub(crate) async fn handle_new_stack_settlement_attestation_event(
 /// 1. Extracts the `stack_small_id` and `dispute_settled_at_epoch` from the event.
 /// 2. Calls the `settle_stack_settlement_ticket` method on the `AtomaStateManager` to update the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_stack_settlement_ticket_event(
+pub async fn handle_stack_settlement_ticket_event(
     state_manager: &AtomaStateManager,
     event: StackSettlementTicketEvent,
 ) -> Result<()> {
@@ -597,7 +719,7 @@ pub(crate) async fn handle_stack_settlement_ticket_event(
 /// 1. Extracts the `stack_small_id` and `user_refund_amount` from the event.
 /// 2. Calls the `update_stack_settlement_ticket_with_claim` method on the `AtomaStateManager` to update the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_stack_settlement_ticket_claimed_event(
+pub async fn handle_stack_settlement_ticket_claimed_event(
     state_manager: &AtomaStateManager,
     event: StackSettlementTicketClaimedEvent,
 ) -> Result<()> {
@@ -641,7 +763,7 @@ pub(crate) async fn handle_stack_settlement_ticket_claimed_event(
 /// 1. Converts the `StackAttestationDisputeEvent` into a stack attestation dispute object.
 /// 2. Calls the `insert_stack_attestation_dispute` method on the `AtomaStateManager` to insert the dispute into the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_stack_attestation_dispute_event(
+pub async fn handle_stack_attestation_dispute_event(
     state_manager: &AtomaStateManager,
     event: StackAttestationDisputeEvent,
 ) -> Result<()> {
@@ -685,14 +807,14 @@ pub(crate) async fn handle_stack_attestation_dispute_event(
 /// 1. Extracts the `node_small_id` from the event.
 /// 2. Calls the `insert_new_node` method on the `AtomaStateManager` to insert the node into the database.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_registration_event(
+pub async fn handle_node_registration_event(
     state_manager: &AtomaStateManager,
     event: NodeRegisteredEvent,
     address: String,
 ) -> Result<()> {
     state_manager
         .state
-        .insert_new_node(event.node_small_id.inner as i64, address)
+        .insert_new_node(event.node_small_id.inner as i64, event.badge_id, address)
         .await?;
     Ok(())
 }
@@ -726,7 +848,7 @@ pub(crate) async fn handle_node_registration_event(
 /// 3. For `UpdateStackNumTokens`, it updates the number of tokens for the specified stack.
 /// 4. For `UpdateStackTotalHash`, it updates the total hash for the specified stack.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_state_manager_event(
+pub async fn handle_state_manager_event(
     state_manager: &AtomaStateManager,
     event: AtomaAtomaStateManagerEvent,
 ) -> Result<()> {
@@ -1058,6 +1180,15 @@ pub(crate) async fn handle_state_manager_event(
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::OAuth {
+            username,
+            result_sender,
+        } => {
+            let user_id = state_manager.state.oauth(&username).await;
+            result_sender
+                .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
         AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
             username,
             password,
@@ -1147,24 +1278,18 @@ pub(crate) async fn handle_state_manager_event(
                 .send(sui_address)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::GetUserId {
+        AtomaAtomaStateManagerEvent::ConfirmUser {
             sui_address,
+            user_id,
             result_sender,
         } => {
-            let user_id = state_manager.state.get_user_id(sui_address).await;
+            let confirmation = state_manager.state.confirm_user(sui_address, user_id).await;
             result_sender
-                .send(user_id)
+                .send(confirmation)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::TopUpBalance {
-            user_id,
-            amount,
-            timestamp,
-        } => {
-            state_manager
-                .state
-                .top_up_balance(user_id, amount, timestamp)
-                .await?;
+        AtomaAtomaStateManagerEvent::TopUpBalance { user_id, amount } => {
+            state_manager.state.top_up_balance(user_id, amount).await?;
         }
         AtomaAtomaStateManagerEvent::DeductFromUsdc {
             user_id,
@@ -1172,6 +1297,37 @@ pub(crate) async fn handle_state_manager_event(
             result_sender,
         } => {
             let success = state_manager.state.deduct_from_usdc(user_id, amount).await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::InsertNewUsdcPaymentDigest {
+            digest,
+            result_sender,
+        } => {
+            let success = state_manager
+                .state
+                .insert_new_usdc_payment_digest(digest)
+                .await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetSalt {
+            user_id,
+            result_sender,
+        } => {
+            let salt = state_manager.state.get_salt(user_id).await;
+            result_sender
+                .send(salt)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SetSalt {
+            user_id,
+            salt,
+            result_sender,
+        } => {
+            let success = state_manager.state.set_salt(user_id, &salt).await;
             result_sender
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
@@ -1215,7 +1371,7 @@ pub(crate) async fn handle_state_manager_event(
 /// }
 /// ```
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_new_key_rotation_event(
+pub async fn handle_new_key_rotation_event(
     state_manager: &AtomaStateManager,
     event: NewKeyRotationEvent,
 ) -> Result<()> {
@@ -1268,7 +1424,7 @@ pub(crate) async fn handle_new_key_rotation_event(
 /// }
 /// ```
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_key_rotation_event(
+pub async fn handle_node_key_rotation_event(
     state_manager: &AtomaStateManager,
     event: NodePublicKeyCommittmentEvent,
 ) -> Result<()> {
@@ -1298,8 +1454,151 @@ pub(crate) async fn handle_node_key_rotation_event(
     Ok(())
 }
 
+/// Handles a node's public URL registration event by updating the node's URL in the state database.
+///
+/// This function processes events when nodes register or update their public URLs. It stores the URL
+/// along with the registration timestamp in the state database, allowing other components to discover
+/// and communicate with nodes in the network.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+/// * `public_url` - The public URL where the node can be reached
+/// * `node_small_id` - The unique identifier of the node registering its URL
+/// * `timestamp` - The Unix timestamp when the registration occurred
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the URL registration was successful, or an error if the operation failed
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The database operation to register the node's public URL fails
+/// * The state manager encounters any internal errors during the registration process
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+///
+/// async fn register_node_url(
+///     state_manager: &AtomaStateManager,
+///     url: String,
+///     node_id: i64,
+///     timestamp: i64
+/// ) {
+///     if let Err(e) = handle_node_public_url_registration_event(
+///         state_manager,
+///         url,
+///         node_id,
+///         timestamp
+///     ).await {
+///         eprintln!("Failed to register node URL: {}", e);
+///     }
+/// }
+/// ```
+///
+/// # Notes
+///
+/// The function uses the `tracing` crate to log information about the URL registration event,
+/// which can be useful for debugging and monitoring the system's behavior.
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_node_public_url_registration_event(
+    state_manager: &AtomaStateManager,
+    public_url: String,
+    node_small_id: i64,
+    timestamp: i64,
+    country: String,
+) -> Result<()> {
+    info!(
+        target = "atoma-state-handlers",
+        event = "handle-node-public-url-registration-event",
+        public_url = public_url,
+        node_small_id = node_small_id,
+        timestamp = timestamp,
+        "Node public url registration event"
+    );
+    state_manager
+        .state
+        .register_node_public_url(node_small_id, public_url, timestamp, country)
+        .await?;
+    Ok(())
+}
+
+/// Handles a node small ID ownership verification event by updating the node's ownership status in the database.
+///
+/// This function processes events that verify the ownership of a node's small ID by associating it with a
+/// Sui blockchain address. This verification is crucial for ensuring that only authorized nodes can participate
+/// in the network and that node identifiers cannot be spoofed.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+/// * `node_small_id` - The small ID of the node being verified (as an i64)
+/// * `sui_address` - The Sui blockchain address claiming ownership of the node (as a String)
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the verification was successful, or an error if the operation failed
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The database operation to verify the node's ownership fails
+/// * The state manager encounters any internal errors during the verification process
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use atoma_state::AtomaStateManager;
+///
+/// async fn verify_node_ownership(
+///     state_manager: &AtomaStateManager,
+///     node_id: i64,
+///     address: String,
+/// ) {
+///     if let Err(e) = handle_node_small_id_ownership_verification_event(
+///         state_manager,
+///         node_id,
+///         address,
+///     ).await {
+///         eprintln!("Failed to verify node ownership: {}", e);
+///     }
+/// }
+/// ```
+///
+/// # Notes
+///
+/// The function uses the `tracing` crate to log information about the verification event,
+/// which can be useful for debugging and monitoring the system's behavior. The logging
+/// includes the node's small ID and the Sui address claiming ownership.
+///
+/// This verification is an important security measure that helps maintain the integrity
+/// of the node network by ensuring that node identifiers are properly associated with
+/// blockchain addresses.
+#[instrument(level = "trace", skip_all)]
+pub(crate) async fn handle_node_small_id_ownership_verification_event(
+    state_manager: &AtomaStateManager,
+    node_small_id: i64,
+    sui_address: String,
+) -> Result<()> {
+    info!(
+        target = "atoma-state-handlers",
+        event = "handle-node-small-id-ownership-verification-event",
+        node_small_id = node_small_id,
+        sui_address = sui_address,
+        "Node small id ownership verification event"
+    );
+    state_manager
+        .state
+        .verify_node_small_id_ownership(node_small_id, sui_address)
+        .await?;
+    Ok(())
+}
+
 mod utils {
-    use super::*;
+    use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
     use dcap_qvl::quote::{Quote, Report};
@@ -1342,7 +1641,7 @@ mod utils {
     /// async fn verify_attestation() {
     ///     let quote_data = vec![/* quote data */];
     ///     let public_key = vec![/* public key data */];
-    ///     
+    ///
     ///     match verify_quote_v4_attestation(&quote_data, &public_key).await {
     ///         Ok(()) => println!("Attestation verified successfully"),
     ///         Err(e) => eprintln!("Attestation verification failed: {:?}", e),
@@ -1355,7 +1654,7 @@ mod utils {
     /// * Uses Intel's PCCS service at a hardcoded URL with a 10-second timeout
     /// * The `new_public_key` parameter is currently passed through but not used in the verification process
     /// * This function is specifically for Quote V4 format attestations
-    pub(crate) async fn verify_quote_v4_attestation(
+    pub async fn verify_quote_v4_attestation(
         quote_bytes: &[u8],
         new_public_key: &[u8],
     ) -> Result<()> {
@@ -1364,6 +1663,7 @@ mod utils {
         let fmspc = quote
             .fmspc()
             .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
+        #[allow(clippy::uninlined_format_args)]
         let certification_tcb_url = format!(
             "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc={:?}&update={TCB_UPDATE_MODE}",
             fmspc

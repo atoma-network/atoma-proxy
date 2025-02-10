@@ -1,0 +1,5 @@
+ALTER TABLE users
+ADD COLUMN salt TEXT;
+
+ALTER TABLE users
+ALTER COLUMN password_hash DROP NOT NULL;

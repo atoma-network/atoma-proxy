@@ -1,7 +1,9 @@
 target/
-.vscode/
-config.toml
 logs/
 cursor.toml
-
+client.yaml
+sui.aliases
+sui.keystore
+config.test.toml
 .env
+/config.toml
