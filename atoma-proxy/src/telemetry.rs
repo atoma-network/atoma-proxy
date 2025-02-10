@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
-use opentelemetry::{global, logs::Logger, trace::TracerProvider, KeyValue};
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     metrics::{self as sdkmetrics},
