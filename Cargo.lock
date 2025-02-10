@@ -686,7 +686,7 @@ dependencies = [
  "itertools 0.13.0",
  "jsonwebtoken",
  "pem",
- "rand 0.8.5",
+ "rand 0.9.0",
  "regex",
  "reqwest 0.12.12",
  "rsa 0.9.7",
@@ -750,7 +750,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "rand 0.8.5",
+ "rand 0.9.0",
  "reqwest 0.12.12",
  "serde",
  "serde_json",
@@ -784,7 +784,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "config",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
  "serde_yaml 0.9.34+deprecated",
  "sui-sdk",
@@ -2094,7 +2094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18e4fdb82bd54a12e42fb58a800dcae6b9e13982238ce2296dc3570b92148e1f"
 dependencies = [
  "data-encoding",
- "syn 2.0.98",
+ "syn 1.0.109",
 ]
 
 [[package]]
