@@ -5223,7 +5223,7 @@ mod tests {
         // Spawn a task to insert the node after a delay
         let db_clone = state.db.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
             insert_test_node(&db_clone, 2).await;
         });
 
