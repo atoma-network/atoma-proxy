@@ -48,7 +48,7 @@ sui-sdk.workspace = true
 thiserror = { workspace = true }
 tokenizers.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tonic = { version = "0.9", features = ["tls", "tls-roots", "prost"] }
+tonic = { version = "0.12", features = ["tls", "tls-roots", "prost"] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
 tracing-appender.workspace = true
