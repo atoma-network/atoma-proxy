@@ -1,4 +1,4 @@
-use atoma_p2p::AtomaP2pEvent;
+use atoma_p2p::{metrics::NodeMetrics, AtomaP2pEvent};
 use atoma_sui::events::{
     AtomaEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
     NodePublicKeyCommittmentEvent, NodeRegisteredEvent, NodeSubscribedToTaskEvent,
@@ -195,18 +195,20 @@ pub async fn handle_p2p_event(
     sender: Option<oneshot::Sender<bool>>,
 ) -> Result<()> {
     match event {
-        AtomaP2pEvent::NodePublicUrlRegistrationEvent {
+        AtomaP2pEvent::NodeMetricsRegistrationEvent {
             public_url,
             node_small_id,
             timestamp,
             country,
+            node_metrics,
         } => {
-            handle_node_public_url_registration_event(
+            handle_node_metrics_registration_event(
                 state_manager,
                 public_url,
                 node_small_id as i64,
                 timestamp as i64,
                 country,
+                node_metrics,
             )
             .await
         }
@@ -1488,7 +1490,7 @@ pub async fn handle_node_key_rotation_event(
 ///     node_id: i64,
 ///     timestamp: i64
 /// ) {
-///     if let Err(e) = handle_node_public_url_registration_event(
+///     if let Err(e) = NodeMetricsRegistrationEvent(
 ///         state_manager,
 ///         url,
 ///         node_id,
@@ -1504,12 +1506,13 @@ pub async fn handle_node_key_rotation_event(
 /// The function uses the `tracing` crate to log information about the URL registration event,
 /// which can be useful for debugging and monitoring the system's behavior.
 #[instrument(level = "trace", skip_all)]
-pub(crate) async fn handle_node_public_url_registration_event(
+pub(crate) async fn handle_node_metrics_registration_event(
     state_manager: &AtomaStateManager,
     public_url: String,
     node_small_id: i64,
     timestamp: i64,
     country: String,
+    node_metrics: NodeMetrics,
 ) -> Result<()> {
     info!(
         target = "atoma-state-handlers",
@@ -1519,9 +1522,72 @@ pub(crate) async fn handle_node_public_url_registration_event(
         timestamp = timestamp,
         "Node public url registration event"
     );
+    let NodeMetrics {
+        cpu_usage,
+        ram_used,
+        ram_total,
+        ram_swap_used,
+        ram_swap_total,
+        num_cpus,
+        network_rx,
+        network_tx,
+        num_gpus,
+        gpus,
+    } = node_metrics;
+
+    // Collect each metric using iterators
+    let gpu_memory_used: Vec<_> = gpus.iter().map(|gpu| gpu.memory_used).collect();
+    let gpu_memory_total: Vec<_> = gpus.iter().map(|gpu| gpu.memory_total).collect();
+    let gpu_memory_free: Vec<_> = gpus.iter().map(|gpu| gpu.memory_free).collect();
+    let gpu_percentage_time_read_write: Vec<_> = gpus
+        .iter()
+        .map(|gpu| gpu.percentage_time_read_write)
+        .collect();
+    let gpu_percentage_time_execution: Vec<_> = gpus
+        .iter()
+        .map(|gpu| gpu.percentage_time_gpu_execution)
+        .collect();
+    let gpu_temperatures: Vec<_> = gpus.iter().map(|gpu| gpu.temperature).collect();
+    let gpu_power_usages: Vec<_> = gpus.iter().map(|gpu| gpu.power_usage).collect();
+
     state_manager
         .state
         .register_node_public_url(node_small_id, public_url, timestamp, country)
+        .await?;
+    state_manager
+        .state
+        .insert_node_metrics(
+            node_small_id,
+            timestamp,
+            cpu_usage,
+            num_cpus as i32,
+            ram_used as i64,
+            ram_total as i64,
+            ram_swap_used as i64,
+            ram_swap_total as i64,
+            network_rx as i64,
+            network_tx as i64,
+            num_gpus as i32,
+            gpu_memory_used.iter().map(|&x| x as i64).collect(),
+            gpu_memory_total.iter().map(|&x| x as i64).collect(),
+            gpu_memory_free.iter().map(|&x| x as i64).collect(),
+            gpu_percentage_time_read_write
+                .iter()
+                .map(|&x| f64::from(x) / 100.0)
+                .collect(),
+            gpu_percentage_time_execution
+                .iter()
+                .map(|&x| f64::from(x) / 100.0)
+                .collect(),
+            gpu_temperatures
+                .iter()
+                .map(|&x| f64::from(x) / 100.0)
+                .collect(),
+            gpu_power_usages
+                .iter()
+                .map(|&x| f64::from(x) / 100.0)
+                .collect(),
+        )
         .await?;
     Ok(())
 }

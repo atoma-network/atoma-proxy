@@ -2835,12 +2835,17 @@ impl AtomaState {
         address: String,
         country: String,
     ) -> Result<()> {
-        sqlx::query("UPDATE nodes SET public_address = $2, country = $3 WHERE node_small_id = $1")
-            .bind(small_id)
-            .bind(address)
-            .bind(country)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "UPDATE nodes 
+             SET public_address = $2, country = $3 
+             WHERE node_small_id = $1 
+             AND (public_address IS DISTINCT FROM $2 OR country IS DISTINCT FROM $3)",
+        )
+        .bind(small_id)
+        .bind(address)
+        .bind(country)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
@@ -3439,13 +3444,11 @@ impl AtomaState {
         // fine.
         const NUM_RETRIES: u32 = 3;
         const BASE_DELAY: Duration = Duration::from_millis(100);
-        const MAX_DELAY: Duration = Duration::from_secs(2);
+        const MAX_DELAY: Duration = Duration::from_millis(500);
 
         validation::validate_timestamp(timestamp)?;
         validation::validate_country(&country)?;
         validation::validate_url(&public_url)?;
-
-        let mut retries = 0;
 
         for retry in 0..NUM_RETRIES {
             let result = sqlx::query(
@@ -3454,7 +3457,8 @@ impl AtomaState {
                         timestamp = $3,
                         country = $4
                     WHERE node_small_id = $1 
-                    AND (timestamp IS NULL OR timestamp < $3)",
+                    AND (timestamp IS NULL OR timestamp < $3)
+                    AND (public_address IS DISTINCT FROM $2 OR country IS DISTINCT FROM $4)",
             )
             .bind(node_small_id)
             .bind(&public_url)
@@ -3478,31 +3482,163 @@ impl AtomaState {
             }
         }
 
-        loop {
-            let result = sqlx::query(
-                "UPDATE nodes 
-                    SET public_address = $2, 
-                        timestamp = $3,
-                        country = $4
-                    WHERE node_small_id = $1 
-                    AND (timestamp IS NULL OR timestamp < $3)",
+        Err(AtomaStateManagerError::NodeNotFound)
+    }
+
+    /// Inserts node performance metrics into the database.
+    ///
+    /// This method records various system performance metrics for a node, including CPU, RAM, network,
+    /// and GPU statistics. The metrics are stored in the `node_metrics` table with a timestamp for
+    /// historical tracking. A new record is only inserted if the provided timestamp is newer than
+    /// the latest stored record for this node.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique identifier of the node.
+    /// * `timestamp` - Unix timestamp when the metrics were collected.
+    /// * `cpu_usage` - CPU utilization percentage (0.0 to 100.0).
+    /// * `num_cpus` - Number of CPU cores available.
+    /// * `ram_used` - Amount of RAM currently in use (in bytes).
+    /// * `ram_total` - Total amount of RAM available (in bytes).
+    /// * `ram_swap_used` - Amount of swap space currently in use (in bytes).
+    /// * `ram_swap_total` - Total amount of swap space available (in bytes).
+    /// * `network_rx` - Number of bytes received over the network.
+    /// * `network_tx` - Number of bytes transmitted over the network.
+    /// * `num_gpus` - Number of GPUs available.
+    /// * `gpu_utilizations` - Vector of GPU utilization percentages (0.0 to 100.0) for each GPU.
+    /// * `gpu_memory_used` - Vector of GPU memory used (in bytes) for each GPU.
+    /// * `gpu_memory_total` - Vector of total GPU memory (in bytes) for each GPU.
+    /// * `gpu_memory_free` - Vector of free GPU memory (in bytes) for each GPU.
+    /// * `gpu_percentage_time_read_write` - Vector of GPU memory read/write time percentages for each GPU.
+    /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages for each GPU.
+    /// * `gpu_temperatures` - Vector of GPU temperatures (in Celsius) for each GPU.
+    /// * `gpu_power_usages` - Vector of GPU power consumption (in watts) for each GPU.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's a connection issue with the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn record_metrics(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_id = 1;
+    ///     let timestamp = chrono::Utc::now().timestamp();
+    ///     
+    ///     state_manager.insert_node_metrics(
+    ///         node_id,
+    ///         timestamp,
+    ///         75.5,           // CPU usage
+    ///         8,              // Number of CPUs
+    ///         8_589_934_592,  // 8GB RAM used
+    ///         17_179_869_184, // 16GB total RAM
+    ///         1_073_741_824,  // 1GB swap used
+    ///         4_294_967_296,  // 4GB total swap
+    ///         1_000_000,      // Network RX
+    ///         500_000,        // Network TX
+    ///         2,              // Number of GPUs
+    ///         vec![80.0, 85.0],                    // GPU utilizations
+    ///         vec![6_442_450_944, 6_442_450_944],  // GPU memory used
+    ///         vec![8_589_934_592, 8_589_934_592],  // GPU memory total
+    ///         vec![2_147_483_648, 2_147_483_648],  // GPU memory free
+    ///         vec![25.5, 30.0],                    // GPU read/write time
+    ///         vec![70.0, 75.5],                    // GPU execution time
+    ///         vec![75.0, 78.0],                    // GPU temperatures
+    ///         vec![150.0, 165.0],                  // GPU power usage
+    ///     ).await
+    /// }
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// The GPU-related vectors should all have the same length, matching the `num_gpus` parameter.
+    /// Each index in these vectors corresponds to metrics for a specific GPU in the system.
+    #[instrument(level = "trace", skip(self))]
+    #[allow(clippy::similar_names)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_node_metrics(
+        &self,
+        node_small_id: i64,
+        timestamp: i64,
+        cpu_usage: f32,
+        num_cpus: i32,
+        ram_used: i64,
+        ram_total: i64,
+        ram_swap_used: i64,
+        ram_swap_total: i64,
+        network_rx: i64,
+        network_tx: i64,
+        num_gpus: i32,
+        gpu_memory_used: Vec<i64>,
+        gpu_memory_total: Vec<i64>,
+        gpu_memory_free: Vec<i64>,
+        gpu_percentage_time_read_write: Vec<f64>,
+        gpu_percentage_time_execution: Vec<f64>,
+        gpu_temperatures: Vec<f64>,
+        gpu_power_usages: Vec<f64>,
+    ) -> Result<()> {
+        sqlx::query(
+            "WITH latest_timestamp AS (
+                SELECT MAX(timestamp) as max_ts 
+                FROM node_metrics 
+                WHERE node_small_id = $1
             )
-            .bind(node_small_id)
-            .bind(&public_url)
-            .bind(timestamp)
-            .bind(&country)
-            .execute(&self.db)
-            .await?;
-            if result.rows_affected() == 0 {
-                if retries >= NUM_RETRIES {
-                    return Err(AtomaStateManagerError::NodeNotFound);
-                }
-                retries += 1;
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            } else {
-                break;
-            }
-        }
+            INSERT INTO node_metrics (
+                node_small_id,
+                timestamp,
+                cpu_usage,
+                num_cpus,
+                ram_used,
+                ram_total,
+                ram_swap_used,
+                ram_swap_total,
+                network_rx,
+                network_tx,
+                num_gpus,
+                gpu_memory_used,
+                gpu_memory_total,
+                gpu_memory_free,
+                gpu_percentage_time_read_write,
+                gpu_percentage_time_execution,
+                gpu_temperatures,
+                gpu_power_usages
+            )
+            SELECT 
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18
+            WHERE NOT EXISTS (
+                SELECT 1 FROM latest_timestamp 
+                WHERE max_ts >= $2
+            )",
+        )
+        .bind(node_small_id)
+        .bind(timestamp)
+        .bind(cpu_usage)
+        .bind(num_cpus)
+        .bind(ram_used)
+        .bind(ram_total)
+        .bind(ram_swap_used)
+        .bind(ram_swap_total)
+        .bind(network_rx)
+        .bind(network_tx)
+        .bind(num_gpus)
+        .bind(gpu_memory_used)
+        .bind(gpu_memory_total)
+        .bind(gpu_memory_free)
+        .bind(gpu_percentage_time_read_write)
+        .bind(gpu_percentage_time_execution)
+        .bind(gpu_temperatures)
+        .bind(gpu_power_usages)
+        .execute(&self.db)
+        .await?;
 
         Ok(())
     }
@@ -4642,6 +4778,8 @@ pub mod validation {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::NodeMetrics;
+
     use super::*;
     use uuid::Uuid;
 
@@ -4665,7 +4803,8 @@ mod tests {
                 stack_attestation_disputes,
                 node_public_keys,
                 users,
-                key_rotations
+                key_rotations,
+                node_metrics
             CASCADE",
         )
         .execute(db)
@@ -5066,11 +5205,11 @@ mod tests {
         assert!(matches!(result, Err(AtomaStateManagerError::NodeNotFound)));
 
         // Verify that it took at least the expected retry time
-        // 3 retries * 500ms = 1500ms minimum
+        // 3 retries * 100ms = 300ms minimum
         let elapsed = start_time.elapsed();
         assert!(
-            elapsed >= std::time::Duration::from_millis(1500),
-            "Should have waited for at least 1500ms, but only waited for {}ms",
+            elapsed >= std::time::Duration::from_millis(300),
+            "Should have waited for at least 300ms, but only waited for {}ms",
             elapsed.as_millis()
         );
     }
@@ -5084,7 +5223,7 @@ mod tests {
         // Spawn a task to insert the node after a delay
         let db_clone = state.db.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             insert_test_node(&db_clone, 2).await;
         });
 
@@ -5980,6 +6119,308 @@ mod tests {
             .verify_stack_for_confidential_compute_request(1, 500)
             .await?;
         assert!(result, "Stack should be valid with updated key");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_metrics_basic() {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let timestamp = Utc::now().timestamp();
+        let node_small_id = 1;
+
+        // Test with single GPU metrics
+        state
+            .insert_new_node(
+                node_small_id,
+                "0x1234567890".to_string(),
+                "0x1234567890".to_string(),
+            )
+            .await
+            .expect("Failed to insert node");
+        state
+            .insert_node_metrics(
+                node_small_id,
+                timestamp,
+                75.5,                // CPU usage
+                8,                   // Number of CPUs
+                8_589_934_592,       // RAM used (8GB)
+                17_179_869_184,      // RAM total (16GB)
+                1_073_741_824,       // Swap used (1GB)
+                4_294_967_296,       // Swap total (4GB)
+                1_000_000,           // Network RX
+                500_000,             // Network TX
+                1,                   // Number of GPUs
+                vec![6_442_450_944], // GPU memory used (6GB)
+                vec![8_589_934_592], // GPU memory total (8GB)
+                vec![2_147_483_648], // GPU memory free (2GB)
+                vec![25.5],          // GPU read/write time
+                vec![70.0],          // GPU execution time
+                vec![75.0],          // GPU temperature
+                vec![150.0],         // GPU power usage
+            )
+            .await
+            .expect("Failed to insert node metrics");
+
+        // Verify the data was inserted correctly
+        let metrics =
+            sqlx::query_as::<_, NodeMetrics>("SELECT * FROM node_metrics WHERE node_small_id = $1")
+                .bind(node_small_id)
+                .fetch_one(&state.db)
+                .await
+                .expect("Failed to fetch node metrics");
+
+        assert_eq!(metrics.node_small_id, node_small_id);
+        assert_eq!(metrics.timestamp, timestamp);
+        assert_eq!((metrics.cpu_usage * 10.0) as i32, 755);
+        assert_eq!(metrics.num_cpus, 8);
+        assert_eq!(metrics.ram_used, 8_589_934_592);
+        assert_eq!(metrics.ram_total, 17_179_869_184);
+        assert_eq!(metrics.ram_swap_used, 1_073_741_824);
+        assert_eq!(metrics.ram_swap_total, 4_294_967_296);
+        assert_eq!(metrics.network_rx, 1_000_000);
+        assert_eq!(metrics.network_tx, 500_000);
+        assert_eq!(metrics.num_gpus, 1);
+        assert_eq!(metrics.gpu_memory_used, vec![6_442_450_944i64]);
+        assert_eq!(metrics.gpu_memory_total, vec![8_589_934_592i64]);
+        assert_eq!(metrics.gpu_memory_free, vec![2_147_483_648i64]);
+        assert_eq!(metrics.gpu_percentage_time_read_write, vec![25.5f64]);
+        assert_eq!(metrics.gpu_percentage_time_execution, vec![70.0f64]);
+        assert_eq!(metrics.gpu_temperatures, vec![75.0f64]);
+        assert_eq!(metrics.gpu_power_usages, vec![150.0f64]);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_metrics_multiple_gpus() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let timestamp = Utc::now().timestamp();
+        let node_small_id = 1;
+
+        // Test with multiple GPU metrics
+        state
+            .insert_new_node(
+                node_small_id,
+                "0x1234567890".to_string(),
+                "0x1234567890".to_string(),
+            )
+            .await
+            .expect("Failed to insert node");
+        state
+            .insert_node_metrics(
+                node_small_id,
+                timestamp,
+                80.0,                                 // CPU usage
+                16,                                   // Number of CPUs
+                16_589_934_592,                       // RAM used (16GB)
+                34_359_738_368,                       // RAM total (32GB)
+                2_147_483_648,                        // Swap used (2GB)
+                8_589_934_592,                        // Swap total (8GB)
+                2_000_000,                            // Network RX
+                1_000_000,                            // Network TX
+                2,                                    // Number of GPUs
+                vec![12_884_901_888, 12_884_901_888], // GPU memory used (12GB each)
+                vec![17_179_869_184, 17_179_869_184], // GPU memory total (16GB each)
+                vec![4_294_967_296, 4_294_967_296],   // GPU memory free (4GB each)
+                vec![30.0, 35.0],                     // GPU read/write time
+                vec![75.0, 80.0],                     // GPU execution time
+                vec![78.0, 82.0],                     // GPU temperatures
+                vec![200.0, 220.0],                   // GPU power usage
+            )
+            .await
+            .expect("Failed to insert node metrics");
+
+        // Verify the data was inserted correctly
+        let metrics =
+            sqlx::query_as::<_, NodeMetrics>("SELECT * FROM node_metrics WHERE node_small_id = $1")
+                .bind(node_small_id)
+                .fetch_one(&state.db)
+                .await
+                .expect("Failed to fetch node metrics");
+
+        assert_eq!(metrics.num_gpus, 2);
+        assert_eq!(
+            metrics.gpu_memory_used,
+            vec![12_884_901_888i64, 12_884_901_888i64]
+        );
+        assert_eq!(
+            metrics.gpu_memory_total,
+            vec![17_179_869_184i64, 17_179_869_184i64]
+        );
+        assert_eq!(
+            metrics.gpu_memory_free,
+            vec![4_294_967_296i64, 4_294_967_296i64]
+        );
+        assert_eq!(
+            metrics.gpu_percentage_time_read_write,
+            vec![30.0f64, 35.0f64]
+        );
+        assert_eq!(
+            metrics.gpu_percentage_time_execution,
+            vec![75.0f64, 80.0f64]
+        );
+        assert_eq!(metrics.gpu_temperatures, vec![78.0f64, 82.0f64]);
+        assert_eq!(metrics.gpu_power_usages, vec![200.0f64, 220.0f64]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_metrics_timestamp_check() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let initial_timestamp = Utc::now().timestamp();
+        let older_timestamp = initial_timestamp - 3600; // 1 hour older
+        let node_small_id = 1;
+
+        // Insert initial metrics
+        state
+            .insert_new_node(
+                node_small_id,
+                "0x1234567890".to_string(),
+                "0x1234567890".to_string(),
+            )
+            .await
+            .expect("Failed to insert node");
+        state
+            .insert_node_metrics(
+                node_small_id,
+                initial_timestamp,
+                75.5,
+                8,
+                8_589_934_592,
+                17_179_869_184,
+                1_073_741_824,
+                4_294_967_296,
+                1_000_000,
+                500_000,
+                1,
+                vec![6_442_450_944],
+                vec![8_589_934_592],
+                vec![2_147_483_648],
+                vec![25.5],
+                vec![70.0],
+                vec![75.0],
+                vec![150.0],
+            )
+            .await
+            .expect("Failed to insert node metrics");
+
+        // Try to insert metrics with older timestamp
+        state
+            .insert_node_metrics(
+                node_small_id,
+                older_timestamp,
+                80.0,
+                8,
+                8_589_934_592,
+                17_179_869_184,
+                1_073_741_824,
+                4_294_967_296,
+                1_000_000,
+                500_000,
+                1,
+                vec![7_442_450_944],
+                vec![8_589_934_592],
+                vec![1_147_483_648],
+                vec![30.5],
+                vec![75.0],
+                vec![78.0],
+                vec![160.0],
+            )
+            .await
+            .expect("Failed to insert node metrics");
+
+        // Verify that the older metrics were not inserted
+        // Verify that the older metrics were not inserted
+        let metrics =
+            sqlx::query("SELECT COUNT(*) as count FROM node_metrics WHERE node_small_id = $1")
+                .bind(node_small_id)
+                .fetch_one(&state.db)
+                .await
+                .expect("Failed to fetch node metrics");
+        let count: i64 = metrics.get(0);
+        assert_eq!(count, 1); // Only one record should exist
+
+        // Verify the data hasn't changed
+        let metrics =
+            sqlx::query_as::<_, NodeMetrics>("SELECT * FROM node_metrics WHERE node_small_id = $1")
+                .bind(node_small_id)
+                .fetch_one(&state.db)
+                .await
+                .expect("Failed to fetch node metrics");
+
+        assert_eq!(metrics.timestamp, initial_timestamp);
+        assert_eq!((metrics.cpu_usage * 10.0) as i32, 755);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_metrics_zero_gpus() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        let timestamp = Utc::now().timestamp();
+        let node_small_id = 1;
+
+        // Test with no GPUs
+        state
+            .insert_new_node(
+                node_small_id,
+                "0x1234567890".to_string(),
+                "0x1234567890".to_string(),
+            )
+            .await
+            .expect("Failed to insert node");
+        state
+            .insert_node_metrics(
+                node_small_id,
+                timestamp,
+                75.5,           // CPU usage
+                8,              // Number of CPUs
+                8_589_934_592,  // RAM used
+                17_179_869_184, // RAM total
+                1_073_741_824,  // Swap used
+                4_294_967_296,  // Swap total
+                1_000_000,      // Network RX
+                500_000,        // Network TX
+                0,              // Number of GPUs
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .await
+            .expect("Failed to insert node metrics");
+
+        // Verify the data was inserted correctly
+        let metrics: NodeMetrics =
+            sqlx::query_as("SELECT * FROM node_metrics WHERE node_small_id = $1")
+                .bind(node_small_id)
+                .fetch_one(&state.db)
+                .await
+                .expect("Failed to fetch node metrics");
+
+        assert_eq!(metrics.num_gpus, 0);
+        assert!(metrics.gpu_memory_used.is_empty());
+        assert!(metrics.gpu_memory_total.is_empty());
+        assert!(metrics.gpu_memory_free.is_empty());
+        assert!(metrics.gpu_percentage_time_read_write.is_empty());
+        assert!(metrics.gpu_percentage_time_execution.is_empty());
+        assert!(metrics.gpu_temperatures.is_empty());
+        assert!(metrics.gpu_power_usages.is_empty());
 
         Ok(())
     }
