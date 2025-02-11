@@ -12,7 +12,7 @@ use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
 use opentelemetry::KeyValue;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::instrument;
@@ -35,6 +35,12 @@ use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKEN
 /// This endpoint follows the OpenAI API format for chat completions, with additional
 /// confidential processing (through AEAD encryption and TEE hardware).
 pub const CONFIDENTIAL_CHAT_COMPLETIONS_PATH: &str = "/v1/confidential/chat/completions";
+
+/// The key for the content field in the request payload.
+///
+/// This is used to represent the content of a message in the chat completion request.
+/// It can be either a text or an array of content parts.
+pub const CONTENT_KEY: &str = "content";
 
 // TODO: Create a new endpoint for the confidential chat completions
 
@@ -64,7 +70,13 @@ const STREAM: &str = "stream";
         CompletionUsage,
         ChatCompletionChunk,
         ChatCompletionChunkChoice,
-        ChatCompletionChunkDelta
+        ChatCompletionChunkDelta,
+        ToolCall,
+        Tool,
+        ToolCallFunction,
+        ToolFunction,
+        MessageContent,
+        MessageContentPart,
     ))
 )]
 pub struct ChatCompletionsOpenApi;
@@ -739,6 +751,7 @@ pub struct RequestModelChatCompletions {
 
     /// Array of message objects that represent the conversation history
     /// Each message should contain a "role" (system/user/assistant) and "content"
+    /// The content can be a string or an array of content parts.
     messages: Vec<Value>,
 
     /// The maximum number of tokens to generate in the completion
@@ -795,33 +808,70 @@ impl RequestModel for RequestModelChatCompletions {
 
         for message in &self.messages {
             let content = message
-                .get("content")
-                .and_then(|content| content.as_str())
+                .get(CONTENT_KEY)
+                .and_then(|content| MessageContent::deserialize(content).ok())
                 .ok_or_else(|| AtomaProxyError::RequestError {
                     message: "Missing or invalid message content".to_string(),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
 
-            let num_tokens = tokenizer
-                .encode(content, true)
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to encode message: {err:?}"),
-                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-                })?
-                .get_ids()
-                .len() as u64;
+            match content {
+                MessageContent::Text(text) => {
+                    let num_tokens = tokenizer
+                        .encode(text, true)
+                        .map_err(|err| AtomaProxyError::InternalError {
+                            message: format!("Failed to encode message: {err:?}"),
+                            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                        })?
+                        .get_ids()
+                        .len() as u64;
 
-            total_num_tokens += num_tokens;
-            // add 2 tokens as a safety margin, for start and end message delimiters
-            total_num_tokens += 2;
-            // add 1 token as a safety margin, for the role name of the message
-            total_num_tokens += 1;
+                    total_num_tokens += num_tokens;
+                    // add 2 tokens as a safety margin, for start and end message delimiters
+                    total_num_tokens += 2;
+                    // add 1 token as a safety margin, for the role name of the message
+                    total_num_tokens += 1;
+                    // add the max completion tokens, to account for the response
+                    total_num_tokens += self.max_completion_tokens;
+                }
+                MessageContent::Array(parts) => {
+                    for part in parts {
+                        match part {
+                            MessageContentPart::Text { text, .. } => {
+                                let num_tokens = tokenizer
+                                    .encode(text, true)
+                                    .map_err(|err| AtomaProxyError::InternalError {
+                                        message: format!("Failed to encode message: {err:?}"),
+                                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                                    })?
+                                    .get_ids()
+                                    .len() as u64;
+                                total_num_tokens += num_tokens;
+                                // add 2 tokens as a safety margin, for start and end message delimiters
+                                total_num_tokens += 2;
+                                // add 1 token as a safety margin, for the role name of the message
+                                total_num_tokens += 1;
+                                // add the max completion tokens, to account for the response
+                                total_num_tokens += self.max_completion_tokens;
+                            }
+                            MessageContentPart::Image { .. } => {
+                                // TODO: Ensure that for image content parts, we have a way to estimate the number of tokens,
+                                // which can depend on the size of the image and the output description.
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         }
-        total_num_tokens += self.max_completion_tokens;
         Ok(total_num_tokens)
     }
 }
 
+/// Represents the create chat completion request.
+///
+/// This is used to represent the create chat completion request in the chat completion request.
+/// It can be either a chat completion or a chat completion stream.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateChatCompletionRequest {
     #[serde(flatten)]
@@ -843,6 +893,10 @@ pub struct CreateChatCompletionStreamRequest {
     pub stream: bool,
 }
 
+/// Represents the chat completion request.
+///
+/// This is used to represent the chat completion request in the chat completion request.
+/// It can be either a chat completion or a chat completion stream.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionRequest {
     /// ID of the model to use
@@ -935,22 +989,244 @@ pub struct ChatCompletionRequest {
     pub seed: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct ChatCompletionMessage {
-    /// The role of the message author. One of: "system", "user", "assistant", "tool", or "function"
-    #[schema(example = "user")]
-    pub role: String,
-
-    /// The contents of the message
-    #[schema(example = "Hello! How can you help me today?")]
-    pub content: String,
-
-    /// The name of the author of this message
-    #[schema(example = "john_doe")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+/// A message that is part of a conversation which is based on the role
+/// of the author of the message.
+///
+/// This is used to represent the message in the chat completion request.
+/// It can be either a system message, a user message, an assistant message, or a tool message.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum ChatCompletionMessage {
+    /// The role of the messages author, in this case system.
+    System {
+        /// The contents of the message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<MessageContent>,
+        /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// The role of the messages author, in this case user.
+    User {
+        /// The contents of the message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<MessageContent>,
+        /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// The role of the messages author, in this case assistant.
+    Assistant {
+        /// The contents of the message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<MessageContent>,
+        /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// The refusal message by the assistant.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refusal: Option<String>,
+        /// The tool calls generated by the model, such as function calls.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_calls: Vec<ToolCall>,
+    },
+    /// The role of the messages author, in this case tool.
+    Tool {
+        /// The contents of the message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<MessageContent>,
+        /// Tool call that this message is responding to.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        tool_call_id: String,
+    },
 }
 
+/// Represents the content of a message.
+///
+/// This is used to represent the content of a message in the chat completion request.
+/// It can be either a text or an array of content parts.
+#[derive(Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum MessageContent {
+    /// The text contents of the message.
+    #[serde(rename(serialize = "text", deserialize = "text"))]
+    Text(String),
+    /// An array of content parts with a defined type, each can be of type text or image_url when passing in images.
+    /// You can pass multiple images by adding multiple image_url content parts. Image input is only supported when using the gpt-4o model.
+    #[serde(rename(serialize = "array", deserialize = "array"))]
+    Array(Vec<MessageContentPart>),
+}
+
+/// Represents a part of a message content.
+///
+/// This is used to represent the content of a message in the chat completion request.
+/// It can be either a text or an image.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum MessageContentPart {
+    #[serde(rename(serialize = "text", deserialize = "text"))]
+    Text {
+        /// The type of the content part.
+        #[serde(rename(serialize = "type", deserialize = "type"))]
+        r#type: String,
+        /// The text content.
+        text: String,
+    },
+    #[serde(rename(serialize = "image", deserialize = "image"))]
+    Image {
+        /// The type of the content part.
+        #[serde(rename(serialize = "type", deserialize = "type"))]
+        r#type: String,
+        /// The image URL.
+        image_url: MessageContentPartImageUrl,
+    },
+}
+
+impl std::fmt::Display for MessageContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(text) => write!(f, "{text}"),
+            Self::Array(parts) => {
+                let mut content = String::new();
+                for part in parts {
+                    content.push_str(&format!("{part}\n"));
+                }
+                write!(f, "{content}")
+            }
+        }
+    }
+}
+
+// We manually implement Deserialize here for more control.
+impl<'de> Deserialize<'de> for MessageContent {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = Value::deserialize(deserializer)?;
+
+        if let Some(s) = value.as_str() {
+            return Ok(Self::Text(s.to_string()));
+        }
+
+        if let Some(arr) = value.as_array() {
+            let parts: std::result::Result<Vec<MessageContentPart>, _> = arr
+                .iter()
+                .map(|v| serde_json::from_value(v.clone()).map_err(serde::de::Error::custom))
+                .collect();
+            return Ok(Self::Array(parts?));
+        }
+
+        Err(serde::de::Error::custom(
+            "Expected a string or an array of content parts",
+        ))
+    }
+}
+
+impl std::fmt::Display for MessageContentPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text { r#type, text } => {
+                write!(f, "{type}: {text}")
+            }
+            Self::Image { r#type, image_url } => {
+                write!(f, "{type}: [Image URL: {image_url}]")
+            }
+        }
+    }
+}
+
+/// Represents the image URL of a message content part.
+///
+/// This is used to represent the image URL of a message content part in the chat completion request.
+/// It can be either a URL or a base64 encoded image data.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename(serialize = "image_url", deserialize = "image_url"))]
+pub struct MessageContentPartImageUrl {
+    /// Either a URL of the image or the base64 encoded image data.
+    url: String,
+    /// Specifies the detail level of the image.
+    detail: Option<String>,
+}
+
+/// Implementing Display for MessageContentPartImageUrl
+impl std::fmt::Display for MessageContentPartImageUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.detail {
+            Some(detail) => write!(f, "Image URL: {}, Detail: {}", self.url, detail),
+            None => write!(f, "Image URL: {}", self.url),
+        }
+    }
+}
+
+/// Represents the function that the model called.
+///
+/// This is used to represent the function that the model called in the chat completion request.
+/// It can be either a function or a tool call.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ToolCallFunction {
+    /// The name of the function to call.
+    name: String,
+    /// The arguments to call the function with, as generated by the model in JSON format.
+    /// Note that the model does not always generate valid JSON, and may hallucinate parameters not defined by your function schema.
+    /// Validate the arguments in your code before calling your function.
+    arguments: Value,
+}
+
+/// Represents the tool call that the model made.
+///
+/// This is used to represent the tool call that the model made in the chat completion request.
+/// It can be either a function or a tool.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename(serialize = "tool_call", deserialize = "tool_call"))]
+pub struct ToolCall {
+    /// The ID of the tool call.
+    id: String,
+    /// The type of the tool. Currently, only function is supported.
+    #[serde(rename(serialize = "type", deserialize = "type"))]
+    r#type: String,
+    /// The function that the model called.
+    function: ToolCallFunction,
+}
+
+/// Represents the tool that the model called.
+///
+/// This is used to represent the tool that the model called in the chat completion request.
+/// It can be either a function or a tool.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename(serialize = "tool", deserialize = "tool"))]
+pub struct Tool {
+    /// The type of the tool. Currently, only function is supported.
+    #[serde(rename(serialize = "type", deserialize = "type"))]
+    r#type: String,
+    /// The function that the model called.
+    function: ToolFunction,
+}
+
+/// Represents the function that the model called.
+///
+/// This is used to represent the function that the model called in the chat completion request.
+/// It can be either a function or a tool.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ToolFunction {
+    /// Description of the function to call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    /// The name of the function to call.
+    name: String,
+    /// The arguments to call the function with, as generated by the model in JSON format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parameters: Option<Value>,
+    /// Whether to enable strict schema adherence when generating the function call. If set to true, the
+    /// model will follow the exact schema defined in the parameters field. Only a subset of JSON Schema is supported when strict is true
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    strict: Option<bool>,
+}
+
+/// Represents the chat completion response.
+///
+/// This is used to represent the chat completion response in the chat completion request.
+/// It can be either a chat completion or a chat completion stream.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionResponse {
     /// A unique identifier for the chat completion.
@@ -977,12 +1253,20 @@ pub struct ChatCompletionResponse {
     pub system_fingerprint: Option<String>,
 }
 
+/// Represents the chat completion stream response.
+///
+/// This is used to represent the chat completion stream response in the chat completion request.
+/// It can be either a chat completion chunk or a chat completion stream.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionStreamResponse {
     /// The stream of chat completion chunks.
     pub data: ChatCompletionChunk,
 }
 
+/// Represents the chat completion choice.
+///
+/// This is used to represent the chat completion choice in the chat completion request.
+/// It can be either a chat completion message or a chat completion chunk.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChoice {
     /// The index of this choice in the list of choices.
@@ -1001,6 +1285,10 @@ pub struct ChatCompletionChoice {
     pub logprobs: Option<Value>,
 }
 
+/// Represents the completion usage.
+///
+/// This is used to represent the completion usage in the chat completion request.
+/// It can be either a completion usage or a completion chunk usage.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CompletionUsage {
@@ -1036,6 +1324,10 @@ pub struct ChatCompletionChunk {
     pub choices: Vec<ChatCompletionChunkChoice>,
 }
 
+/// Represents the chat completion chunk choice.
+///
+/// This is used to represent the chat completion chunk choice in the chat completion request.
+/// It can be either a chat completion chunk delta or a chat completion chunk choice.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChunkChoice {
     /// The index of this choice in the list of choices.
@@ -1051,6 +1343,10 @@ pub struct ChatCompletionChunkChoice {
     pub finish_reason: Option<String>,
 }
 
+/// Represents the chat completion chunk delta.
+///
+/// This is used to represent the chat completion chunk delta in the chat completion request.
+/// It can be either a chat completion chunk delta message or a chat completion chunk delta choice.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionChunkDelta {
     /// The role of the message author, if present in this chunk.
