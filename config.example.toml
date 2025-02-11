@@ -33,3 +33,19 @@ secret_key = "secret_key" # Secret key for the tokens generation
 access_token_lifetime = 1 # In minutes
 refresh_token_lifetime = 1 # In days
 google_client_id="" # required only when google-oauth feature is enabled. Google client id for google login.
+
+[atoma_p2p]
+# Interval for sending heartbeat messages to peers (in seconds)
+heartbeat_interval = { secs = 30, nanos = 0 }
+# Maximum duration a connection can remain idle before closing (in seconds)
+idle_connection_timeout = { secs = 60, nanos = 0 }
+# Address to listen for incoming QUIC connections (format: "/ip4/x.x.x.x/udp/x")
+listen_addr = "/ip4/0.0.0.0/udp/4001/quic-v1"
+# List of bootstrap nodes to connect to
+bootstrap_nodes = [
+    "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc",
+]
