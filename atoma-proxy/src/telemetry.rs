@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
-use opentelemetry::{global, trace::TracerProvider};
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     metrics::{self as sdkmetrics},
@@ -29,20 +29,21 @@ const LOG_FILE: &str = "atoma-proxy-service.log";
 const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 
 static RESOURCE: Lazy<Resource> =
-    Lazy::new(|| Resource::builder().with_service_name("atoma-proxy").build());
+    Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
 
 /// Initialize metrics with OpenTelemetry SDK
 fn init_metrics(otlp_endpoint: &str) -> sdkmetrics::SdkMeterProvider {
     let metrics_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
-        .with_timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap();
 
-    let reader = sdkmetrics::PeriodicReader::builder(metrics_exporter)
-        .with_interval(std::time::Duration::from_secs(3))
-        .build();
+    let reader =
+        sdkmetrics::PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
+            .with_interval(std::time::Duration::from_secs(3))
+            .with_timeout(std::time::Duration::from_secs(10))
+            .build();
 
     sdkmetrics::SdkMeterProvider::builder()
         .with_reader(reader)
@@ -51,14 +52,14 @@ fn init_metrics(otlp_endpoint: &str) -> sdkmetrics::SdkMeterProvider {
 }
 
 /// Initialize tracing with OpenTelemetry SDK
-fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::SdkTracer> {
+fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::Tracer> {
     let tracing_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
         .build()?;
 
-    let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-        .with_batch_exporter(tracing_exporter)
+    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_batch_exporter(tracing_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_sampler(Sampler::AlwaysOn)
         .with_id_generator(RandomIdGenerator::default())
         .with_max_events_per_span(64)
@@ -74,9 +75,7 @@ fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::SdkTracer> {
 }
 
 /// Configure logging with JSON formatting, file output, and console output
-pub fn setup_logging<P: AsRef<Path>>(
-    log_dir: P,
-) -> Result<(WorkerGuard, WorkerGuard)> {
+pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
     // Create logs directory if it doesn't exist
@@ -95,15 +94,15 @@ pub fn setup_logging<P: AsRef<Path>>(
 
     // Initialize OpenTelemetry tracing
     let tracer = init_traces(&otlp_endpoint)?;
-    let opentelemetry_layer = OpenTelemetryLayer::default().with_tracer(tracer);
+    let opentelemetry_layer = OpenTelemetryLayer::new(tracer);
 
     let logs_exporter = opentelemetry_otlp::LogExporter::builder()
         .with_tonic()
         .with_endpoint(otlp_endpoint)
         .build()?;
 
-    let _ = opentelemetry_sdk::logs::SdkLoggerProvider::builder()
-        .with_batch_exporter(logs_exporter)
+    let _ = opentelemetry_sdk::logs::LoggerProvider::builder()
+        .with_batch_exporter(logs_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_resource(RESOURCE.clone())
         .build();
 
@@ -147,6 +146,6 @@ pub fn setup_logging<P: AsRef<Path>>(
 }
 
 /// Ensure all spans are exported before shutdown
-pub fn shutdown(tracer_provider: &opentelemetry_sdk::trace::SdkTracerProvider) {
-    tracer_provider.shutdown();
+pub fn shutdown() {
+    global::shutdown_tracer_provider();
 }
