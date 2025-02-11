@@ -43,6 +43,7 @@ pub struct AuthResponse {
 /// Contains the signature of the user to prove ownership of the sui address.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProofRequest {
+    /// The signature of the user to prove ownership of the sui address
     pub signature: String,
 }
 
@@ -51,7 +52,9 @@ pub struct ProofRequest {
 /// Contains the transaction digest of the payment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UsdcPaymentRequest {
+    /// The transaction digest of the payment
     pub transaction_digest: String,
+    /// The proof signature of the payment
     pub proof_signature: Option<String>,
 }
 
@@ -139,8 +142,11 @@ pub struct LatencyResponse {
 /// - Settled compute units = 5
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct StatsStackResponse {
+    /// Timestamp of the measurement (hourly basis)
     pub timestamp: DateTime<Utc>,
+    /// Total compute units in the system
     pub num_compute_units: i64,
+    /// Number of settled compute units
     pub settled_num_compute_units: i64,
 }
 
@@ -167,25 +173,70 @@ pub struct Task {
     pub minimum_reputation_score: Option<i16>,
 }
 
+/// Represents system metrics collected from a node in the network
+///
+/// This struct contains detailed hardware metrics including CPU, RAM, network,
+/// and GPU usage statistics. For GPU metrics, each vector field contains one entry
+/// per GPU device present on the node.
+///
+/// # Fields
+///
+/// All memory/storage values are in bytes unless otherwise specified.
+/// All percentage values are between 0.0 and 100.0.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct NodeMetrics {
+    /// Unique small integer identifier for the node
     pub node_small_id: i64,
+
+    /// Unix timestamp when metrics were collected
     pub timestamp: i64,
+
+    /// CPU usage as a percentage (0.0-100.0)
     pub cpu_usage: f32,
+
+    /// Number of CPU cores available
     pub num_cpus: i32,
+
+    /// Current RAM usage in bytes
     pub ram_used: i64,
+
+    /// Total RAM available in bytes
     pub ram_total: i64,
+
+    /// Current swap memory usage in bytes
     pub ram_swap_used: i64,
+
+    /// Total swap memory available in bytes
     pub ram_swap_total: i64,
+
+    /// Total bytes received over network
     pub network_rx: i64,
+
+    /// Total bytes transmitted over network
     pub network_tx: i64,
+
+    /// Number of GPU devices present
     pub num_gpus: i32,
+
+    /// Memory used per GPU in bytes
     pub gpu_memory_used: Vec<i64>,
+
+    /// Total memory available per GPU in bytes
     pub gpu_memory_total: Vec<i64>,
+
+    /// Free memory available per GPU in bytes
     pub gpu_memory_free: Vec<i64>,
+
+    /// Percentage of time each GPU spent on memory operations (0.0-100.0)
     pub gpu_percentage_time_read_write: Vec<f64>,
+
+    /// Percentage of time each GPU spent executing compute tasks (0.0-100.0)
     pub gpu_percentage_time_execution: Vec<f64>,
+
+    /// Temperature of each GPU in degrees Celsius
     pub gpu_temperatures: Vec<f64>,
+
+    /// Power consumption of each GPU in watts
     pub gpu_power_usages: Vec<f64>,
 }
 
@@ -205,15 +256,66 @@ impl From<TaskRegisteredEvent> for Task {
     }
 }
 
+/// Represents weights used to calculate overall node performance scores
+///
+/// Each weight is a coefficient between 0 and 1 that determines how much
+/// each hardware metric contributes to the final performance score.
+///
+/// The weights should sum to 1.0 to ensure proper score normalization.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct PerformanceWeights {
+    /// Weight coefficient for GPU performance metrics (0.0 to 1.0)
+    pub gpu_score_weight: f64,
+
+    /// Weight coefficient for CPU performance metrics (0.0 to 1.0)
+    pub cpu_score_weight: f64,
+
+    /// Weight coefficient for RAM usage metrics (0.0 to 1.0)
+    pub ram_score_weight: f64,
+
+    /// Weight coefficient for swap RAM usage metrics (0.0 to 1.0)
+    pub swap_ram_score_weight: f64,
+
+    /// Weight coefficient for network performance metrics (0.0 to 1.0)
+    pub network_score_weight: f64,
+
+    /// Weight coefficient for GPU VRAM usage (0.0 to 1.0)
+    pub gpu_vram_weight: f64,
+
+    /// Weight coefficient for GPU execution availability (0.0 to 1.0)
+    pub gpu_exec_avail_weight: f64,
+
+    /// Weight coefficient for GPU temperature (0.0 to 1.0)
+    pub gpu_temp_weight: f64,
+
+    /// Weight coefficient for GPU power usage (0.0 to 1.0)
+    pub gpu_power_weight: f64,
+
+    /// Temperature threshold for GPU (0.0 to 1.0)
+    pub gpu_temp_threshold: f64,
+
+    /// Maximum temperature for GPU (0.0 to 1.0)
+    pub gpu_temp_max: f64,
+
+    /// Power threshold for GPU (0.0 to 1.0)
+    pub gpu_power_threshold: f64,
+
+    /// Maximum power usage for GPU (0.0 to 1.0)
+    pub gpu_power_max: f64,
+}
+
 /// Represents the cheapest node settings for a specific model
 #[derive(FromRow)]
 pub struct CheapestNode {
     /// Unique small integer identifier for the task
     pub task_small_id: i64,
+
     /// Price per one million compute units for the task that is offered by some node
     pub price_per_one_million_compute_units: i64,
+
     /// Maximum number of compute units for the task that is offered by the cheapest node
     pub max_num_compute_units: i64,
+
     /// Unique small integer identifier for the node
     pub node_small_id: i64,
 }
@@ -224,7 +326,10 @@ pub struct CheapestNode {
 /// Contains the country of the node and the count of nodes in that country.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct NodeDistribution {
+    /// The country of the node
     pub country: Option<String>,
+
+    /// The count of nodes in that country
     pub count: i64,
 }
 
@@ -233,25 +338,34 @@ pub struct NodeDistribution {
 pub struct Stack {
     /// Address of the owner of the stack
     pub owner: String,
+
     /// Unique small integer identifier for the stack
     pub stack_small_id: i64,
+
     /// Unique string identifier for the stack
     pub stack_id: String,
     /// Small integer identifier of the associated task
     pub task_small_id: i64,
+
     /// Identifier of the selected node for computation
     pub selected_node_id: i64,
+
     /// Total number of compute units in this stack
     pub num_compute_units: i64,
+
     /// Price per one million compute units for the stack (likely in smallest currency unit)
     pub price_per_one_million_compute_units: i64,
+
     /// Number of compute units already processed
     pub already_computed_units: i64,
+
     /// Indicates whether the stack is currently in the settle period
     pub in_settle_period: bool,
+
     /// Joint concatenation of Blake2b hashes of each payload and response pairs that was already processed
     /// by the node for this stack.
     pub total_hash: Vec<u8>,
+
     /// Number of payload requests that were received by the node for this stack.
     pub num_total_messages: i64,
 }
@@ -608,6 +722,7 @@ pub enum AtomaAtomaStateManagerEvent {
     OAuth {
         /// The username of the user
         username: String,
+        /// The result sender to send back the user ID
         result_sender: oneshot::Sender<Result<i64>>,
     },
     /// Checks if a refresh token is valid for a user
@@ -673,37 +788,57 @@ pub enum AtomaAtomaStateManagerEvent {
     },
     /// Retrieves the sui_address for a user
     GetSuiAddress {
+        /// The user ID
         user_id: i64,
+        /// The result sender to send back the Sui address
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
     /// Retrieves the user ID by Sui address
     ConfirmUser {
+        /// The Sui address
         sui_address: String,
+        /// The user ID
         user_id: i64,
+        /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<bool>>,
     },
     /// Updates the balance of a user
-    TopUpBalance { user_id: i64, amount: i64 },
+    TopUpBalance {
+        /// The user ID
+        user_id: i64,
+        /// The amount to top up
+        amount: i64,
+    },
     /// Withdraws the balance of a user
     DeductFromUsdc {
+        /// The user ID
         user_id: i64,
+        /// The amount to deduct
         amount: i64,
+        /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
     },
     /// Acknowledges a USDC payment. Fails if the digest has already been acknowledged.
     InsertNewUsdcPaymentDigest {
+        /// The digest of the USDC payment
         digest: String,
+        /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
     },
     /// Retrieves the salt of a user
     GetSalt {
+        /// The user ID
         user_id: i64,
+        /// The result sender to send back the salt
         result_sender: oneshot::Sender<Result<Option<String>>>,
     },
     /// Sets the salt of a user
     SetSalt {
+        /// The user ID
         user_id: i64,
+        /// The salt
         salt: String,
+        /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
     },
 }

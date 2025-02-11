@@ -17,6 +17,69 @@ use crate::{
     AtomaStateManager, AtomaStateManagerError,
 };
 
+/// Handles various Atoma network events by delegating them to appropriate handler functions.
+///
+/// This function serves as the main event handler for the Atoma network, processing different types of events
+/// including task management, node subscriptions, stack operations, key rotations, and various system events.
+///
+/// # Arguments
+///
+/// * `event` - An `AtomaEvent` enum representing the event to be processed
+/// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the event was processed successfully, or an error if something went wrong
+///
+/// # Event Categories
+///
+/// ## Task Management
+/// - `TaskRegisteredEvent` - Handles registration of new tasks
+/// - `TaskDeprecationEvent` - Processes task deprecation
+/// - `TaskRemovedEvent` - Logs task removal
+///
+/// ## Node Operations
+/// - `NodeSubscribedToTaskEvent` - Manages node task subscriptions
+/// - `NodeSubscriptionUpdatedEvent` - Handles subscription updates
+/// - `NodeUnsubscribedFromTaskEvent` - Processes task unsubscriptions
+/// - `NodeRegisteredEvent` - Handles node registration
+/// - `NodePublicKeyCommittmentEvent` - Manages node key rotations
+///
+/// ## Stack Operations
+/// - `StackCreatedEvent` - Processes new stack creation
+/// - `StackTrySettleEvent` - Handles stack settlement attempts
+/// - `StackSettlementTicketEvent` - Manages settlement tickets
+/// - `StackAttestationDisputeEvent` - Handles attestation disputes
+///
+/// ## System Events
+/// - `NewKeyRotationEvent` - Processes system key rotations
+/// - `PublishedEvent` - Logs published events
+/// - `DisputeEvent` - Logs dispute events
+/// - `SettledEvent` - Logs settlement events
+///
+/// ## AI Model Events
+/// - `Text2ImagePromptEvent` - Logs text-to-image prompts
+/// - `Text2TextPromptEvent` - Logs text-to-text prompts
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use atoma_state::{AtomaStateManager, Result};
+/// use atoma_sui::events::AtomaEvent;
+///
+/// async fn process_event(
+///     state_manager: &AtomaStateManager,
+///     event: AtomaEvent,
+/// ) -> Result<()> {
+///     handle_atoma_event(event, state_manager).await
+/// }
+/// ```
+///
+/// # Notes
+///
+/// The function uses the `#[instrument]` attribute for tracing with `skip_all` to prevent logging
+/// of potentially sensitive parameters. Many events are currently just logged for monitoring
+/// purposes and may be expanded with additional handling logic in the future.
 #[instrument(level = "trace", skip_all)]
 pub async fn handle_atoma_event(
     event: AtomaEvent,
@@ -1550,6 +1613,55 @@ pub(crate) async fn handle_node_metrics_registration_event(
     let gpu_temperatures: Vec<_> = gpus.iter().map(|gpu| gpu.temperature).collect();
     let gpu_power_usages: Vec<_> = gpus.iter().map(|gpu| gpu.power_usage).collect();
 
+    if num_gpus > 0
+        && (gpu_memory_used.len() != num_gpus as usize
+            || gpu_memory_total.len() != num_gpus as usize
+            || gpu_memory_free.len() != num_gpus as usize
+            || gpu_percentage_time_read_write.len() != num_gpus as usize
+            || gpu_percentage_time_execution.len() != num_gpus as usize
+            || gpu_temperatures.len() != num_gpus as usize
+            || gpu_power_usages.len() != num_gpus as usize)
+    {
+        error!(
+            target = "atoma-state-handlers",
+            event = "handle-node-metrics-registration-event",
+            "Invalid GPU metrics:\n\
+             Expected {num_gpus} GPUs, got:\n\
+             - {} GPU memory used\n\
+             - {} GPU memory total\n\
+             - {} GPU memory free\n\
+             - {} GPU percentage time read/write\n\
+             - {} GPU percentage time execution\n\
+             - {} GPU temperatures\n\
+             - {} GPU power usages",
+            gpu_memory_used.len(),
+            gpu_memory_total.len(),
+            gpu_memory_free.len(),
+            gpu_percentage_time_read_write.len(),
+            gpu_percentage_time_execution.len(),
+            gpu_temperatures.len(),
+            gpu_power_usages.len()
+        );
+        return Err(AtomaStateManagerError::InvalidGpuMetrics(format!(
+            "Invalid GPU metrics:\n\
+             Expected {num_gpus} GPUs, got:\n\
+             - {} GPU memory used\n\
+             - {} GPU memory total\n\
+             - {} GPU memory free\n\
+             - {} GPU percentage time read/write\n\
+             - {} GPU percentage time execution\n\
+             - {} GPU temperatures\n\
+             - {} GPU power usages",
+            gpu_memory_used.len(),
+            gpu_memory_total.len(),
+            gpu_memory_free.len(),
+            gpu_percentage_time_read_write.len(),
+            gpu_percentage_time_execution.len(),
+            gpu_temperatures.len(),
+            gpu_power_usages.len()
+        )));
+    }
+
     state_manager
         .state
         .register_node_public_url(node_small_id, public_url, timestamp, country)
@@ -1765,5 +1877,173 @@ mod utils {
         verify(quote_bytes, &collateral, now)
             .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
         Ok(())
+    }
+
+    pub mod node_performance {
+        use serde::{Deserialize, Serialize};
+        use sqlx::FromRow;
+        use tracing::instrument;
+
+        use crate::{state_manager::Result, types::PerformanceWeights, AtomaState};
+
+        /// Represents the performance metrics and scoring weights for a node in the Atoma network.
+        ///
+        /// This struct combines both the overall performance score of a node and the weights used
+        /// to calculate that score from individual hardware component metrics.
+        #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+        pub struct NodePerformance {
+            /// The aggregate performance score of the node, calculated by combining
+            /// weighted scores from GPU, CPU, RAM, and network performance metrics
+            pub total_performance_score: f64,
+
+            /// The weight applied to GPU performance metrics when calculating
+            /// the total score. Higher values indicate greater importance of GPU performance.
+            pub gpu_score_weight: f64,
+
+            /// The weight applied to CPU performance metrics when calculating
+            /// the total score. Higher values indicate greater importance of CPU performance.
+            pub cpu_score_weight: f64,
+
+            /// The weight applied to RAM usage metrics when calculating
+            /// the total score. Higher values indicate greater importance of memory performance.
+            pub ram_score_weight: f64,
+
+            /// The weight applied to network throughput metrics when calculating
+            /// the total score. Higher values indicate greater importance of network performance.
+            pub network_score_weight: f64,
+        }
+
+        #[instrument(level = "trace", skip_all)]
+        #[allow(clippy::similar_names)]
+        #[allow(clippy::too_many_arguments)]
+        pub async fn get_node_performance(
+            state: &AtomaState,
+            cpu_usage: f64,
+            ram_used: i64,
+            ram_total: i64,
+            ram_swap_used: i64,
+            ram_swap_total: i64,
+            network_rx: i64,
+            network_tx: i64,
+            num_gpus: i32,
+            gpu_memory_used: Vec<i64>,
+            gpu_memory_total: Vec<i64>,
+            gpu_percentage_time_execution: Vec<f64>,
+            gpu_temperatures: Vec<f64>,
+            gpu_power_usages: Vec<f64>,
+        ) -> Result<NodePerformance> {
+            let PerformanceWeights {
+                gpu_score_weight,
+                cpu_score_weight,
+                ram_score_weight,
+                swap_ram_score_weight,
+                network_score_weight,
+                gpu_vram_weight,
+                gpu_exec_avail_weight,
+                gpu_temp_weight,
+                gpu_power_weight,
+                gpu_temp_threshold,
+                gpu_temp_max,
+                gpu_power_threshold,
+                gpu_power_max,
+            } = state.get_performance_weights().await?;
+
+            // NOTE: Calculate the GPU VRAM score, since we assume that node operators maximize for KV cache allocation,
+            // having more VRAM usage, that is, higher KV cache allocation is better. We compute the minimum VRAM usage percentage
+            // across all GPUs, and use that as the VRAM score.
+            let gpu_vram_score = gpu_memory_used
+                .iter()
+                .zip(gpu_memory_total.iter())
+                .map(|(used, total)| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let used_percentage = (*used as f64) / (*total as f64);
+                    gpu_vram_weight * used_percentage
+                })
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0f64);
+
+            // NOTE: Calculate the GPU execution score. Having lower execution rate means that the node has faced less overall
+            // load, and is therefore more available. We compute the average execution rate across all GPUs,
+            // and use that as the execution score.
+            let gpu_exec_score = gpu_percentage_time_execution
+                .iter()
+                .map(|&exec_rate| exec_rate * gpu_exec_avail_weight)
+                .sum::<f64>()
+                / f64::from(num_gpus);
+
+            // Calculate temperature factor through a step function that:
+            // - Returns 1.0 for temps <= 80°C
+            // - Linearly decreases from 1.0 to 0.0 between 80°C and 100°C
+            // - Returns 0.0 for temps >= 100°C
+            // NOTE: We take the minimum temperature across all GPUs, and use that as the temperature score.
+            let gpu_temp_score = gpu_temperatures
+                .iter()
+                .map(|&temp| {
+                    let temp_factor = f64::max(
+                        0.0,
+                        1.0 - (temp - gpu_temp_threshold) / (gpu_temp_max - gpu_temp_threshold),
+                    );
+                    temp_factor * gpu_temp_weight
+                })
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0f64);
+
+            // Calculate the GPU power score. We use a step function that:
+            // - Returns 1.0 for power <= 200W
+            // - Linearly decreases from 1.0 to 0.0 between 200W and 300W
+            // - Returns 0.0 for power >= 300W
+            // NOTE: Having lower power usage means that the node is more energy efficient,
+            // and is therefore capable of running for longer periods of time and more sustainably. We compute the average power usage across all GPUs,
+            // and use that as the power score.
+            let gpu_power_score = gpu_power_usages
+                .iter()
+                .map(|&power| {
+                    let power_factor = f64::max(
+                        0.0,
+                        1.0 - (power - gpu_power_threshold) / (gpu_power_max - gpu_power_threshold),
+                    );
+                    power_factor * gpu_power_weight
+                })
+                .sum::<f64>()
+                / f64::from(num_gpus);
+
+            let gpu_performance_score = gpu_vram_score.mul_add(
+                gpu_vram_weight,
+                gpu_exec_score.mul_add(
+                    gpu_exec_avail_weight,
+                    gpu_temp_score.mul_add(gpu_temp_weight, gpu_power_score * gpu_power_weight),
+                ),
+            );
+
+            let cpu_score =
+                cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
+            #[allow(clippy::cast_precision_loss)]
+            let ram_score = (1.0 - (ram_used as f64) / (ram_total as f64)) * ram_score_weight;
+            #[allow(clippy::cast_precision_loss)]
+            let swap_ram_score =
+                (1.0 - ram_swap_used as f64) / (ram_swap_total as f64) * swap_ram_score_weight;
+            #[allow(clippy::cast_precision_loss)]
+            let network_score = 1.0 / (1.0 + network_rx as f64 + network_tx as f64);
+            let total_performance_score = cpu_score.mul_add(
+                cpu_score_weight,
+                gpu_performance_score.mul_add(
+                    gpu_score_weight,
+                    ram_score.mul_add(
+                        ram_score_weight,
+                        swap_ram_score.mul_add(
+                            swap_ram_score_weight,
+                            network_score.mul_add(network_score_weight, 0.0),
+                        ),
+                    ),
+                ),
+            );
+            Ok(NodePerformance {
+                total_performance_score,
+                gpu_score_weight,
+                cpu_score_weight,
+                ram_score_weight,
+                network_score_weight,
+            })
+        }
     }
 }

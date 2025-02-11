@@ -4,8 +4,8 @@ use crate::build_query_with_in;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task, UserProfile,
+    NodeDistribution, NodePublicKey, NodeSubscription, PerformanceWeights, Stack,
+    StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
 use atoma_p2p::AtomaP2pEvent;
@@ -285,6 +285,100 @@ impl AtomaState {
             .fetch_one(&self.db)
             .await?;
         Ok(Task::from_row(&task)?)
+    }
+
+    /// Retrieves the most recent performance weights from the database.
+    ///
+    /// This method fetches the latest performance weights record from the `performance_weights` table,
+    /// which contains the weights used to evaluate node performance metrics.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<PerformanceWeights>`: A result containing either:
+    ///   - `Ok(PerformanceWeights)`: The most recent performance weights configuration.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database row into a `PerformanceWeights` object.
+    /// - No performance weights records exist in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_weights(state_manager: &AtomaStateManager) -> Result<PerformanceWeights, AtomaStateManagerError> {
+    ///     state_manager.get_performance_weights().await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_performance_weights(&self) -> Result<PerformanceWeights> {
+        let weights = sqlx::query("SELECT * FROM performance_weights ORDER BY id DESC LIMIT 1")
+            .fetch_one(&self.db)
+            .await?;
+        Ok(PerformanceWeights::from_row(&weights)?)
+    }
+
+    /// Sets new performance weights in the database.
+    ///
+    /// This method inserts a new record into the `performance_weights` table with the provided weights
+    /// for different performance metrics (GPU, CPU, RAM, and network). These weights are used to
+    /// calculate overall node performance scores.
+    ///
+    /// # Arguments
+    ///
+    /// * `weights` - A `PerformanceWeights` struct containing the weight values for each metric:
+    ///   - `gpu_score_weight`: Weight for GPU performance
+    ///   - `cpu_score_weight`: Weight for CPU performance
+    ///   - `ram_score_weight`: Weight for RAM performance
+    ///   - `network_score_weight`: Weight for network performance
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's an issue with the database connection
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, PerformanceWeights};
+    ///
+    /// async fn update_weights(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let weights = PerformanceWeights {
+    ///         gpu_score_weight: 0.4,
+    ///         cpu_score_weight: 0.3,
+    ///         ram_score_weight: 0.2,
+    ///         network_score_weight: 0.1,
+    ///     };
+    ///     
+    ///     state_manager.set_performance_weights(weights).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn set_performance_weights(&self, weights: PerformanceWeights) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight,
+                cpu_score_weight,
+                ram_score_weight,
+                network_score_weight
+            ) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(weights.gpu_score_weight)
+        .bind(weights.cpu_score_weight)
+        .bind(weights.ram_score_weight)
+        .bind(weights.network_score_weight)
+        .execute(&self.db)
+        .await?;
+        Ok(())
     }
 
     /// Get a stack by its unique identifier.
@@ -4692,6 +4786,8 @@ pub enum AtomaStateManagerError {
     InvalidCountry(String),
     #[error("URL is not valid: {0}")]
     InvalidUrl(String),
+    #[error("Invalid GPU metrics: {0}")]
+    InvalidGpuMetrics(String),
 }
 
 pub mod validation {
