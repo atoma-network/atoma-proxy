@@ -13,7 +13,7 @@ async-trait = "0.1.86"
 atoma-auth = { path = "./atoma-auth" }
 atoma-proxy-service = { path = "./atoma-proxy-service" }
 atoma-state = { path = "./atoma-state" }
-atoma-p2p = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
+atoma-p2p = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "ja-node-metrics" }
 atoma-sui = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
 atoma-utils = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
 axum = "0.7.7"
