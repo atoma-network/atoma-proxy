@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::build_query_with_in;
+use crate::handlers::utils::node_performance::NodePerformance;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
@@ -322,62 +323,207 @@ impl AtomaState {
         Ok(PerformanceWeights::from_row(&weights)?)
     }
 
-    /// Sets new performance weights in the database.
-    ///
-    /// This method inserts a new record into the `performance_weights` table with the provided weights
-    /// for different performance metrics (GPU, CPU, RAM, and network). These weights are used to
-    /// calculate overall node performance scores.
-    ///
-    /// # Arguments
-    ///
-    /// * `weights` - A `PerformanceWeights` struct containing the weight values for each metric:
-    ///   - `gpu_score_weight`: Weight for GPU performance
-    ///   - `cpu_score_weight`: Weight for CPU performance
-    ///   - `ram_score_weight`: Weight for RAM performance
-    ///   - `network_score_weight`: Weight for network performance
+    /// Retrieves the latest performance scores from the database.
     ///
     /// # Returns
     ///
-    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    /// - `Result<NodePerformance>`: A result containing either:
+    ///   - `Ok(NodePerformance)`: The latest performance scores.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
     ///
     /// # Errors
     ///
     /// This function will return an error if:
     /// - The database query fails to execute
-    /// - There's an issue with the database connection
+    /// - No performance scores exist in the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_latest_performance_scores(state_manager: &AtomaStateManager) -> Result<NodePerformance, AtomaStateManagerError> {
+    ///     state_manager.get_latest_performance_scores().await
+    /// }
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_latest_performance_scores(&self) -> Result<NodePerformance> {
+        let scores = sqlx::query("SELECT * FROM node_performance_scores ORDER BY id DESC LIMIT 1")
+            .fetch_one(&self.db)
+            .await?;
+        Ok(NodePerformance::from_row(&scores)?)
+    }
+
+    /// Inserts a new performance score for a node into the database.
+    ///
+    /// This method records a node's performance score along with the latest performance weights configuration.
+    /// The weights_id is automatically selected as the most recent entry from the performance_weights table.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique small identifier of the node.
+    /// * `timestamp` - The Unix timestamp when the performance was measured.
+    /// * `performance_score` - The calculated performance score for the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - No performance weights exist in the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn record_performance(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_id = 1;
+    ///     let timestamp = chrono::Utc::now().timestamp();
+    ///     let score = 95.5;
+    ///
+    ///     state_manager.insert_node_performance(node_id, timestamp, score).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn insert_node_performance(
+        &self,
+        node_small_id: i64,
+        timestamp: i64,
+        performance_score: f64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO node_performance_scores (node_small_id, timestamp, performance_score, weights_id) 
+             SELECT $1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1)"
+        )
+        .bind(node_small_id)
+        .bind(timestamp)
+        .bind(performance_score)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Inserts a new set of performance weights into the database.
+    ///
+    /// This method stores configuration parameters used to calculate node performance scores.
+    /// The weights determine how different hardware metrics contribute to the overall
+    /// performance evaluation of a node.
+    ///
+    /// # Arguments
+    ///
+    /// * `weights` - A `PerformanceWeights` struct containing:
+    ///   - `gpu_score_weight`: Weight factor for overall GPU score
+    ///   - `cpu_score_weight`: Weight factor for CPU utilization
+    ///   - `ram_score_weight`: Weight factor for RAM usage
+    ///   - `network_score_weight`: Weight factor for network performance
+    ///   - `swap_ram_score_weight`: Weight factor for swap memory usage
+    ///   - `gpu_vram_weight`: Weight factor for GPU VRAM usage
+    ///   - `gpu_exec_avail_weight`: Weight factor for GPU execution availability
+    ///   - `gpu_temp_weight`: Weight factor for GPU temperature
+    ///   - `gpu_power_weight`: Weight factor for GPU power consumption
+    ///   - `gpu_temp_threshold`: Temperature threshold for GPU performance
+    ///   - `gpu_temp_max`: Maximum acceptable GPU temperature
+    ///   - `gpu_power_threshold`: Power consumption threshold for GPU
+    ///   - `gpu_power_max`: Maximum acceptable GPU power consumption
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's a connection issue with the database
     ///
     /// # Example
     ///
     /// ```rust,ignore
     /// use atoma_node::atoma_state::{AtomaStateManager, PerformanceWeights};
     ///
-    /// async fn update_weights(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    /// async fn configure_weights(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
     ///     let weights = PerformanceWeights {
     ///         gpu_score_weight: 0.4,
-    ///         cpu_score_weight: 0.3,
-    ///         ram_score_weight: 0.2,
+    ///         cpu_score_weight: 0.2,
+    ///         ram_score_weight: 0.1,
     ///         network_score_weight: 0.1,
+    ///         swap_ram_score_weight: 0.05,
+    ///         gpu_vram_weight: 0.3,
+    ///         gpu_exec_avail_weight: 0.3,
+    ///         gpu_temp_weight: 0.2,
+    ///         gpu_power_weight: 0.2,
+    ///         gpu_temp_threshold: 70.0,
+    ///         gpu_temp_max: 85.0,
+    ///         gpu_power_threshold: 200.0,
+    ///         gpu_power_max: 250.0,
     ///     };
-    ///     
-    ///     state_manager.set_performance_weights(weights).await
+    ///
+    ///     state_manager.insert_performance_weights(weights).await
     /// }
     /// ```
+    ///
+    /// # Note
+    ///
+    /// The weights are used in performance scoring calculations and should be carefully
+    /// calibrated based on the relative importance of each metric for your specific use case.
+    /// The sum of weights within each category (overall scores and GPU-specific scores)
+    /// should typically equal 1.0 for proper normalization.
     #[instrument(level = "trace", skip_all)]
-    pub async fn set_performance_weights(&self, weights: PerformanceWeights) -> Result<()> {
+    pub async fn insert_performance_weights(&self, weights: PerformanceWeights) -> Result<()> {
+        let PerformanceWeights {
+            gpu_score_weight,
+            cpu_score_weight,
+            ram_score_weight,
+            network_score_weight,
+            swap_ram_score_weight,
+            gpu_vram_weight,
+            gpu_exec_avail_weight,
+            gpu_temp_weight,
+            gpu_power_weight,
+            gpu_temp_threshold,
+            gpu_temp_max,
+            gpu_power_threshold,
+            gpu_power_max,
+        } = weights;
+
         sqlx::query(
             "INSERT INTO performance_weights (
                 gpu_score_weight,
                 cpu_score_weight,
                 ram_score_weight,
-                network_score_weight
-            ) VALUES ($1, $2, $3, $4)",
+                network_score_weight,
+                swap_ram_score_weight,
+                gpu_vram_weight,
+                gpu_exec_avail_weight,
+                gpu_temp_weight,
+                gpu_power_weight,
+                gpu_temp_threshold,
+                gpu_temp_max,
+                gpu_power_threshold,
+                gpu_power_max,
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
-        .bind(weights.gpu_score_weight)
-        .bind(weights.cpu_score_weight)
-        .bind(weights.ram_score_weight)
-        .bind(weights.network_score_weight)
+        .bind(gpu_score_weight)
+        .bind(cpu_score_weight)
+        .bind(ram_score_weight)
+        .bind(network_score_weight)
+        .bind(swap_ram_score_weight)
+        .bind(gpu_vram_weight)
+        .bind(gpu_exec_avail_weight)
+        .bind(gpu_temp_weight)
+        .bind(gpu_power_weight)
+        .bind(gpu_temp_threshold)
+        .bind(gpu_temp_max)
+        .bind(gpu_power_threshold)
+        .bind(gpu_power_max)
         .execute(&self.db)
         .await?;
+
         Ok(())
     }
 

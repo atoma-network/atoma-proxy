@@ -2,6 +2,7 @@
 -- for computing resources. These weights determine the relative importance of different
 -- hardware metrics in the final performance calculation.
 CREATE TABLE performance_weights (
+    -- Unique identifier for the weights
     id SERIAL PRIMARY KEY,
 
     -- Weight factor for GPU performance in the overall score calculation (0.0 to 1.0)
@@ -12,6 +13,9 @@ CREATE TABLE performance_weights (
 
     -- Weight factor for RAM capacity/performance in the overall score calculation (0.0 to 1.0)
     ram_score_weight     DOUBLE PRECISION NOT NULL,
+
+    -- Weight factor for swap RAM performance in the overall score calculation (0.0 to 1.0)
+    swap_ram_score_weight DOUBLE PRECISION NOT NULL,
 
     -- Weight factor for network performance in the overall score calculation (0.0 to 1.0)
     network_score_weight DOUBLE PRECISION NOT NULL,
@@ -41,7 +45,22 @@ CREATE TABLE performance_weights (
 
     -- GPU power usage specific weight
     gpu_power_weight DOUBLE PRECISION NOT NULL,
-    
-    
-    
+);
+
+-- This table stores the performance scores for each node at a given timestamp
+CREATE TABLE node_performance_scores (
+    -- Unique identifier for the performance score
+    id BIGSERIAL PRIMARY KEY,
+
+    -- Identifier for the weights used to calculate the performance score
+    weights_id INTEGER NOT NULL,
+
+    -- Small integer identifier for the node
+    node_small_id INTEGER NOT NULL,
+
+    -- Timestamp of the performance score
+    timestamp TIMESTAMP NOT NULL,
+
+    -- Performance score for the node
+    performance_score DOUBLE PRECISION NOT NULL,
 );

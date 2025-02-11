@@ -1662,6 +1662,27 @@ pub(crate) async fn handle_node_metrics_registration_event(
         )));
     }
 
+    let node_performance = utils::node_performance::get_node_performance(
+        &state_manager.state,
+        f64::from(cpu_usage),
+        ram_used as i64,
+        ram_total as i64,
+        ram_swap_used as i64,
+        ram_swap_total as i64,
+        network_rx as i64,
+        network_tx as i64,
+        num_gpus as i32,
+        gpu_memory_used.iter().map(|&x| x as i64).collect(),
+        gpu_memory_total.iter().map(|&x| x as i64).collect(),
+        gpu_percentage_time_execution
+            .iter()
+            .map(|&x| f64::from(x) / 100.0)
+            .collect(),
+        gpu_temperatures.iter().map(|&x| f64::from(x)).collect(),
+        gpu_power_usages.iter().map(|&x| f64::from(x)).collect(),
+    )
+    .await?;
+
     state_manager
         .state
         .register_node_public_url(node_small_id, public_url, timestamp, country)
@@ -1699,6 +1720,14 @@ pub(crate) async fn handle_node_metrics_registration_event(
                 .iter()
                 .map(|&x| f64::from(x) / 100.0)
                 .collect(),
+        )
+        .await?;
+    state_manager
+        .state
+        .insert_node_performance(
+            node_small_id,
+            timestamp,
+            node_performance.total_performance_score,
         )
         .await?;
     Ok(())
@@ -1775,7 +1804,7 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
     Ok(())
 }
 
-mod utils {
+pub mod utils {
     use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
@@ -1895,24 +1924,96 @@ mod utils {
             /// The aggregate performance score of the node, calculated by combining
             /// weighted scores from GPU, CPU, RAM, and network performance metrics
             pub total_performance_score: f64,
-
-            /// The weight applied to GPU performance metrics when calculating
-            /// the total score. Higher values indicate greater importance of GPU performance.
-            pub gpu_score_weight: f64,
-
-            /// The weight applied to CPU performance metrics when calculating
-            /// the total score. Higher values indicate greater importance of CPU performance.
-            pub cpu_score_weight: f64,
-
-            /// The weight applied to RAM usage metrics when calculating
-            /// the total score. Higher values indicate greater importance of memory performance.
-            pub ram_score_weight: f64,
-
-            /// The weight applied to network throughput metrics when calculating
-            /// the total score. Higher values indicate greater importance of network performance.
-            pub network_score_weight: f64,
         }
 
+        /// Calculates a comprehensive performance score for a node based on its hardware metrics and resource utilization.
+        ///
+        /// This function evaluates node performance across multiple dimensions including GPU, CPU, RAM, and network metrics.
+        /// It uses configurable weights to compute a normalized score that represents the node's overall capability and
+        /// efficiency.
+        ///
+        /// # Performance Scoring Components
+        ///
+        /// ## GPU Metrics (weighted by `gpu_score_weight`)
+        /// - **VRAM Usage**: Higher is better, indicates KV cache allocation efficiency
+        ///   - Uses minimum usage percentage across all GPUs
+        ///   - Weighted by `gpu_vram_weight`
+        ///
+        /// - **Execution Availability**: Lower is better, indicates GPU availability
+        ///   - Averages execution rates across all GPUs
+        ///   - Weighted by `gpu_exec_avail_weight`
+        ///
+        /// - **Temperature**: Lower is better, using step function:
+        ///   - 1.0 for temps <= threshold (typically 80°C)
+        ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 100°C)
+        ///   - 0.0 for temps >= max
+        ///   - Uses minimum score across all GPUs
+        ///   - Weighted by `gpu_temp_weight`
+        ///
+        /// - **Power Usage**: Lower is better, using step function:
+        ///   - 1.0 for power <= threshold (typically 200W)
+        ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 300W)
+        ///   - 0.0 for power >= max
+        ///   - Averages across all GPUs
+        ///   - Weighted by `gpu_power_weight`
+        ///
+        /// ## CPU Metrics (weighted by `cpu_score_weight`)
+        /// - Balances current usage with available capacity
+        ///
+        /// ## RAM Metrics
+        /// - Main RAM (weighted by `ram_score_weight`): Scores available memory ratio
+        /// - Swap RAM (weighted by `swap_ram_score_weight`): Scores available swap ratio
+        ///
+        /// ## Network Metrics (weighted by `network_score_weight`)
+        /// - Inverse of total network traffic (rx + tx)
+        ///
+        /// # Arguments
+        ///
+        /// * `state` - Reference to AtomaState for accessing performance weight configurations
+        /// * `cpu_usage` - Current CPU usage as a float between 0.0 and 1.0
+        /// * `ram_used` - Currently used RAM in bytes
+        /// * `ram_total` - Total available RAM in bytes
+        /// * `ram_swap_used` - Currently used swap space in bytes
+        /// * `ram_swap_total` - Total available swap space in bytes
+        /// * `network_rx` - Network receive throughput in bytes
+        /// * `network_tx` - Network transmit throughput in bytes
+        /// * `num_gpus` - Number of GPUs in the system
+        /// * `gpu_memory_used` - Vector of used GPU memory per GPU in bytes
+        /// * `gpu_memory_total` - Vector of total GPU memory per GPU in bytes
+        /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages (0.0 to 1.0)
+        /// * `gpu_temperatures` - Vector of GPU temperatures in Celsius
+        /// * `gpu_power_usages` - Vector of GPU power usage in Watts
+        ///
+        /// # Returns
+        ///
+        /// * `Result<NodePerformance>` - Structure containing the calculated total performance score
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if:
+        /// - Unable to retrieve performance weights from state
+        /// - Vector lengths don't match num_gpus
+        ///
+        /// # Example
+        ///
+        /// ```rust,ignore
+        /// let performance = get_node_performance(
+        ///     &state,
+        ///     0.5,                    // 50% CPU usage
+        ///     8_000_000_000,         // 8GB RAM used
+        ///     16_000_000_000,        // 16GB total RAM
+        ///     1_000_000_000,         // 1GB swap used
+        ///     4_000_000_000,         // 4GB total swap
+        ///     1_000_000,             // 1MB/s network rx
+        ///     500_000,               // 500KB/s network tx
+        ///     2,                     // 2 GPUs
+        ///     vec![8000, 7000],      // GPU memory used
+        ///     vec![10000, 10000],    // GPU memory total
+        ///     vec![0.6, 0.7],        // GPU execution %
+        ///     vec![75.0, 78.0],      // GPU temperatures
+        ///     vec![180.0, 190.0],    // GPU power usage
+        /// ).await?;
+        /// ```
         #[instrument(level = "trace", skip_all)]
         #[allow(clippy::similar_names)]
         #[allow(clippy::too_many_arguments)]
@@ -2039,10 +2140,6 @@ mod utils {
             );
             Ok(NodePerformance {
                 total_performance_score,
-                gpu_score_weight,
-                cpu_score_weight,
-                ram_score_weight,
-                network_score_weight,
             })
         }
     }
