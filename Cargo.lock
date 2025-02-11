@@ -826,7 +826,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#d2f3d42f8c882e1f153822e77e426b5404e9643d"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#e3eed5c03c36eba3f1cc777a1ece0590359c1a57"
 dependencies = [
  "anyhow",
  "config",
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#d2f3d42f8c882e1f153822e77e426b5404e9643d"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#e3eed5c03c36eba3f1cc777a1ece0590359c1a57"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -9711,9 +9711,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.23"
+version = "0.22.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02a8b472d1a3d7c18e2d61a489aee3453fd9031c33e4f55bd533f4a7adca1bee"
+checksum = "17b4795ff5edd201c7cd6dca065ae59972ce77d1b80fa0a84d94950ece7d1474"
 dependencies = [
  "indexmap 2.7.1",
  "serde",
