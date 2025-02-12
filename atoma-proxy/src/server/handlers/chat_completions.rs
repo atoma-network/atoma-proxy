@@ -148,6 +148,7 @@ pub async fn chat_completions_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -402,6 +403,7 @@ pub async fn confidential_chat_completions_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -513,6 +515,7 @@ async fn handle_non_streaming_response(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send OpenAI API request: {err:?}"),
+            client_message: Some("Failed to connect to the node.".to_string()),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -529,6 +532,7 @@ async fn handle_non_streaming_response(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to parse OpenAI API response: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -569,6 +573,7 @@ async fn handle_non_streaming_response(
         )
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Error updating node throughput performance: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -585,6 +590,7 @@ async fn handle_non_streaming_response(
                 "Error converting response hash to array, received array of length {}",
                 e.len()
             ),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -596,6 +602,7 @@ async fn handle_non_streaming_response(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Error updating stack total hash: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -610,6 +617,7 @@ async fn handle_non_streaming_response(
     ) {
         return Err(AtomaProxyError::InternalError {
             message: format!("Error updating state manager: {e:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         });
     }
@@ -692,6 +700,7 @@ async fn handle_streaming_response(
         .await
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Error sending request to inference service: {e:?}"),
+            client_message: Some("Failed to connect to the node.".to_string()),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -806,6 +815,9 @@ impl RequestModel for RequestModelChatCompletions {
                 .encode(content, true)
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to encode message: {err:?}"),
+                    client_message: Some(
+                        "Failed to encode message using the model's tokenizer".to_string(),
+                    ),
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?
                 .get_ids()

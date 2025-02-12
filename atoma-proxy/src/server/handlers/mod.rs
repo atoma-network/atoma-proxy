@@ -76,6 +76,7 @@ pub fn update_state_manager(
         })
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Error updating stack num tokens: {e}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
     Ok(())
@@ -109,6 +110,7 @@ pub fn verify_response_hash_and_signature(
             .as_str()
             .ok_or_else(|| AtomaProxyError::InternalError {
                 message: "Missing response_hash in payload".to_string(),
+                client_message: Some("Invalid response from inference service".to_string()),
                 endpoint: "verify_signature".to_string(),
             })?;
     let response_hash = STANDARD.decode(response_hash).unwrap();
@@ -122,12 +124,14 @@ pub fn verify_response_hash_and_signature(
             .as_str()
             .ok_or_else(|| AtomaProxyError::InternalError {
                 message: "Missing signature in payload".to_string(),
+                client_message: Some("Invalid response from inference service".to_string()),
                 endpoint: "verify_signature".to_string(),
             })?;
 
     let signature =
         Signature::from_str(node_signature).map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to create signature: {e}"),
+            client_message: Some("Invalid response from inference service".to_string()),
             endpoint: "verify_signature".to_string(),
         })?;
 
@@ -136,6 +140,7 @@ pub fn verify_response_hash_and_signature(
         PublicKey::try_from_bytes(signature.scheme(), public_key_bytes).map_err(|e| {
             AtomaProxyError::InternalError {
                 message: format!("Failed to create public key: {e}"),
+                client_message: Some("Invalid response from inference service".to_string()),
                 endpoint: "verify_signature".to_string(),
             }
         })?;
@@ -145,6 +150,7 @@ pub fn verify_response_hash_and_signature(
             let public_key = Ed25519PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
                     message: format!("Failed to create public key: {e}"),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
@@ -152,6 +158,7 @@ pub fn verify_response_hash_and_signature(
                 Ed25519Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
                         message: format!("Failed to create ed25519 signature: {e}"),
+                        client_message: Some("Invalid response from inference service".to_string()),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -159,6 +166,7 @@ pub fn verify_response_hash_and_signature(
                 .verify(response_hash.as_slice(), &signature)
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to verify ed25519 signature: {e}"),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
@@ -166,6 +174,7 @@ pub fn verify_response_hash_and_signature(
             let public_key = Secp256k1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
                     message: format!("Failed to create secp256k1 public key: {e}"),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
@@ -173,6 +182,7 @@ pub fn verify_response_hash_and_signature(
                 Secp256k1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
                         message: format!("Failed to create secp256k1 signature: {e}"),
+                        client_message: Some("Invalid response from inference service".to_string()),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -180,6 +190,7 @@ pub fn verify_response_hash_and_signature(
                 .verify(response_hash.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
                     message: "Failed to verify secp256k1 signature".to_string(),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
@@ -187,6 +198,7 @@ pub fn verify_response_hash_and_signature(
             let public_key = Secp256r1PublicKey::from_bytes(public_key.as_ref()).map_err(|e| {
                 AtomaProxyError::InternalError {
                     message: format!("Failed to create secp256r1 public key: {e}"),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 }
             })?;
@@ -194,6 +206,7 @@ pub fn verify_response_hash_and_signature(
                 Secp256r1Signature::from_bytes(signature.signature_bytes()).map_err(|e| {
                     AtomaProxyError::InternalError {
                         message: format!("Failed to create secp256r1 signature: {e}"),
+                        client_message: Some("Invalid response from inference service".to_string()),
                         endpoint: "verify_signature".to_string(),
                     }
                 })?;
@@ -201,12 +214,14 @@ pub fn verify_response_hash_and_signature(
                 .verify(response_hash.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
                     message: "Failed to verify secp256r1 signature".to_string(),
+                    client_message: Some("Invalid response from inference service".to_string()),
                     endpoint: "verify_signature".to_string(),
                 })?;
         }
         _ => {
             return Err(AtomaProxyError::InternalError {
                 message: "Currently unsupported signature scheme".to_string(),
+                client_message: Some("Invalid response from inference service".to_string()),
                 endpoint: "verify_signature".to_string(),
             });
         }
@@ -259,6 +274,7 @@ fn verify_response_hash(value: &serde_json::Value, response_hash: &[u8]) -> Resu
     if blake2_hash.as_slice() != response_hash {
         return Err(AtomaProxyError::InternalError {
             message: "Response hash does not match".to_string(),
+            client_message: Some("Invalid response from inference service".to_string()),
             endpoint: "verify_signature".to_string(),
         });
     }
@@ -291,14 +307,17 @@ pub fn handle_status_code_error(
         }),
         StatusCode::INTERNAL_SERVER_ERROR => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned internal server error: {error}"),
+            client_message: Some(format!("Node returned status code error {status_code}")),
             endpoint: endpoint.to_string(),
         }),
         StatusCode::BAD_REQUEST => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned bad request error: {error}"),
+            client_message: Some(format!("Node returned status code error {status_code}")),
             endpoint: endpoint.to_string(),
         }),
         _ => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned non-success error: {error}"),
+            client_message: Some(format!("Node returned status code error {status_code}")),
             endpoint: endpoint.to_string(),
         }),
     }

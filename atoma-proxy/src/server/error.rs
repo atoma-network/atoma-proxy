@@ -59,6 +59,8 @@ pub enum AtomaProxyError {
     InternalError {
         /// Description of the internal error
         message: String,
+        /// The message to be sent to the client, if None then default message will be used
+        client_message: Option<String>,
         /// The endpoint that the error occurred on
         endpoint: String,
     },
@@ -147,7 +149,9 @@ impl AtomaProxyError {
         match self {
             Self::RequestError { message, .. } => format!("Request error: {message}"),
             Self::AuthError { .. } => "Authentication failed".to_string(),
-            Self::InternalError { .. } => "Internal server error occurred".to_string(),
+            Self::InternalError { client_message, .. } => client_message
+                .clone()
+                .unwrap_or_else(|| "Internal server error occurred".to_string()),
             Self::NotFound { .. } => "Resource not found".to_string(),
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
