@@ -466,7 +466,7 @@ impl Stream for Streamer {
                         let guard = self.sui.blocking_read();
                         verify_and_sign_response(&chunk, verify_hash, guard.get_keystore())
                             .map_err(|e| Error::new(e.to_string()))?
-                    }; // guard is dropped immediately after signature is created
+                    };
                     self.handle_final_chunk(usage)?;
                 }
 
