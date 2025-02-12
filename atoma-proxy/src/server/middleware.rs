@@ -503,6 +503,7 @@ pub mod auth {
     use crate::server::handlers::embeddings::RequestModelEmbeddings;
     use crate::server::handlers::embeddings::EMBEDDINGS_PATH;
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
+    use crate::server::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
     use crate::server::{
         check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
@@ -702,9 +703,25 @@ pub mod auth {
     ) -> Result<(Option<Stack>, u64, String, i64)> {
         let user_id = check_auth(&state.state_manager_sender, headers, endpoint).await?;
 
-        // Estimate compute units and the request model
-        let model = request_model.get_model()?;
-        let total_compute_units = request_model.get_compute_units_estimate(state)?;
+        // Retrieve the model and the appropriate tokenizer
+        let model = request_model.get_model();
+        let total_compute_units = if (endpoint != IMAGE_GENERATIONS_PATH)
+            && (endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH)
+        {
+            let tokenizer_index =
+                state
+                    .models
+                    .iter()
+                    .position(|m| m == &model)
+                    .ok_or_else(|| AtomaProxyError::RequestError {
+                        message: "Model not supported".to_string(),
+                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                    })?;
+            let tokenizer = state.tokenizers[tokenizer_index].clone();
+            request_model.get_compute_units_estimate(Some(&tokenizer))?
+        } else {
+            request_model.get_compute_units_estimate(None)?
+        };
 
         let (result_sender, result_receiver) = oneshot::channel();
 
