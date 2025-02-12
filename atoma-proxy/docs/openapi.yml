@@ -422,15 +422,6 @@ paths:
       - bearerAuth: []
 components:
   schemas:
-    Audio:
-      type: object
-      description: Data about the audio data of a message.
-      required:
-      - id
-      properties:
-        id:
-          type: string
-          description: Unique identifier for a previous audio response from the model.
     ChatCompletionChoice:
       type: object
       description: |-
@@ -717,11 +708,6 @@ components:
         required:
         - role
         properties:
-          audio:
-            oneOf:
-            - type: 'null'
-            - $ref: '#/components/schemas/Audio'
-              description: Data about a previous audio response from the model.
           content:
             oneOf:
             - type: 'null'
