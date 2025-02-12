@@ -13,7 +13,9 @@ use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
 use openai_api::tools::ToolFunction;
 use openai_api::{
-    completion_choice::{ChatCompletionChoice, ChatCompletionChunkChoice},
+    completion_choice::{
+        ChatCompletionChoice, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
+    },
     logprobs::ChatCompletionLogProb,
     logprobs::{ChatCompletionLogProbs, ChatCompletionLogProbsContent},
     message::ChatCompletionMessage,
@@ -23,7 +25,7 @@ use openai_api::{
     tools::{ChatCompletionChunkDeltaToolCall, ChatCompletionChunkDeltaToolCallFunction},
     tools::{Tool, ToolCall, ToolCallFunction},
     usage::CompletionUsage,
-    ChatCompletionChunk, ChatCompletionChunkDelta, ChatCompletionRequest, ChatCompletionResponse,
+    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse,
 };
 use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest};
 use opentelemetry::KeyValue;
@@ -826,7 +828,19 @@ impl RequestModel for RequestModelChatCompletions {
             })?;
         let tokenizer = &state.tokenizers[tokenizer_index];
 
-        let mut total_num_tokens = 0;
+        // Helper function to count tokens for a text string
+        let count_text_tokens = |text: &str| -> Result<u64> {
+            Ok(tokenizer
+                .encode(text, true)
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to encode message: {err:?}"),
+                    endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                })?
+                .get_ids()
+                .len() as u64)
+        };
+        let mut prompt_num_tokens = 0;
+        let mut num_messages = 1_u64;
 
         for message in &self.messages {
             let content = message
@@ -837,44 +851,33 @@ impl RequestModel for RequestModelChatCompletions {
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
 
+            // Add fixed token overhead per message
+            prompt_num_tokens += 3; // 2 for delimiters + 1 for role
+
             match content {
                 MessageContent::Text(text) => {
-                    let num_tokens = tokenizer
-                        .encode(text, true)
-                        .map_err(|err| AtomaProxyError::InternalError {
-                            message: format!("Failed to encode message: {err:?}"),
-                            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-                        })?
-                        .get_ids()
-                        .len() as u64;
-
-                    total_num_tokens += num_tokens;
-                    // add 2 tokens as a safety margin, for start and end message delimiters
-                    total_num_tokens += 2;
-                    // add 1 token as a safety margin, for the role name of the message
-                    total_num_tokens += 1;
-                    // add the max completion tokens, to account for the response
-                    total_num_tokens += self.max_completion_tokens;
+                    let num_tokens = count_text_tokens(&text)?;
+                    prompt_num_tokens += num_tokens;
                 }
                 MessageContent::Array(parts) => {
+                    num_messages = parts.len() as u64;
+                    if num_messages == 0 {
+                        tracing::error!(
+                            "Received empty array of message parts for chat completion request"
+                        );
+                        return Err(AtomaProxyError::RequestError {
+                            message: "Missing or invalid message content".to_string(),
+                            endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                        });
+                    }
+                    prompt_num_tokens += (num_messages - 1) * 3; // We subtract 1 to account for the first overhead summation above
                     for part in parts {
                         match part {
                             MessageContentPart::Text { text, .. } => {
-                                let num_tokens = tokenizer
-                                    .encode(text, true)
-                                    .map_err(|err| AtomaProxyError::InternalError {
-                                        message: format!("Failed to encode message: {err:?}"),
-                                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-                                    })?
-                                    .get_ids()
-                                    .len() as u64;
-                                total_num_tokens += num_tokens;
-                                // add 2 tokens as a safety margin, for start and end message delimiters
-                                total_num_tokens += 2;
-                                // add 1 token as a safety margin, for the role name of the message
-                                total_num_tokens += 1;
+                                let num_tokens = count_text_tokens(&text)?;
+                                prompt_num_tokens += num_tokens;
                                 // add the max completion tokens, to account for the response
-                                total_num_tokens += self.max_completion_tokens;
+                                prompt_num_tokens += self.max_completion_tokens;
                             }
                             MessageContentPart::Image { .. } => {
                                 // TODO: Ensure that for image content parts, we have a way to estimate the number of tokens,
@@ -886,13 +889,11 @@ impl RequestModel for RequestModelChatCompletions {
                 }
             }
         }
-        Ok(total_num_tokens)
+        Ok(prompt_num_tokens + num_messages * self.max_completion_tokens)
     }
 }
 
 pub mod openai_api {
-    use std::collections::HashMap;
-
     use serde::{Deserialize, Deserializer, Serialize};
     use serde_json::Value;
     use utoipa::ToSchema;
@@ -1125,33 +1126,8 @@ pub mod openai_api {
         pub usage: Option<usage::CompletionUsage>,
     }
 
-    /// Represents the chat completion chunk delta.
-    ///
-    /// This is used to represent the chat completion chunk delta in the chat completion request.
-    /// It can be either a chat completion chunk delta message or a chat completion chunk delta choice.
-    #[derive(Debug, Serialize, Deserialize, ToSchema)]
-    pub struct ChatCompletionChunkDelta {
-        /// The role of the message author, if present in this chunk.
-        #[schema(example = "assistant")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub role: Option<String>,
-
-        /// The content of the message, if present in this chunk.
-        #[schema(example = "Hello")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub content: Option<String>,
-
-        /// The reasoning content, if present in this chunk.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub reasoning_content: Option<String>,
-
-        /// The tool calls information, if present in this chunk.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub tool_calls: Option<Vec<tools::ChatCompletionChunkDeltaToolCall>>,
-    }
-
     mod audio {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// Data about the audio data of a message.
         #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1162,7 +1138,7 @@ pub mod openai_api {
     }
 
     pub mod completion_choice {
-        use super::*;
+        use super::{logprobs, message, stop_reason, tools, Deserialize, Serialize, ToSchema};
 
         /// Represents the chat completion choice.
         ///
@@ -1189,7 +1165,6 @@ pub mod openai_api {
         /// Represents the chat completion chunk choice.
         ///
         /// This is used to represent the chat completion chunk choice in the chat completion request.
-        /// It can be either a chat completion chunk delta or a chat completion chunk choice.
         #[derive(Debug, Serialize, Deserialize, ToSchema)]
         pub struct ChatCompletionChunkChoice {
             /// The index of this choice in the list of choices.
@@ -1212,10 +1187,35 @@ pub mod openai_api {
             #[serde(skip_serializing_if = "Option::is_none")]
             pub stop_reason: Option<stop_reason::StopReason>,
         }
+
+        /// Represents the chat completion chunk delta.
+        ///
+        /// This is used to represent the chat completion chunk delta in the chat completion request.
+        /// It can be either a chat completion chunk delta message or a chat completion chunk delta choice.
+        #[derive(Debug, Serialize, Deserialize, ToSchema)]
+        pub struct ChatCompletionChunkDelta {
+            /// The role of the message author, if present in this chunk.
+            #[schema(example = "assistant")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub role: Option<String>,
+
+            /// The content of the message, if present in this chunk.
+            #[schema(example = "Hello")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub content: Option<String>,
+
+            /// The reasoning content, if present in this chunk.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub reasoning_content: Option<String>,
+
+            /// The tool calls information, if present in this chunk.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub tool_calls: Option<Vec<tools::ChatCompletionChunkDeltaToolCall>>,
+        }
     }
 
     pub mod logprobs {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// Represents the chat completion log probs.
         ///
@@ -1259,7 +1259,7 @@ pub mod openai_api {
     }
 
     pub mod message {
-        use super::*;
+        use super::{audio, message_content, tools, Deserialize, Serialize, ToSchema};
 
         /// A message that is part of a conversation which is based on the role
         /// of the author of the message.
@@ -1318,7 +1318,9 @@ pub mod openai_api {
     }
 
     pub mod message_content {
-        use super::*;
+        use serde_json::Value;
+
+        use super::{Deserialize, Deserializer, Serialize, ToSchema};
 
         /// Represents the content of a message.
         ///
@@ -1442,7 +1444,7 @@ pub mod openai_api {
     }
 
     pub mod response_format {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// The format to return the response in.
         #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1493,7 +1495,7 @@ pub mod openai_api {
     }
 
     pub mod stream_options {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// Specifies the stream options for the request.
         #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1507,7 +1509,9 @@ pub mod openai_api {
     }
 
     pub mod stop_reason {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
+        use serde::Deserializer;
+        use serde_json::Value;
 
         /// Represents the stop reason.
         ///
@@ -1556,7 +1560,7 @@ pub mod openai_api {
     }
 
     pub mod token_details {
-        use super::*;
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// Represents the prompt tokens details.
         ///
@@ -1571,7 +1575,10 @@ pub mod openai_api {
     }
 
     pub mod tools {
-        use super::*;
+        use serde_json::Value;
+        use std::collections::HashMap;
+
+        use super::{Deserialize, Serialize, ToSchema};
 
         /// Represents the function that the model called.
         ///
@@ -1748,7 +1755,7 @@ pub mod openai_api {
     }
 
     pub mod usage {
-        use super::*;
+        use super::{token_details, Deserialize, Serialize, ToSchema};
 
         /// Represents the completion usage.
         ///
