@@ -1808,7 +1808,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(&tokenizer);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 18); // 8 tokens + 10 completion
+        assert_eq!(result.unwrap(), 21); // 8 tokens + 3 overhead + 10 completion
     }
 
     #[tokio::test]
@@ -1830,7 +1830,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(&tokenizer);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 26); // (8+8) tokens + 10 completion
+        assert_eq!(result.unwrap(), 32); // (8+8) tokens + (3+3) overhead + 10 completion
     }
 
     #[tokio::test]
