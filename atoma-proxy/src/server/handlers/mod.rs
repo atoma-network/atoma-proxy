@@ -302,7 +302,7 @@ pub fn handle_status_code_error(
 ) -> Result<()> {
     match status_code {
         StatusCode::UNAUTHORIZED => Err(AtomaProxyError::AuthError {
-            auth_error: format!("Unauthorized response from inference service: {error}"),
+            auth_error: error.to_string(), // The message coming here is from node in the format format!("Unauthorized response from inference service: {error}"),
             endpoint: endpoint.to_string(),
         }),
         StatusCode::INTERNAL_SERVER_ERROR => Err(AtomaProxyError::InternalError {
@@ -314,9 +314,7 @@ pub fn handle_status_code_error(
         }),
         StatusCode::BAD_REQUEST => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned bad request error: {error}"),
-            client_message: Some(format!(
-                "Inference service returned bad request error: {error}"
-            )),
+            client_message: Some(error.to_string()), // The message coming here is from node in the format format!("Inference service returned bad request error: {error}"),
             endpoint: endpoint.to_string(),
         }),
         _ => Err(AtomaProxyError::InternalError {
