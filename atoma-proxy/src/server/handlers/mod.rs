@@ -307,17 +307,23 @@ pub fn handle_status_code_error(
         }),
         StatusCode::INTERNAL_SERVER_ERROR => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned internal server error: {error}"),
-            client_message: Some(format!("Node returned status code error {status_code}")),
+            client_message: Some(format!(
+                "Inference service returned status code error {status_code}"
+            )),
             endpoint: endpoint.to_string(),
         }),
         StatusCode::BAD_REQUEST => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned bad request error: {error}"),
-            client_message: Some(format!("Node returned status code error {status_code}")),
+            client_message: Some(format!(
+                "Inference service returned bad request error: {error}"
+            )),
             endpoint: endpoint.to_string(),
         }),
         _ => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned non-success error: {error}"),
-            client_message: Some(format!("Node returned status code error {status_code}")),
+            client_message: Some(format!(
+                "Inference service returned status code error {status_code}"
+            )),
             endpoint: endpoint.to_string(),
         }),
     }
