@@ -451,8 +451,14 @@ components:
           description: The chat completion message.
     ChatCompletionChunk:
       type: object
+      description: |-
+        Represents the chat completion chunk.
+
+        This is used to represent the chat completion chunk in the chat completion request.
+        It can be either a chat completion chunk or a chat completion chunk choice.
       required:
       - id
+      - object
       - created
       - model
       - choices
@@ -475,6 +481,14 @@ components:
           type: string
           description: The model used for the chat completion.
           example: meta-llama/Llama-3.3-70B-Instruct
+        object:
+          type: string
+          description: The object of the chat completion chunk (which is always `chat.completion.chunk`)
+        usage:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CompletionUsage'
+            description: Usage statistics for the completion request.
     ChatCompletionChunkChoice:
       type: object
       description: |-
@@ -500,6 +514,16 @@ components:
           format: int32
           description: The index of this choice in the list of choices.
           example: 0
+        logprobs:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionLogProbs'
+            description: Log probability information for the choice, if applicable.
+        stop_reason:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/StopReason'
+            description: The reason the chat completion was stopped, if applicable.
     ChatCompletionChunkDelta:
       type: object
       description: |-
@@ -514,8 +538,11 @@ components:
           - 'null'
           description: The content of the message, if present in this chunk.
           example: Hello
-        function_call:
-          description: The function call information, if present in this chunk.
+        reasoning_content:
+          type:
+          - string
+          - 'null'
+          description: The reasoning content, if present in this chunk.
         role:
           type:
           - string
@@ -526,8 +553,113 @@ components:
           type:
           - array
           - 'null'
-          items: {}
+          items:
+            $ref: '#/components/schemas/ChatCompletionChunkDeltaToolCall'
           description: The tool calls information, if present in this chunk.
+    ChatCompletionChunkDeltaToolCall:
+      type: object
+      description: |-
+        Represents the chat completion chunk delta tool call.
+
+        This is used to represent the chat completion chunk delta tool call in the chat completion request.
+        It can be either a chat completion chunk delta tool call or a chat completion chunk delta tool call function.
+      required:
+      - id
+      - type
+      - index
+      properties:
+        function:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionChunkDeltaToolCallFunction'
+            description: The function of the tool call.
+        id:
+          type: string
+          description: The ID of the tool call.
+        index:
+          type: integer
+          format: int32
+          description: The index of the tool call.
+        type:
+          type: string
+          description: The type of the tool call.
+    ChatCompletionChunkDeltaToolCallFunction:
+      type: object
+      description: |-
+        Represents the chat completion chunk delta tool call function.
+
+        This is used to represent the chat completion chunk delta tool call function in the chat completion request.
+        It can be either a chat completion chunk delta tool call function or a chat completion chunk delta tool call function arguments.
+      properties:
+        arguments:
+          type:
+          - string
+          - 'null'
+          description: The arguments of the tool call function.
+        name:
+          type:
+          - string
+          - 'null'
+          description: The name of the tool call function.
+    ChatCompletionLogProb:
+      type: object
+      description: |-
+        Represents the chat completion log prob.
+
+        This is used to represent the chat completion log prob in the chat completion request.
+        It can be either a chat completion log prob or a chat completion log prob choice.
+      required:
+      - logprob
+      - token
+      properties:
+        bytes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: integer
+            format: int32
+          description: |-
+            A list of integers representing the UTF-8 bytes representation of the token.
+            Useful in instances where characters are represented by multiple tokens and their byte
+            representations must be combined to generate the correct text representation.
+            Can be null if there is no bytes representation for the token.
+        logprob:
+          type: number
+          format: float
+          description: The log prob of the chat completion.
+        token:
+          type: string
+          description: The token of the chat completion.
+    ChatCompletionLogProbs:
+      type: object
+      description: |-
+        Represents the chat completion log probs.
+
+        This is used to represent the chat completion log probs in the chat completion request.
+        It can be either a chat completion log probs or a chat completion log probs choice.
+      properties:
+        content:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/ChatCompletionLogProbsContent'
+          description: The log probs of the chat completion.
+    ChatCompletionLogProbsContent:
+      type: object
+      description: |-
+        Represents the chat completion log probs content.
+
+        This is used to represent the chat completion log probs content in the chat completion request.
+        It can be either a chat completion log probs content or a chat completion log probs content choice.
+      required:
+      - top_logprobs
+      properties:
+        top_logprobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatCompletionLogProb'
     ChatCompletionMessage:
       oneOf:
       - type: object
@@ -827,6 +959,11 @@ components:
           format: int32
           description: Number of tokens in the prompt.
           example: 9
+        prompt_tokens_details:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PromptTokensDetails'
+            description: Details about the prompt tokens.
         total_tokens:
           type: integer
           format: int32
@@ -1335,6 +1472,42 @@ components:
         message:
           type: string
           description: The message of the response
+    PromptTokensDetails:
+      type: object
+      description: |-
+        Represents the prompt tokens details.
+
+        This is used to represent the prompt tokens details in the chat completion request.
+        It can be either a prompt tokens details or a prompt tokens details choice.
+      required:
+      - cached_tokens
+      properties:
+        cached_tokens:
+          type: integer
+          format: int32
+          description: Number of tokens in the prompt that were cached.
+          example: 1
+    StopReason:
+      oneOf:
+      - type: object
+        required:
+        - Int
+        properties:
+          Int:
+            type: integer
+            format: int32
+            minimum: 0
+      - type: object
+        required:
+        - String
+        properties:
+          String:
+            type: string
+      description: |-
+        Represents the stop reason.
+
+        This is used to represent the stop reason in the chat completion request.
+        It can be either a stop reason or a stop reason choice.
     Tool:
       type: object
       description: |-
@@ -1385,6 +1558,7 @@ components:
       - arguments
       properties:
         arguments:
+          type: string
           description: |-
             The arguments to call the function with, as generated by the model in JSON format.
             Note that the model does not always generate valid JSON, and may hallucinate parameters not defined by your function schema.
