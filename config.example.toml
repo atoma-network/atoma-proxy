@@ -18,8 +18,8 @@ database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB
 hf_token = "<API_KEY>" # Hugging face api token, required if you want to access a gated model
 modalities = [ [ "Chat Completions" ], [ "Chat Completions" ] ] # Modalities of the above models
 models = [
-    "meta-llama/Llama-3.2-1B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
+"meta-llama/Llama-3.2-1B-Instruct",
+"meta-llama/Llama-3.2-3B-Instruct",
 ] # Models supported by proxy
 password = "password" # Password for the service
 revisions = [ "main", "main" ] # Revision of the above models
@@ -43,9 +43,9 @@ idle_connection_timeout = { secs = 60, nanos = 0 }
 listen_addr = "/ip4/0.0.0.0/udp/4001/quic-v1"
 # List of bootstrap nodes to connect to
 bootstrap_nodes = [
-    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc",
-    "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-    "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+"12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc",
+"QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+"QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+"QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+"QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
 ]
