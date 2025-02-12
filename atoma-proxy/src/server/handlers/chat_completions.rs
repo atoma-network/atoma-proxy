@@ -839,8 +839,8 @@ impl RequestModel for RequestModelChatCompletions {
                 .get_ids()
                 .len() as u64)
         };
-        let mut prompt_num_tokens = 0;
-        let mut num_messages = 1_u64;
+
+        let mut total_num_tokens = 0;
 
         for message in &self.messages {
             let content = message
@@ -852,12 +852,13 @@ impl RequestModel for RequestModelChatCompletions {
                 })?;
 
             // Add fixed token overhead per message
-            prompt_num_tokens += 3; // 2 for delimiters + 1 for role
+            total_num_tokens += 3; // 2 for delimiters + 1 for role
+            let mut num_messages = 1;
 
             match content {
                 MessageContent::Text(text) => {
                     let num_tokens = count_text_tokens(&text)?;
-                    prompt_num_tokens += num_tokens;
+                    total_num_tokens += num_tokens;
                 }
                 MessageContent::Array(parts) => {
                     num_messages = parts.len() as u64;
@@ -870,14 +871,16 @@ impl RequestModel for RequestModelChatCompletions {
                             endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                         });
                     }
-                    prompt_num_tokens += (num_messages - 1) * 3; // We subtract 1 to account for the first overhead summation above
+
+                    // add the overhead for the message delimiters
+                    // we subtract 1 to account for the first overhead summation above
+                    total_num_tokens += (num_messages - 1) * 3;
+
                     for part in parts {
                         match part {
                             MessageContentPart::Text { text, .. } => {
                                 let num_tokens = count_text_tokens(&text)?;
-                                prompt_num_tokens += num_tokens;
-                                // add the max completion tokens, to account for the response
-                                prompt_num_tokens += self.max_completion_tokens;
+                                total_num_tokens += num_tokens;
                             }
                             MessageContentPart::Image { .. } => {
                                 // TODO: Ensure that for image content parts, we have a way to estimate the number of tokens,
@@ -888,8 +891,10 @@ impl RequestModel for RequestModelChatCompletions {
                     }
                 }
             }
+            // add the max completion tokens, to account for the response
+            total_num_tokens += num_messages * self.max_completion_tokens;
         }
-        Ok(prompt_num_tokens + num_messages * self.max_completion_tokens)
+        Ok(total_num_tokens)
     }
 }
 
