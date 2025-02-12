@@ -1,6 +1,7 @@
 use serde_json::Value;
+use tokenizers::Tokenizer;
 
-use crate::server::{http_server::ProxyState, Result};
+use crate::server::Result;
 
 /// A trait for parsing and handling AI model requests across different endpoints (chat, embeddings, images).
 /// This trait provides a common interface for processing various types of AI model requests
@@ -21,17 +22,20 @@ pub trait RequestModel {
     /// Retrieves the target AI model identifier for this request.
     ///
     /// # Returns
-    /// * `Ok(String)` - The name/identifier of the AI model to be used
-    /// * `Err(AtomaProxyError)` - If the model information is missing or invalid
-    fn get_model(&self) -> Result<String>;
+    /// * `String` - The name/identifier of the AI model to be used
+    fn get_model(&self) -> String;
 
     /// Calculates the estimated computational resources required for this request.
     ///
     /// # Arguments
-    /// * `state` - The current proxy state containing configuration and metrics
+    /// * `tokenizer` - The tokenizer to use for the request
     ///
     /// # Returns
     /// * `Ok(u64)` - The estimated compute units needed
     /// * `Err(AtomaProxyError)` - If the estimation fails or parameters are invalid
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64>;
+    ///
+    /// # Warning
+    /// This method assumes that the tokenizer has been correctly retrieved from the `ProxyState` for
+    /// the associated model, as obtained by calling `get_model` on `Self`.
+    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64>;
 }

@@ -13,6 +13,7 @@ use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
+use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
@@ -95,21 +96,11 @@ impl RequestModel for RequestModelEmbeddings {
         })
     }
 
-    fn get_model(&self) -> Result<String> {
-        Ok(self.model.clone())
+    fn get_model(&self) -> String {
+        self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
-        let tokenizer_index = state
-            .models
-            .iter()
-            .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::RequestError {
-                message: "Model not supported".to_string(),
-                endpoint: EMBEDDINGS_PATH.to_string(),
-            })?;
-        let tokenizer = &state.tokenizers[tokenizer_index];
-
+    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64> {
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {

@@ -46,7 +46,7 @@ sqlx.workspace = true
 sui-keys.workspace = true
 sui-sdk.workspace = true
 thiserror = { workspace = true }
-tokenizers.workspace = true
+tokenizers = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true, features = ["tls", "tls-roots", "prost"] }
 tower = { workspace = true }

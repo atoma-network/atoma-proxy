@@ -32,6 +32,7 @@ use opentelemetry::KeyValue;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
+use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::OpenApi;
 
@@ -813,21 +814,20 @@ impl RequestModel for RequestModelChatCompletions {
         })
     }
 
-    fn get_model(&self) -> Result<String> {
-        Ok(self.model.clone())
+    fn get_model(&self) -> String {
+        self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
-        let tokenizer_index = state
-            .models
-            .iter()
-            .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::RequestError {
-                message: "Model not supported".to_string(),
-                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-            })?;
-        let tokenizer = &state.tokenizers[tokenizer_index];
-
+    /// Computes the total number of tokens for the chat completion request.
+    ///
+    /// This is used to estimate the cost of the chat completion request, on the proxy side.
+    /// We support either string or array of content parts. We further assume that all content messages
+    /// share the same previous messages. That said, we further assume that content parts formatted into arrays
+    /// are to be concatenated and treated as a single message, by the model and from the estimate point of view.
+    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64> {
+        // In order to account for the possibility of not taking into account possible additional special tokens,
+        // which might not be considered by the tokenizer, we add a small overhead to the total number of tokens, per message.
+        const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
         // Helper function to count tokens for a text string
         let count_text_tokens = |text: &str| -> Result<u64> {
             Ok(tokenizer
@@ -851,18 +851,13 @@ impl RequestModel for RequestModelChatCompletions {
                     endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                 })?;
 
-            // Add fixed token overhead per message
-            total_num_tokens += 3; // 2 for delimiters + 1 for role
-            let mut num_messages = 1;
-
             match content {
                 MessageContent::Text(text) => {
                     let num_tokens = count_text_tokens(&text)?;
-                    total_num_tokens += num_tokens;
+                    total_num_tokens += num_tokens + MESSAGE_OVERHEAD_TOKENS;
                 }
                 MessageContent::Array(parts) => {
-                    num_messages = parts.len() as u64;
-                    if num_messages == 0 {
+                    if parts.is_empty() {
                         tracing::error!(
                             "Received empty array of message parts for chat completion request"
                         );
@@ -871,16 +866,11 @@ impl RequestModel for RequestModelChatCompletions {
                             endpoint: CHAT_COMPLETIONS_PATH.to_string(),
                         });
                     }
-
-                    // add the overhead for the message delimiters
-                    // we subtract 1 to account for the first overhead summation above
-                    total_num_tokens += (num_messages - 1) * 3;
-
                     for part in parts {
                         match part {
                             MessageContentPart::Text { text, .. } => {
                                 let num_tokens = count_text_tokens(&text)?;
-                                total_num_tokens += num_tokens;
+                                total_num_tokens += num_tokens + MESSAGE_OVERHEAD_TOKENS;
                             }
                             MessageContentPart::Image { .. } => {
                                 // TODO: Ensure that for image content parts, we have a way to estimate the number of tokens,
@@ -891,10 +881,9 @@ impl RequestModel for RequestModelChatCompletions {
                     }
                 }
             }
-            // add the max completion tokens, to account for the response
-            total_num_tokens += num_messages * self.max_completion_tokens;
         }
-        Ok(total_num_tokens)
+        // add the max completion tokens, to account for the response
+        Ok(total_num_tokens + self.max_completion_tokens)
     }
 }
 
@@ -1785,5 +1774,199 @@ pub mod openai_api {
             #[serde(skip_serializing_if = "Option::is_none")]
             pub prompt_tokens_details: Option<token_details::PromptTokensDetails>,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde_json::json;
+    use std::str::FromStr;
+    use tokenizers::Tokenizer;
+
+    const MODEL: &str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0";
+
+    async fn load_tokenizer() -> Tokenizer {
+        let url =
+            "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/raw/main/tokenizer.json";
+        let tokenizer_json = reqwest::get(url).await.unwrap().text().await.unwrap();
+
+        Tokenizer::from_str(&tokenizer_json).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                "content": "Hello from the other side of Mars"
+            })],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 18); // 8 tokens + 10 completion
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_multiple_messages() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![
+                json!({
+                    "role": "user",
+                    "content": "Hello from the other side of Mars"
+                }),
+                json!({
+                    "role": "assistant",
+                    "content": "Hello from the other side of Mars"
+                }),
+            ],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 26); // (8+8) tokens + 10 completion
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_array_content() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Hello from the other side of Mars"
+                    },
+                    {
+                        "type": "text",
+                        "text": "Hello from the other side of Mars"
+                    }
+                ]
+            })],
+            max_completion_tokens: 10,
+        };
+
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 32); // (8+8) tokens  (3 + 3) overhead + 10 completion
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_empty_message() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                "content": ""
+            })],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 14); // 1 tokens (special token) + 3 overhead + 10 completion
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_mixed_content() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![
+                json!({
+                    "role": "system",
+                    "content": "Hello from the other side of Mars"
+                }),
+                json!({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Hello from the other side of Mars"
+                        },
+                        {
+                            "type": "image",
+                            "image_url": {
+                                "url": "http://example.com/image.jpg"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Hello from the other side of Mars"
+                        }
+                    ]
+                }),
+            ],
+            max_completion_tokens: 15,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        // System message: tokens + 15 completion
+        // User message array: (2 text parts tokens) + (15 * 2 for text completion for parts)
+        let tokens = result.unwrap();
+        assert_eq!(tokens, 48); // 3 * 8 + 3 * 3 overhead + 15
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_invalid_content() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                // Missing "content" field
+            })],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AtomaProxyError::RequestError { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_empty_array_content() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                "content": []
+            })],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AtomaProxyError::RequestError { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_compute_units_estimate_special_characters() {
+        let request = RequestModelChatCompletions {
+            model: MODEL.to_string(),
+            messages: vec![json!({
+                "role": "user",
+                "content": "Hello! 👋 🌍 \n\t Special chars: &*#@"
+            })],
+            max_completion_tokens: 10,
+        };
+        let tokenizer = load_tokenizer().await;
+        let result = request.get_compute_units_estimate(&tokenizer);
+        assert!(result.is_ok());
+        let tokens = result.unwrap();
+        assert!(tokens > 13); // Should be more than minimum (3 overhead + 10 completion)
     }
 }
