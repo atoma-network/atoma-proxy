@@ -454,7 +454,10 @@ components:
           description: The index of this choice in the list of choices.
           example: 0
         logprobs:
-          description: Log probability information for the choice, if applicable.
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionLogProbs'
+            description: Log probability information for the choice, if applicable.
         message:
           $ref: '#/components/schemas/ChatCompletionMessage'
           description: The chat completion message.
@@ -493,6 +496,7 @@ components:
         object:
           type: string
           description: The object of the chat completion chunk (which is always `chat.completion.chunk`)
+          example: chat.completion.chunk
         usage:
           oneOf:
           - type: 'null'
@@ -504,7 +508,6 @@ components:
         Represents the chat completion chunk choice.
 
         This is used to represent the chat completion chunk choice in the chat completion request.
-        It can be either a chat completion chunk delta or a chat completion chunk choice.
       required:
       - index
       - delta
@@ -982,6 +985,7 @@ components:
       - created
       - model
       - choices
+      - object
       properties:
         choices:
           type: array
@@ -1001,6 +1005,15 @@ components:
           type: string
           description: The model used for the chat completion.
           example: meta-llama/Llama-3.3-70B-Instruct
+        object:
+          type: string
+          description: The object of the chat completion.
+          example: chat.completion
+        service_tier:
+          type:
+          - string
+          - 'null'
+          description: The service tier of the chat completion.
         system_fingerprint:
           type:
           - string
