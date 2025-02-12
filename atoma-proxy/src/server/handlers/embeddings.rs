@@ -100,7 +100,13 @@ impl RequestModel for RequestModelEmbeddings {
         self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64> {
+    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64> {
+        let Some(tokenizer) = tokenizer else {
+            return Err(AtomaProxyError::InternalError {
+                message: "Tokenizer not found for current model".to_string(),
+                endpoint: EMBEDDINGS_PATH.to_string(),
+            });
+        };
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {
@@ -109,7 +115,6 @@ impl RequestModel for RequestModelEmbeddings {
             })?
             .get_ids()
             .len() as u64;
-
         Ok(num_tokens)
     }
 }

@@ -37,5 +37,5 @@ pub trait RequestModel {
     /// # Warning
     /// This method assumes that the tokenizer has been correctly retrieved from the `ProxyState` for
     /// the associated model, as obtained by calling `get_model` on `Self`.
-    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64>;
+    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64>;
 }

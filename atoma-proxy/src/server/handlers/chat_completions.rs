@@ -824,10 +824,16 @@ impl RequestModel for RequestModelChatCompletions {
     /// We support either string or array of content parts. We further assume that all content messages
     /// share the same previous messages. That said, we further assume that content parts formatted into arrays
     /// are to be concatenated and treated as a single message, by the model and from the estimate point of view.
-    fn get_compute_units_estimate(&self, tokenizer: &Tokenizer) -> Result<u64> {
+    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64> {
         // In order to account for the possibility of not taking into account possible additional special tokens,
         // which might not be considered by the tokenizer, we add a small overhead to the total number of tokens, per message.
         const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
+        let Some(tokenizer) = tokenizer else {
+            return Err(AtomaProxyError::InternalError {
+                message: "Tokenizer not found for current model".to_string(),
+                endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+            });
+        };
         // Helper function to count tokens for a text string
         let count_text_tokens = |text: &str| -> Result<u64> {
             Ok(tokenizer
@@ -1792,7 +1798,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 21); // 8 tokens + 3 overhead + 10 completion
     }
@@ -1814,7 +1820,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 32); // (8+8) tokens + (3+3) overhead + 10 completion
     }
@@ -1840,7 +1846,7 @@ mod tests {
         };
 
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 32); // (8+8) tokens  (3 + 3) overhead + 10 completion
     }
@@ -1856,7 +1862,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 14); // 1 tokens (special token) + 3 overhead + 10 completion
     }
@@ -1893,7 +1899,7 @@ mod tests {
             max_completion_tokens: 15,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         // System message: tokens + 15 completion
         // User message array: (2 text parts tokens) + (15 * 2 for text completion for parts)
@@ -1912,7 +1918,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1931,7 +1937,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1950,7 +1956,7 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(&tokenizer);
+        let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         let tokens = result.unwrap();
         assert!(tokens > 13); // Should be more than minimum (3 overhead + 10 completion)

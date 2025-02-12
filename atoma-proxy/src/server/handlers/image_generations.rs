@@ -98,7 +98,7 @@ impl RequestModel for RequestModelImageGenerations {
         self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, _tokenizer: &Tokenizer) -> Result<u64> {
+    fn get_compute_units_estimate(&self, _tokenizer: Option<&Tokenizer>) -> Result<u64> {
         // Parse dimensions from size string (e.g., "1024x1024")
         let dimensions: Vec<u64> = self
             .size
