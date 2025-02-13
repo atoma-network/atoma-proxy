@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
+use openai_api::message::Role;
 use openai_api::tools::ToolFunction;
 use openai_api::{
     completion_choice::{
@@ -102,6 +103,7 @@ const STREAM: &str = "stream";
         ChatCompletionLogProbs,
         ChatCompletionLogProbsContent,
         ChatCompletionLogProb,
+        Role,
     ))
 )]
 pub struct ChatCompletionsOpenApi;
@@ -947,6 +949,20 @@ pub mod openai_api {
         pub model: String,
 
         /// A list of messages comprising the conversation so far
+        #[schema(example = json!([
+            {
+                "role": "system",
+                "content": "You are a helpful AI assistant"
+            },
+            {
+                "role": "user",
+                "content": "Hello!"
+            },
+            {
+                "role": "assistant",
+                "content": "I'm here to help you with any questions you have. How can I assist you today?"
+            }
+        ]))]
         pub messages: Vec<message::ChatCompletionMessage>,
 
         /// What sampling temperature to use, between 0 and 2
@@ -1005,6 +1021,10 @@ pub mod openai_api {
         /// between -1 and 1 should decrease or increase likelihood of selection; values like -100 or
         /// 100 should result in a ban or exclusive selection of the relevant token.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!({
+            "1234567890": 0.5,
+            "1234567891": -0.5
+        }))]
         pub logit_bias: Option<std::collections::HashMap<u32, f32>>,
 
         /// An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
@@ -1020,22 +1040,60 @@ pub mod openai_api {
 
         /// A list of functions the model may generate JSON inputs for
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!([
+            {
+                "name": "get_current_weather",
+                "description": "Get the current weather in a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The location to get the weather for"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        ]))]
         pub functions: Option<Vec<Value>>,
 
         /// Controls how the model responds to function calls
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!("auto"))]
         pub function_call: Option<Value>,
 
         /// The format to return the response in
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!("json_object"))]
         pub response_format: Option<response_format::ResponseFormat>,
 
         /// A list of tools the model may call
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_current_weather",
+                    "description": "Get the current weather in a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The location to get the weather for"
+                            }
+                        },
+                        "required": ["location"]
+                    }
+                }
+            }
+        ]))]
         pub tools: Option<Vec<tools::ChatCompletionToolsParam>>,
 
         /// Controls which (if any) tool the model should use
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!("auto"))]
         pub tool_choice: Option<tools::ToolChoice>,
 
         /// If specified, our system will make a best effort to sample deterministically
@@ -1055,10 +1113,14 @@ pub mod openai_api {
 
         /// Options for streaming response. Only set this when you set stream: true.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!({
+            "include_usage": true
+        }))]
         pub stream_options: Option<stream_options::StreamOptions>,
 
         /// Whether to enable parallel tool calls.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = true)]
         pub parallel_tool_calls: Option<bool>,
     }
 
@@ -1167,6 +1229,10 @@ pub mod openai_api {
             pub index: i32,
 
             /// The chat completion message.
+            #[schema(example = json!({
+                "role": "assistant",
+                "content": "Hello! How can I help you today?"
+            }))]
             pub message: message::ChatCompletionMessage,
 
             /// The reason the chat completion was finished.
@@ -1175,6 +1241,12 @@ pub mod openai_api {
 
             /// Log probability information for the choice, if applicable.
             #[serde(skip_serializing_if = "Option::is_none")]
+            #[schema(example = json!({
+                "logprobs": {
+                    "tokens": ["Hello", "!", "How", "can", "I", "help", "you", "today?"],
+                    "token_logprobs": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+                }
+            }))]
             pub logprobs: Option<logprobs::ChatCompletionLogProbs>,
         }
 
@@ -1277,6 +1349,22 @@ pub mod openai_api {
     pub mod message {
         use super::{message_content, tools, Deserialize, Serialize, ToSchema};
 
+        /// The role of the message author
+        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+        #[serde(rename_all = "snake_case")]
+        #[schema(title = "Role")]
+        #[schema(example = "system")]
+        pub enum Role {
+            /// System role for setting behavior
+            System,
+            /// Assistant role for AI responses
+            Assistant,
+            /// User role for human messages
+            User,
+            /// Tool role for function calls
+            Tool,
+        }
+
         /// A message that is part of a conversation which is based on the role
         /// of the author of the message.
         ///
@@ -1287,32 +1375,41 @@ pub mod openai_api {
         pub enum ChatCompletionMessage {
             /// The role of the messages author, in this case system.
             #[schema(title = "System")]
+            #[serde(rename = "system")]
             System {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "You are a helpful AI assistant")]
                 content: Option<message_content::MessageContent>,
                 /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "AI expert")]
                 name: Option<String>,
             },
             /// The role of the messages author, in this case user.
             #[schema(title = "User")]
+            #[serde(rename = "user")]
             User {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "Hello! How can I help you today?")]
                 content: Option<message_content::MessageContent>,
                 /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "John Doe")]
                 name: Option<String>,
             },
             /// The role of the messages author, in this case assistant.
             #[schema(title = "Assistant")]
+            #[serde(rename = "assistant")]
             Assistant {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "Hello! How can I help you today?")]
                 content: Option<message_content::MessageContent>,
                 /// An optional name for the participant. Provides the model information to differentiate between participants of the same role.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[schema(example = "AI")]
                 name: Option<String>,
                 /// The refusal message by the assistant.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1323,6 +1420,7 @@ pub mod openai_api {
             },
             /// The role of the messages author, in this case tool.
             #[schema(title = "Tool")]
+            #[serde(rename = "tool")]
             Tool {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
