@@ -82,12 +82,14 @@ async fn check_auth(
                     })
                     .map_err(|err| AtomaProxyError::InternalError {
                         message: format!("Failed to send IsApiTokenValid event: {err:?}"),
+                        client_message: None,
                         endpoint: endpoint.to_string(),
                     })?;
                 return receiver
                     .await
                     .map_err(|err| AtomaProxyError::InternalError {
                         message: format!("Failed to receive IsApiTokenValid result: {err:?}"),
+                        client_message: None,
                         endpoint: endpoint.to_string(),
                     })?
                     .map_err(|err| AtomaProxyError::AuthError {

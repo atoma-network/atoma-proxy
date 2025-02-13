@@ -153,6 +153,7 @@ pub async fn nodes_create(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send GetNodeSuiAddress event: {err:?}"),
+            client_message: None,
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
@@ -160,10 +161,12 @@ pub async fn nodes_create(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to receive GetNodeSuiAddress result: {err:?}"),
+            client_message: None,
             endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to get node Sui address: {err:?}"),
+            client_message: None,
             endpoint: NODES_CREATE_PATH.to_string(),
         })?
         .ok_or_else(|| AtomaProxyError::NotFound {
@@ -188,6 +191,7 @@ pub async fn nodes_create(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send UpsertNodePublicAddress event: {err:?}"),
+            client_message: None,
             endpoint: NODES_CREATE_PATH.to_string(),
         })?;
 
@@ -272,10 +276,12 @@ pub async fn nodes_create_lock(
         )
         .map_err(|_| AtomaProxyError::InternalError {
             message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
+            client_message: None,
             endpoint: NODES_CREATE_LOCK_PATH.to_string(),
         })?;
     let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to receive node public key: {e}"),
+        client_message: None,
         endpoint: NODES_CREATE_LOCK_PATH.to_string(),
     })?;
 
@@ -285,6 +291,7 @@ pub async fn nodes_create_lock(
                 .stack_small_id
                 .ok_or_else(|| AtomaProxyError::InternalError {
                     message: "Stack small id not found for node public key".to_string(),
+                    client_message: None,
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
         let public_key = STANDARD.encode(node_public_key.public_key);
@@ -313,16 +320,19 @@ pub async fn nodes_create_lock(
             })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetCheapestNodeForModel event: {e:?}"),
+                client_message: None,
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         let node = receiver
             .await
             .map_err(|_| AtomaProxyError::InternalError {
                 message: "Failed to receive GetCheapestNodeForModel result".to_string(),
+                client_message: None,
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetCheapestNodeForModel result: {e:?}"),
+                client_message: None,
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         if let Some(node) = node {
@@ -340,12 +350,14 @@ pub async fn nodes_create_lock(
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send DeductFromUsdc event: {err:?}"),
+                    client_message: None,
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             result_receiver
                 .await
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to receive DeductFromUsdc result: {e:?}"),
+                    client_message: None,
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?
                 .map_err(|e| AtomaProxyError::BalanceError {
@@ -365,6 +377,7 @@ pub async fn nodes_create_lock(
                 .await
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {e:?}"),
+                    client_message: Some("Sui contract error".to_string()),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             // NOTE: The contract might select a different node than the one we used to extract
@@ -384,10 +397,12 @@ pub async fn nodes_create_lock(
                 )
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to send GetNodePublicKeyForEncryption event: {e:?}"),
+                    client_message: None,
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
             let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetNodePublicKeyForEncryption result: {e:?}"),
+                client_message: None,
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
             if let Some(node_public_key) = node_public_key {
@@ -401,6 +416,7 @@ pub async fn nodes_create_lock(
             } else {
                 Err(AtomaProxyError::InternalError {
                     message: format!("No node public key found for node {0}", node.node_small_id),
+                    client_message: Some("Node public key not found".to_string()),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })
             }
