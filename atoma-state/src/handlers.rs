@@ -1664,6 +1664,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
 
     let node_performance = node_performance::get_node_performance(
         &state_manager.state,
+        node_small_id,
         f64::from(cpu_usage),
         ram_used as i64,
         ram_total as i64,
@@ -1671,8 +1672,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
         ram_swap_total as i64,
         network_rx as i64,
         network_tx as i64,
-        num_gpus as i32,
-        gpu_memory_used.iter().map(|&x| x as i64).collect(),
+        gpu_memory_free.iter().map(|&x| x as i64).collect(),
         gpu_memory_total.iter().map(|&x| x as i64).collect(),
         gpu_percentage_time_execution
             .iter()
@@ -1930,54 +1930,71 @@ pub mod node_performance {
     ///
     /// This function evaluates node performance across multiple dimensions including GPU, CPU, RAM, and network metrics.
     /// It uses configurable weights to compute a normalized score that represents the node's overall capability and
-    /// efficiency.
+    /// efficiency. The final score is smoothed using an exponential moving average.
     ///
     /// # Performance Scoring Components
     ///
-    /// ## GPU Metrics (weighted by `gpu_score_weight`)
-    /// - **VRAM Usage**: Higher is better, indicates KV cache allocation efficiency
-    ///   - Uses minimum usage percentage across all GPUs
-    ///   - Weighted by `gpu_vram_weight`
+    /// ## GPU Performance (weighted by `gpu_score_weight`)
+    /// Combines four weighted sub-scores:
     ///
-    /// - **Execution Availability**: Lower is better, indicates GPU availability
-    ///   - Averages execution rates across all GPUs
-    ///   - Weighted by `gpu_exec_avail_weight`
+    /// 1. **VRAM Usage** (`gpu_vram_weight`)
+    ///    - Higher is better (indicates efficient KV cache allocation)
+    ///    - Uses minimum usage percentage across all GPUs
+    ///    - Score = (used_memory / total_memory) * weight
     ///
-    /// - **Temperature**: Lower is better, using step function:
-    ///   - 1.0 for temps <= threshold (typically 80°C)
-    ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 100°C)
-    ///   - 0.0 for temps >= max
-    ///   - Uses minimum score across all GPUs
-    ///   - Weighted by `gpu_temp_weight`
+    /// 2. **Execution Availability** (`gpu_exec_avail_weight`)
+    ///    - Lower is better (indicates GPU availability)
+    ///    - Averages execution rates across all GPUs
+    ///    - Score = average(execution_rate * weight)
     ///
-    /// - **Power Usage**: Lower is better, using step function:
-    ///   - 1.0 for power <= threshold (typically 200W)
-    ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 300W)
-    ///   - 0.0 for power >= max
-    ///   - Averages across all GPUs
-    ///   - Weighted by `gpu_power_weight`
+    /// 3. **Temperature** (`gpu_temp_weight`)
+    ///    - Lower is better
+    ///    - Uses step function:
+    ///      * 1.0 for temps <= threshold
+    ///      * Linear decrease from 1.0 to 0.0 between threshold and max
+    ///      * 0.0 for temps >= max
+    ///    - Uses minimum score across all GPUs
     ///
-    /// ## CPU Metrics (weighted by `cpu_score_weight`)
+    /// 4. **Power Usage** (`gpu_power_weight`)
+    ///    - Lower is better
+    ///    - Uses step function:
+    ///      * 1.0 for power <= threshold
+    ///      * Linear decrease from 1.0 to 0.0 between threshold and max
+    ///      * 0.0 for power >= max
+    ///    - Averages across all GPUs
+    ///
+    /// ## CPU Performance (`cpu_score_weight`)
     /// - Balances current usage with available capacity
+    /// - Score = (cpu_usage * weight) + ((1 - cpu_usage) * weight)
     ///
-    /// ## RAM Metrics
-    /// - Main RAM (weighted by `ram_score_weight`): Scores available memory ratio
-    /// - Swap RAM (weighted by `swap_ram_score_weight`): Scores available swap ratio
+    /// ## Memory Performance
+    /// 1. **RAM** (`ram_score_weight`)
+    ///    - Score = (1 - ram_used/ram_total) * weight
     ///
-    /// ## Network Metrics (weighted by `network_score_weight`)
-    /// - Inverse of total network traffic (rx + tx)
+    /// 2. **Swap** (`swap_ram_score_weight`)
+    ///    - Score = (1 - swap_used/swap_total) * weight
+    ///
+    /// ## Network Performance (`network_score_weight`)
+    /// - Inverse of total network traffic
+    /// - Score = 1 / (1 + rx + tx)
+    ///
+    /// # Final Score Calculation
+    /// 1. Combines all weighted component scores
+    /// 2. Applies exponential moving average:
+    ///    - Uses `moving_avg_window_size` and `moving_avg_smooth_factor`
+    ///    - Smooths score with previous performance data
     ///
     /// # Arguments
     ///
-    /// * `state` - Reference to AtomaState for accessing performance weight configurations
-    /// * `cpu_usage` - Current CPU usage as a float between 0.0 and 1.0
-    /// * `ram_used` - Currently used RAM in bytes
-    /// * `ram_total` - Total available RAM in bytes
-    /// * `ram_swap_used` - Currently used swap space in bytes
-    /// * `ram_swap_total` - Total available swap space in bytes
+    /// * `state` - Reference to AtomaState for accessing performance weights
+    /// * `cpu_usage` - CPU usage (0.0 to 1.0)
+    /// * `ram_used` - Used RAM in bytes
+    /// * `ram_total` - Total RAM in bytes
+    /// * `ram_swap_used` - Used swap space in bytes
+    /// * `ram_swap_total` - Total swap space in bytes
     /// * `network_rx` - Network receive throughput in bytes
     /// * `network_tx` - Network transmit throughput in bytes
-    /// * `num_gpus` - Number of GPUs in the system
+    /// * `num_gpus` - Number of GPUs
     /// * `gpu_memory_used` - Vector of used GPU memory per GPU in bytes
     /// * `gpu_memory_total` - Vector of total GPU memory per GPU in bytes
     /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages (0.0 to 1.0)
@@ -1992,33 +2009,13 @@ pub mod node_performance {
     ///
     /// Returns an error if:
     /// - Unable to retrieve performance weights from state
-    /// - Vector lengths don't match num_gpus
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let performance = get_node_performance(
-    ///     &state,
-    ///     0.5,                    // 50% CPU usage
-    ///     8_000_000_000,         // 8GB RAM used
-    ///     16_000_000_000,        // 16GB total RAM
-    ///     1_000_000_000,         // 1GB swap used
-    ///     4_000_000_000,         // 4GB total swap
-    ///     1_000_000,             // 1MB/s network rx
-    ///     500_000,               // 500KB/s network tx
-    ///     2,                     // 2 GPUs
-    ///     vec![8000, 7000],      // GPU memory used
-    ///     vec![10000, 10000],    // GPU memory total
-    ///     vec![0.6, 0.7],        // GPU execution %
-    ///     vec![75.0, 78.0],      // GPU temperatures
-    ///     vec![180.0, 190.0],    // GPU power usage
-    /// ).await?;
-    /// ```
+    /// - Unable to retrieve previous performance scores
     #[instrument(level = "trace", skip_all)]
     #[allow(clippy::similar_names)]
     #[allow(clippy::too_many_arguments)]
     pub async fn get_node_performance(
         state: &AtomaState,
+        node_small_id: i64,
         cpu_usage: f64,
         ram_used: i64,
         ram_total: i64,
@@ -2026,8 +2023,7 @@ pub mod node_performance {
         ram_swap_total: i64,
         network_rx: i64,
         network_tx: i64,
-        num_gpus: i32,
-        gpu_memory_used: Vec<i64>,
+        gpu_memory_free: Vec<i64>,
         gpu_memory_total: Vec<i64>,
         gpu_percentage_time_execution: Vec<f64>,
         gpu_temperatures: Vec<f64>,
@@ -2047,100 +2043,889 @@ pub mod node_performance {
             gpu_temp_max,
             gpu_power_threshold,
             gpu_power_max,
-            moving_avg_window_size: _moving_avg_window_size,
-            moving_avg_smooth_factor: _moving_avg_smooth_factor,
+            moving_avg_window_size,
+            moving_avg_smooth_factor,
         } = state.get_performance_weights().await?;
 
-        // NOTE: Calculate the GPU VRAM score, since we assume that node operators maximize for KV cache allocation,
-        // having more VRAM usage, that is, higher KV cache allocation is better. We compute the minimum VRAM usage percentage
-        // across all GPUs, and use that as the VRAM score.
-        let gpu_vram_score = gpu_memory_used
-            .iter()
-            .zip(gpu_memory_total.iter())
-            .map(|(used, total)| {
-                #[allow(clippy::cast_precision_loss)]
-                let used_percentage = (*used as f64) / (*total as f64);
-                gpu_vram_weight * used_percentage
-            })
-            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap_or(0f64);
+        let previous_performance_score = state.get_latest_performance_scores(node_small_id).await?;
 
-        // NOTE: Calculate the GPU execution score. Having lower execution rate means that the node has faced less overall
-        // load, and is therefore more available. We compute the average execution rate across all GPUs,
-        // and use that as the execution score.
-        let gpu_exec_score = gpu_percentage_time_execution
-            .iter()
-            .map(|&exec_rate| exec_rate * gpu_exec_avail_weight)
-            .sum::<f64>()
-            / f64::from(num_gpus);
-
-        // Calculate temperature factor through a step function that:
-        // - Returns 1.0 for temps <= 80°C
-        // - Linearly decreases from 1.0 to 0.0 between 80°C and 100°C
-        // - Returns 0.0 for temps >= 100°C
-        // NOTE: We take the minimum temperature across all GPUs, and use that as the temperature score.
-        let gpu_temp_score = gpu_temperatures
-            .iter()
-            .map(|&temp| {
-                let temp_factor = f64::max(
-                    0.0,
-                    1.0 - (temp - gpu_temp_threshold) / (gpu_temp_max - gpu_temp_threshold),
-                );
-                temp_factor * gpu_temp_weight
-            })
-            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap_or(0f64);
-
-        // Calculate the GPU power score. We use a step function that:
-        // - Returns 1.0 for power <= 200W
-        // - Linearly decreases from 1.0 to 0.0 between 200W and 300W
-        // - Returns 0.0 for power >= 300W
-        // NOTE: Having lower power usage means that the node is more energy efficient,
-        // and is therefore capable of running for longer periods of time and more sustainably. We compute the average power usage across all GPUs,
-        // and use that as the power score.
-        let gpu_power_score = gpu_power_usages
-            .iter()
-            .map(|&power| {
-                let power_factor = f64::max(
-                    0.0,
-                    1.0 - (power - gpu_power_threshold) / (gpu_power_max - gpu_power_threshold),
-                );
-                power_factor * gpu_power_weight
-            })
-            .sum::<f64>()
-            / f64::from(num_gpus);
-
-        let gpu_performance_score = gpu_vram_score.mul_add(
+        // --- GPU Subscores --- //
+        let gpu_vram_score = compute_gpu_vram_utilization_score(
+            &gpu_memory_free,
+            &gpu_memory_total,
             gpu_vram_weight,
-            gpu_exec_score.mul_add(
-                gpu_exec_avail_weight,
-                gpu_temp_score.mul_add(gpu_temp_weight, gpu_power_score * gpu_power_weight),
-            ),
+        );
+        let gpu_exec_score =
+            compute_gpu_execution_score(&gpu_percentage_time_execution, gpu_exec_avail_weight);
+        let gpu_temp_score = compute_gpu_temp_score(
+            &gpu_temperatures,
+            gpu_temp_threshold,
+            gpu_temp_max,
+            gpu_temp_weight,
+        );
+        let gpu_power_score = compute_gpu_power_score(
+            &gpu_power_usages,
+            gpu_power_threshold,
+            gpu_power_max,
+            gpu_power_weight,
+        );
+        let gpu_performance_score =
+            gpu_score_weight * (gpu_vram_score + gpu_exec_score + gpu_temp_score + gpu_power_score);
+
+        // --- CPU Subscore --- //
+        let cpu_score = compute_cpu_score(cpu_usage, cpu_score_weight);
+
+        // --- Memory Subscore --- //
+        let ram_score = compute_ram_score(ram_used, ram_total, ram_score_weight);
+        let swap_ram_score =
+            compute_swap_ram_score(ram_swap_used, ram_swap_total, swap_ram_score_weight);
+
+        // --- Network Subscore --- //
+        let network_score = compute_network_score(network_rx, network_tx, network_score_weight);
+
+        // --- Total Performance Score --- //
+        let total_current_performance_score = compute_total_current_performance_score(
+            cpu_score,
+            gpu_performance_score,
+            ram_score,
+            swap_ram_score,
+            network_score,
         );
 
-        let cpu_score = cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
-        #[allow(clippy::cast_precision_loss)]
-        let ram_score = (1.0 - (ram_used as f64) / (ram_total as f64)) * ram_score_weight;
-        #[allow(clippy::cast_precision_loss)]
-        let swap_ram_score =
-            (1.0 - ram_swap_used as f64) / (ram_swap_total as f64) * swap_ram_score_weight;
-        #[allow(clippy::cast_precision_loss)]
-        let network_score = 1.0 / (1.0 + network_rx as f64 + network_tx as f64);
-        let total_performance_score = cpu_score.mul_add(
-            cpu_score_weight,
-            gpu_performance_score.mul_add(
-                gpu_score_weight,
-                ram_score.mul_add(
-                    ram_score_weight,
-                    swap_ram_score.mul_add(
-                        swap_ram_score_weight,
-                        network_score.mul_add(network_score_weight, 0.0),
-                    ),
-                ),
-            ),
+        // --- Exponential Moving Average --- //
+        let total_performance_score = compute_exponential_moving_average(
+            total_current_performance_score,
+            previous_performance_score.map(|score| score.performance_score),
+            moving_avg_smooth_factor,
+            moving_avg_window_size,
         );
+
         Ok(NodePerformance {
             total_performance_score,
         })
+    }
+
+    /// Calculates a weighted score representing GPU VRAM utilization across multiple GPUs.
+    ///
+    /// This function computes a score based on the free VRAM percentage of the most utilized GPU.
+    /// A lower score indicates higher VRAM utilization, which is generally preferred for optimal
+    /// KV cache allocation in machine learning workloads.
+    ///
+    /// # Arguments
+    ///
+    /// * `gpu_memory_free` - A slice containing the amount of free memory (in bytes) for each GPU
+    /// * `gpu_memory_total` - A slice containing the total memory capacity (in bytes) for each GPU
+    /// * `gpu_vram_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted score where:
+    /// - Lower scores indicate higher VRAM utilization (preferred)
+    /// - Higher scores indicate lower VRAM utilization
+    /// - The score is scaled by `gpu_vram_weight`
+    /// - Returns 0.0 if there are no GPUs or if the slices are empty
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let gpu_memory_free = vec![4_000_000_000, 6_000_000_000];  // 4GB and 6GB free
+    /// let gpu_memory_total = vec![16_000_000_000, 16_000_000_000];  // Two 16GB GPUs
+    /// let gpu_vram_weight = 0.3;
+    ///
+    /// let score = compute_gpu_vram_utilization_score(
+    ///     &gpu_memory_free,
+    ///     &gpu_memory_total,
+    ///     gpu_vram_weight
+    /// );
+    /// // score ≈ 0.075 (0.3 * (4GB/16GB))
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - The function uses the GPU with the lowest free memory percentage to calculate the score,
+    ///   as this represents the most constrained resource
+    /// - The calculation assumes that higher VRAM utilization is better for performance
+    /// - Both input slices must be of equal length, representing the same GPUs in the same order
+    /// - Returns -1.0 if the input slices are empty (TODO: We will introduce other accelerators metrics in the future)
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_gpu_vram_utilization_score(
+        gpu_memory_free: &[i64],
+        gpu_memory_total: &[i64],
+        gpu_vram_weight: f64,
+    ) -> f64 {
+        // TODO: The current implementation is not correct. In production systems, using PagedAttention (e.g. vLLM), for optimized batched
+        // inference, KV cache is structured in both virtual and physical memory blocks. Moreover, these blocks are
+        // allocated in the VRAM, at the spawn of the node.
+        //
+        // The score should be computed based on the amount of how many virtual/physical blocks were allocated in total to a given model,
+        // and how many requests in parallel such node could handle. This means, that such computation should be model dependent.
+        //
+        // In case no GPU is available in the system, we return -1.0 to penalize for the lack of accelerators.
+        if gpu_memory_free.is_empty() || gpu_memory_total.is_empty() {
+            return -1.0;
+        }
+        gpu_vram_weight
+            * gpu_memory_free
+                .iter()
+                .zip(gpu_memory_total.iter())
+                .map(|(free, total)| (*free as f64) / (*total as f64))
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0f64)
+    }
+
+    /// Calculates a weighted score representing GPU execution availability across multiple GPUs.
+    ///
+    /// This function computes a score based on the average execution time percentage across all GPUs,
+    /// where lower execution time indicates more available GPU capacity. The final score is inverted
+    /// and weighted to align with the scoring system where higher scores indicate better availability.
+    ///
+    /// # Arguments
+    ///
+    /// * `gpu_percentage_time_execution` - A slice containing execution time percentages (0.0 to 1.0) for each GPU,
+    ///                                    where 1.0 represents 100% utilization
+    /// * `gpu_exec_avail_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted score where:
+    /// - Higher scores indicate more available GPU capacity (preferred)
+    /// - Lower scores indicate less available GPU capacity
+    /// - The score is scaled by `gpu_exec_avail_weight`
+    /// - Returns 0.0 if there are no GPUs or if the slice is empty
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let gpu_execution_times = vec![0.3, 0.5];  // 30% and 50% GPU utilization
+    /// let gpu_exec_weight = 0.3;
+    ///
+    /// let score = compute_gpu_execution_score(&gpu_execution_times, gpu_exec_weight);
+    /// // score ≈ 0.18 (0.3 * (1.0 - (0.3 + 0.5)/2))
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - The function averages execution percentages across all GPUs to get an overall utilization metric
+    /// - The average is inverted (1.0 - avg) since lower utilization indicates better availability
+    /// - The final score is weighted to integrate with the larger node performance scoring system
+    /// - Returns -1.0 if the input slice is empty (TODO: We will introduce other accelerators metrics in the future)
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_gpu_execution_score(
+        gpu_percentage_time_execution: &[f64],
+        gpu_exec_avail_weight: f64,
+    ) -> f64 {
+        if gpu_percentage_time_execution.is_empty() {
+            return -1.0;
+        }
+        // Lower execution percentage is better so invert the average
+        let avg_exec = gpu_percentage_time_execution.iter().sum::<f64>()
+            / (gpu_percentage_time_execution.len() as f64);
+        gpu_exec_avail_weight * (1.0 - avg_exec)
+    }
+
+    /// Calculates a normalized temperature score for a set of GPUs based on their temperatures.
+    ///
+    /// This function evaluates GPU temperatures against defined thresholds and produces a single score
+    /// representing the thermal state of the worst-performing GPU. The scoring uses a step function that:
+    ///
+    /// - Returns 1.0 for temperatures <= threshold (optimal performance)
+    /// - Returns 0.0 for temperatures >= max (critical temperature)
+    /// - Linearly scales between 1.0 and 0.0 for temperatures between threshold and max
+    ///
+    /// The final score is determined by the lowest-scoring GPU, as the system's performance
+    /// is constrained by its most thermally stressed component.
+    ///
+    /// # Arguments
+    ///
+    /// * `gpu_temperatures` - A slice of f64 values representing the temperature of each GPU in Celsius
+    /// * `threshold` - The temperature threshold below which performance is considered optimal (e.g., 80.0°C)
+    /// * `max` - The maximum acceptable temperature above which performance is considered critical (e.g., 100.0°C)
+    ///
+    /// # Returns
+    ///
+    /// Returns a f64 score between 0.0 and 1.0 where:
+    /// - 1.0 indicates all GPUs are operating at or below the optimal threshold
+    /// - 0.0 indicates at least one GPU has reached or exceeded the maximum temperature
+    /// - Values between 0.0 and 1.0 indicate linear degradation based on the worst-performing GPU
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let temperatures = vec![75.0, 82.0, 95.0];
+    /// let threshold = 80.0;
+    /// let max = 100.0;
+    ///
+    /// let score = score_gpu_temp(&temperatures, threshold, max);
+    /// // Returns approximately 0.25 because the worst temperature (95.0)
+    /// // is 75% of the way between threshold (80.0) and max (100.0)
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Returns 0.0 if the input slice is empty
+    /// - Uses partial_cmp for floating point comparisons, defaulting to 0.0 if comparison fails
+    /// - The linear scaling provides a smooth transition between optimal and critical temperatures
+    /// - Returns -1.0 if the input slice is empty (TODO: We will introduce other accelerators metrics in the future)
+    fn compute_gpu_temp_score(
+        gpu_temperatures: &[f64],
+        threshold: f64,
+        max: f64,
+        gpu_temp_weight: f64,
+    ) -> f64 {
+        if gpu_temperatures.is_empty() {
+            return -1.0;
+        }
+        // For each GPU, assign:
+        //   1.0 if temp <= threshold,
+        //   0.0 if temp >= max,
+        //   and linearly scaled in between.
+        // Finally, take the minimum score across all GPUs.
+        gpu_temp_weight
+            * gpu_temperatures
+                .iter()
+                .map(|&temp| {
+                    if temp <= threshold {
+                        1.0
+                    } else if temp >= max {
+                        0.0
+                    } else {
+                        1.0 - ((temp - threshold) / (max - threshold))
+                    }
+                })
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0.0)
+    }
+
+    /// Calculates a normalized power usage score for a set of GPUs based on their power consumption.
+    ///
+    /// This function evaluates GPU power usage against defined thresholds and produces a single score
+    /// representing the power efficiency state of the worst-performing GPU. The scoring uses a step function that:
+    ///
+    /// - Returns 1.0 for power usage <= threshold (optimal efficiency)
+    /// - Returns 0.0 for power usage >= max (critical power consumption)
+    /// - Linearly scales between 1.0 and 0.0 for power usage between threshold and max
+    ///
+    /// The final score is determined by the lowest-scoring GPU, as the system's efficiency
+    /// is constrained by its most power-hungry component.
+    ///
+    /// # Arguments
+    ///
+    /// * `gpu_power_usages` - A slice of f64 values representing the power usage of each GPU in Watts
+    /// * `gpu_power_threshold` - The power threshold below which efficiency is considered optimal (e.g., 200W)
+    /// * `gpu_power_max` - The maximum acceptable power usage above which efficiency is considered critical (e.g., 300W)
+    /// * `gpu_power_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted f64 score between 0.0 and 1.0 where:
+    /// - 1.0 indicates all GPUs are operating at or below the optimal power threshold
+    /// - 0.0 indicates at least one GPU has reached or exceeded the maximum power usage
+    /// - Values between 0.0 and 1.0 indicate linear degradation based on the worst-performing GPU
+    /// - The final score is scaled by `gpu_power_weight`
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let power_usages = vec![180.0, 220.0, 250.0];  // Power usage in Watts
+    /// let threshold = 200.0;
+    /// let max = 300.0;
+    /// let weight = 0.2;
+    ///
+    /// let score = compute_gpu_power_score(&power_usages, threshold, max, weight);
+    /// // Returns approximately 0.1 because:
+    /// // 1. Worst GPU (250W) is 50% between threshold (200W) and max (300W)
+    /// // 2. Score of 0.5 is then weighted by 0.2
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Returns 0.0 if the input slice is empty
+    /// - Uses partial_cmp for floating point comparisons, defaulting to 0.0 if comparison fails
+    /// - The linear scaling provides a smooth transition between optimal and critical power usage levels
+    /// - This score can be used as part of a larger node performance evaluation system
+    /// - Returns -1.0 if the input slice is empty (TODO: We will introduce other accelerators metrics in the future)
+    fn compute_gpu_power_score(
+        gpu_power_usages: &[f64],
+        gpu_power_threshold: f64,
+        gpu_power_max: f64,
+        gpu_power_weight: f64,
+    ) -> f64 {
+        if gpu_power_usages.is_empty() {
+            return -1.0;
+        }
+        // For each GPU, assign:
+        //   1.0 if power <= threshold,
+        //   0.0 if power >= max,
+        //   and linearly scaled in between.
+        // Finally, take the minimum score across all GPUs.
+        gpu_power_weight
+            * gpu_power_usages
+                .iter()
+                .map(|&power| {
+                    if power <= gpu_power_threshold {
+                        1.0
+                    } else if power >= gpu_power_max {
+                        0.0
+                    } else {
+                        1.0 - ((power - gpu_power_threshold)
+                            / (gpu_power_max - gpu_power_threshold))
+                    }
+                })
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0.0)
+    }
+
+    /// Calculates a normalized CPU usage score based on the percentage of CPU time used.
+    ///
+    /// This function computes a score based on the percentage of CPU time used, where lower usage
+    /// indicates better performance. The score is linearly scaled between 0.0 and 1.0, with 0.0
+    /// representing 100% CPU usage and 1.0 representing 0% CPU usage.
+    ///
+    /// # Arguments
+    ///
+    /// * `cpu_usage` - A f64 value representing the percentage of CPU time used (0.0 to 1.0)
+    /// * `cpu_score_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a f64 score between 0.0 and 1.0 where:
+    /// - 0.0 indicates 100% CPU usage
+    /// - 1.0 indicates 0% CPU usage
+    /// - Values between 0.0 and 1.0 indicate linear degradation based on CPU usage
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let cpu_usage = 0.5;
+    /// let weight = 0.3;
+    ///
+    /// let score = compute_cpu_score(cpu_usage, weight);
+    /// // Returns 0.15 because:
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Returns 0.0 if the input is 100% CPU usage
+    fn compute_cpu_score(cpu_usage: f64, cpu_score_weight: f64) -> f64 {
+        cpu_usage.mul_add(-cpu_score_weight, 1.0)
+    }
+
+    /// Calculates a normalized RAM usage score based on memory utilization.
+    ///
+    /// This function computes a score based on the percentage of RAM used, where lower usage
+    /// indicates better performance. The score is linearly scaled between 0.0 and 1.0, with 0.0
+    /// representing 100% RAM usage and 1.0 representing 0% RAM usage. The final score is weighted
+    /// by the provided `ram_score_weight` factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `ram_used` - The amount of RAM currently in use (in bytes)
+    /// * `ram_total` - The total amount of RAM available (in bytes)
+    /// * `ram_score_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted f64 score between 0.0 and `ram_score_weight` where:
+    /// - `ram_score_weight` indicates 0% RAM usage (best performance)
+    /// - 0.0 indicates 100% RAM usage (worst performance)
+    /// - Values between are linearly scaled based on RAM usage percentage
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let ram_used = 8 * 1024 * 1024 * 1024;  // 8GB used
+    /// let ram_total = 16 * 1024 * 1024 * 1024;  // 16GB total
+    /// let weight = 0.15;
+    ///
+    /// let score = compute_ram_score(ram_used, ram_total, weight);
+    /// // Returns 0.075 because:
+    /// // 1. RAM usage is 50% (8GB/16GB)
+    /// // 2. Available RAM percentage is 50% (1.0 - 0.5)
+    /// // 3. Final score is 0.5 * 0.15 = 0.075
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - The function assumes valid input where `ram_used` <= `ram_total`
+    /// - The score is part of a larger node performance evaluation system
+    /// - Higher scores indicate better RAM availability for tasks
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_ram_score(ram_used: i64, ram_total: i64, ram_score_weight: f64) -> f64 {
+        let ram_used_percentage = (ram_used as f64) / (ram_total as f64);
+        ram_score_weight * (1.0 - ram_used_percentage)
+    }
+
+    /// Calculates a normalized swap memory usage score based on swap space utilization.
+    ///
+    /// This function computes a score based on the percentage of swap memory used, where lower usage
+    /// indicates better performance. The score is linearly scaled between 0.0 and 1.0, with 0.0
+    /// representing 100% swap usage and 1.0 representing 0% swap usage. The final score is weighted
+    /// by the provided `swap_ram_score_weight` factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `ram_swap_used` - The amount of swap memory currently in use (in bytes)
+    /// * `ram_swap_total` - The total amount of swap memory available (in bytes)
+    /// * `swap_ram_score_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted f64 score between 0.0 and `swap_ram_score_weight` where:
+    /// - `swap_ram_score_weight` indicates 0% swap usage (best performance)
+    /// - 0.0 indicates 100% swap usage (worst performance)
+    /// - Values between are linearly scaled based on swap usage percentage
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let swap_used = 2 * 1024 * 1024 * 1024;  // 2GB swap used
+    /// let swap_total = 8 * 1024 * 1024 * 1024;  // 8GB total swap
+    /// let weight = 0.05;
+    ///
+    /// let score = compute_swap_ram_score(swap_used, swap_total, weight);
+    /// // Returns 0.0375 because:
+    /// // 1. Swap usage is 25% (2GB/8GB)
+    /// // 2. Available swap percentage is 75% (1.0 - 0.25)
+    /// // 3. Final score is 0.75 * 0.05 = 0.0375
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - The function assumes valid input where `ram_swap_used` <= `ram_swap_total`
+    /// - The score is part of a larger node performance evaluation system
+    /// - Higher scores indicate better swap memory availability
+    /// - Swap memory usage is generally less critical than RAM usage, hence typically lower weights
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_swap_ram_score(
+        ram_swap_used: i64,
+        ram_swap_total: i64,
+        swap_ram_score_weight: f64,
+    ) -> f64 {
+        let ram_swap_used_percentage = (ram_swap_used as f64) / (ram_swap_total as f64);
+        swap_ram_score_weight * (1.0 - ram_swap_used_percentage)
+    }
+
+    /// Calculates a normalized network performance score based on network traffic.
+    ///
+    /// This function computes a score based on the total network traffic (receive + transmit),
+    /// where lower traffic indicates better network availability. The score uses an inverse
+    /// relationship with traffic volume, scaled by the provided weight factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `network_rx` - The network receive traffic in bytes
+    /// * `network_tx` - The network transmit traffic in bytes
+    /// * `network_score_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Returns a weighted f64 score where:
+    /// - Higher scores indicate lower network utilization (better availability)
+    /// - Lower scores indicate higher network utilization
+    /// - The score is scaled by `network_score_weight`
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let rx = 1000;  // 1KB received
+    /// let tx = 2000;  // 2KB transmitted
+    /// let weight = 0.2;
+    ///
+    /// let score = compute_network_score(rx, tx, weight);
+    /// // Returns 0.066 because:
+    /// // 1. Base score = 1 / (1 + 1000 + 2000) = 0.333
+    /// // 2. Final score = 0.333 * 0.2 = 0.066
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Uses an inverse relationship to ensure higher traffic results in lower scores
+    /// - The denominator adds 1 to prevent division by zero
+    /// - The score is part of a larger node performance evaluation system
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_network_score(network_rx: i64, network_tx: i64, network_score_weight: f64) -> f64 {
+        let total_network_usage = network_rx as f64 + network_tx as f64;
+        network_score_weight * (1.0 / (1.0 + total_network_usage))
+    }
+
+    /// Computes the total current performance score based on the individual scores and weights.
+    ///
+    /// This function takes the individual performance scores and weights for each component and
+    /// computes the total performance score by summing them up.
+    ///
+    /// # Arguments
+    ///
+    /// * `cpu_score` - The score for the CPU performance
+    /// * `gpu_performance_score` - The score for the GPU performance
+    /// * `ram_score` - The score for the RAM performance
+    /// * `swap_ram_score` - The score for the swap RAM performance
+    /// * `network_score` - The score for the network performance
+    ///
+    /// # Returns
+    ///
+    /// Returns a f64 score between 0.0 and 1.0 where:
+    /// - 0.0 indicates the worst performance
+    /// - 1.0 indicates the best performance
+    fn compute_total_current_performance_score(
+        cpu_score: f64,
+        gpu_performance_score: f64,
+        ram_score: f64,
+        swap_ram_score: f64,
+        network_score: f64,
+    ) -> f64 {
+        cpu_score + gpu_performance_score + ram_score + swap_ram_score + network_score
+    }
+
+    /// Computes an exponential moving average (EMA) based on the current value and previous average.
+    ///
+    /// This function calculates a weighted average that gives more importance to recent values while
+    /// still considering historical data. The weighting is determined by the smooth factor and window size.
+    ///
+    /// # Arguments
+    ///
+    /// * `current_value` - The newest value to include in the average
+    /// * `previous_average` - Option containing the previous moving average, if any
+    /// * `smooth_factor` - Factor controlling how quickly the EMA responds to new values (0.0 to 1.0)
+    /// * `window_size` - Size of the moving window for the average
+    ///
+    /// # Returns
+    ///
+    /// Returns the new exponential moving average as an f64.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let current = 0.75;
+    /// let previous = Some(0.70);
+    /// let smooth_factor = 0.7;
+    /// let window_size = 10;
+    ///
+    /// let ema = compute_exponential_moving_average(current, previous, smooth_factor, window_size);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - If no previous average exists, returns the current value
+    /// - The smooth factor determines how quickly the EMA responds to changes:
+    ///   - Higher values (closer to 1.0) give more weight to recent values
+    ///   - Lower values (closer to 0.0) give more weight to historical values
+    /// - The window size affects the overall smoothing effect:
+    ///   - Larger windows result in more gradual changes
+    ///   - Smaller windows allow for more rapid adaptation to new values
+    fn compute_exponential_moving_average(
+        current_value: f64,
+        previous_average: Option<f64>,
+        smooth_factor: f64,
+        window_size: i32,
+    ) -> f64 {
+        previous_average.map_or(current_value, |prev_avg| {
+            let alpha = smooth_factor / (1.0 + f64::from(window_size));
+            current_value.mul_add(alpha, prev_avg * (1.0 - alpha))
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::state_manager::tests::{setup_test_db, truncate_tables};
+
+        #[test]
+        fn test_exponential_moving_average() {
+            // Test with no previous average
+            let ema1 = compute_exponential_moving_average(0.5, None, 0.7, 10);
+            assert!((ema1 - 0.5).abs() < 1e-10);
+
+            // Test with previous average
+            let ema2 = compute_exponential_moving_average(0.8, Some(0.5), 0.7, 10);
+            // Expected: 0.8 * (0.7/11) + 0.5 * (1 - 0.7/11) ≈ 0.52
+            assert!((ema2 - 0.519_090_909_090_909).abs() < 1e-10);
+
+            // Test with extreme smooth factor
+            let ema3 = compute_exponential_moving_average(1.0, Some(0.0), 1.0, 10);
+            // Expected: 1.0 * (1.0/11) + 0.0 * (1 - 1.0/11) ≈ 0.09
+            assert!((ema3 - 0.090_909_090_909_090_91).abs() < 1e-10);
+
+            // Test with zero smooth factor
+            let ema4 = compute_exponential_moving_average(1.0, Some(0.5), 0.0, 10);
+            // Expected: 1.0 * (0.0/11) + 0.5 * (1 - 0.0/11) ≈ 0.5
+            assert!((ema4 - 0.5).abs() < 1e-10);
+        }
+
+        // Helper function to create default performance weights
+        const fn default_performance_weights() -> PerformanceWeights {
+            PerformanceWeights {
+                gpu_score_weight: 0.4,
+                cpu_score_weight: 0.2,
+                ram_score_weight: 0.15,
+                swap_ram_score_weight: 0.05,
+                network_score_weight: 0.2,
+                gpu_vram_weight: 0.3,
+                gpu_exec_avail_weight: 0.3,
+                gpu_temp_weight: 0.2,
+                gpu_power_weight: 0.2,
+                gpu_temp_threshold: 80.0,
+                gpu_temp_max: 100.0,
+                gpu_power_threshold: 200.0,
+                gpu_power_max: 300.0,
+                moving_avg_window_size: 10,
+                moving_avg_smooth_factor: 0.7,
+            }
+        }
+
+        async fn insert_performance_weights(state: &AtomaState) -> Result<()> {
+            state
+                .insert_performance_weights(default_performance_weights())
+                .await?;
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn test_optimal_performance() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            let result = get_node_performance(
+                &state,
+                1,
+                0.5,                     // Balanced CPU usage
+                8 * 1024 * 1024 * 1024,  // 8GB RAM used
+                16 * 1024 * 1024 * 1024, // 16GB RAM total
+                0,                       // No swap used
+                8 * 1024 * 1024 * 1024,  // 8GB swap total
+                1000,                    // Low network usage
+                1000,
+                vec![14 * 1024 * 1024 * 1024, 14 * 1024 * 1024 * 1024], // 8GB VRAM used per GPU
+                vec![16 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024], // 16GB VRAM total per GPU
+                vec![0.3, 0.3],                                         // Low GPU execution time
+                vec![60.0, 65.0],                                       // Good temperatures
+                vec![150.0, 160.0],                                     // Efficient power usage
+            )
+            .await
+            .unwrap();
+            assert!(
+                result.total_performance_score > 1.3,
+                "Expected high performance score, got {}",
+                result.total_performance_score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_poor_performance() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            let result = get_node_performance(
+                &state,
+                1,
+                0.95,                    // High CPU usage
+                15 * 1024 * 1024 * 1024, // Nearly full RAM
+                16 * 1024 * 1024 * 1024,
+                7 * 1024 * 1024 * 1024, // High swap usage
+                8 * 1024 * 1024 * 1024,
+                100_000, // High network usage
+                100_000,
+                vec![15 * 1024 * 1024 * 1024, 15 * 1024 * 1024 * 1024], // High VRAM usage
+                vec![16 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024],
+                vec![0.9, 0.9],     // High GPU utilization
+                vec![95.0, 98.0],   // High temperatures
+                vec![280.0, 290.0], // High power usage
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                result.total_performance_score < 1.0,
+                "Expected low performance score, got {}",
+                result.total_performance_score
+            );
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn test_single_gpu_system() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            let result = get_node_performance(
+                &state,
+                1,
+                0.6,
+                8 * 1024 * 1024 * 1024,
+                16 * 1024 * 1024 * 1024,
+                0,
+                8 * 1024 * 1024 * 1024,
+                2000,
+                2000,
+                vec![8 * 1024 * 1024 * 1024],
+                vec![16 * 1024 * 1024 * 1024],
+                vec![0.4],
+                vec![70.0],
+                vec![180.0],
+            )
+            .await
+            .unwrap();
+            assert!(
+                result.total_performance_score > 0.0,
+                "Single GPU system should produce valid score, got {}",
+                result.total_performance_score
+            );
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn test_no_gpus() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            let result = get_node_performance(
+                &state,
+                1,
+                0.5,
+                8 * 1024 * 1024 * 1024,
+                16 * 1024 * 1024 * 1024,
+                8 * 1024 * 1024 * 1024,
+                1000,
+                1000,
+                0,
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                result.total_performance_score < 0.0,
+                "System without GPUs should still get valid score, got {}",
+                result.total_performance_score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_temperature_thresholds() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            // Test different temperature scenarios
+            let temps = vec![
+                (vec![70.0, 75.0], "below threshold"),
+                (vec![85.0, 90.0], "between threshold and max"),
+                (vec![105.0, 110.0], "above max"),
+            ];
+
+            for (gpu_temps, scenario) in temps {
+                let result = get_node_performance(
+                    &state,
+                    1,
+                    0.5,
+                    8 * 1024 * 1024 * 1024,
+                    16 * 1024 * 1024 * 1024,
+                    0,
+                    8 * 1024 * 1024 * 1024,
+                    1000,
+                    1000,
+                    vec![8 * 1024 * 1024 * 1024, 8 * 1024 * 1024 * 1024],
+                    vec![16 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024],
+                    vec![0.3, 0.3],
+                    gpu_temps,
+                    vec![150.0, 160.0],
+                )
+                .await
+                .unwrap();
+                match scenario {
+                    "below threshold" => assert!(
+                        result.total_performance_score > 1.31,
+                        "Expected higher score for low temperatures, got {}",
+                        result.total_performance_score
+                    ),
+                    "between threshold and max" => assert!(
+                        result.total_performance_score > 1.28
+                            && result.total_performance_score < 1.29,
+                        "Expected medium score for medium temperatures, got {}",
+                        result.total_performance_score
+                    ),
+                    "above max" => assert!(
+                        result.total_performance_score < 1.25,
+                        "Expected low score for high temperatures, got {}",
+                        result.total_performance_score
+                    ),
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn test_power_usage_thresholds() {
+            let state = setup_test_db().await;
+            truncate_tables(&state.db).await;
+            insert_performance_weights(&state)
+                .await
+                .expect("Failed to insert performance weights");
+
+            // Test different power usage scenarios
+            let power_usages = vec![
+                (vec![150.0, 160.0], "below threshold"),
+                (vec![250.0, 260.0], "between threshold and max"),
+                (vec![310.0, 320.0], "above max"),
+            ];
+
+            for (gpu_power, scenario) in power_usages {
+                let result = get_node_performance(
+                    &state,
+                    1,
+                    0.5,
+                    8 * 1024 * 1024 * 1024,
+                    16 * 1024 * 1024 * 1024,
+                    0,
+                    8 * 1024 * 1024 * 1024,
+                    1000,
+                    1000,
+                    vec![8 * 1024 * 1024 * 1024, 8 * 1024 * 1024 * 1024],
+                    vec![16 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024],
+                    vec![0.3, 0.3],
+                    vec![70.0, 75.0],
+                    gpu_power,
+                )
+                .await
+                .unwrap();
+                match scenario {
+                    "below threshold" => assert!(
+                        result.total_performance_score > 1.32,
+                        "Expected higher score for low power usage, got {}",
+                        result.total_performance_score
+                    ),
+                    "between threshold and max" => assert!(
+                        result.total_performance_score > 1.28
+                            && result.total_performance_score < 1.29,
+                        "Expected medium score for medium power usage, got {}",
+                        result.total_performance_score
+                    ),
+                    "above max" => assert!(
+                        result.total_performance_score < 1.25,
+                        "Expected low score for high power usage, got {}",
+                        result.total_performance_score
+                    ),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }

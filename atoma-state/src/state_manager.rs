@@ -345,11 +345,19 @@ impl AtomaState {
     ///     state_manager.get_latest_performance_scores().await
     /// }
     #[instrument(level = "trace", skip_all)]
-    pub async fn get_latest_performance_scores(&self) -> Result<NodePerformanceScore> {
-        let scores = sqlx::query("SELECT * FROM node_performance_scores ORDER BY id DESC LIMIT 1")
-            .fetch_one(&self.db)
+    pub async fn get_latest_performance_scores(
+        &self,
+        node_small_id: i64,
+    ) -> Result<Option<NodePerformanceScore>> {
+        let scores = sqlx::query("SELECT * FROM node_performance_scores WHERE node_small_id = $1 ORDER BY id DESC LIMIT 1")
+            .bind(node_small_id)
+            .fetch_optional(&self.db)
             .await?;
-        Ok(NodePerformanceScore::from_row(&scores)?)
+        scores
+            .map(|scores| {
+                NodePerformanceScore::from_row(&scores).map_err(AtomaStateManagerError::from)
+            })
+            .transpose()
     }
 
     /// Inserts a new performance score for a node into the database.
@@ -5024,21 +5032,39 @@ pub mod validation {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::types::NodeMetrics;
 
     use super::*;
     use uuid::Uuid;
 
-    const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
+    pub const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
 
-    async fn setup_test_db() -> AtomaState {
+    /// Creates a new AtomaState instance for testing.
+    ///
+    /// # Returns
+    ///
+    /// - `AtomaState`: A new AtomaState instance.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the database connection pool is not valid.
+    pub async fn setup_test_db() -> AtomaState {
         AtomaState::new_from_url(POSTGRES_TEST_DB_URL)
             .await
             .unwrap()
     }
 
-    async fn truncate_tables(db: &sqlx::PgPool) {
+    /// Truncates all tables in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - The database connection pool.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the database connection pool is not valid.
+    pub async fn truncate_tables(db: &sqlx::PgPool) {
         // List all your tables here
         sqlx::query(
             "TRUNCATE TABLE
@@ -6861,10 +6887,10 @@ mod tests {
         .await?;
 
         // Act
-        let latest_scores = state.get_latest_performance_scores().await?;
+        let latest_scores = state.get_latest_performance_scores(1).await?;
 
         // Assert
-        assert!((latest_scores.performance_score - 96.5).abs() < f64::EPSILON);
+        assert!((latest_scores.unwrap().performance_score - 96.5).abs() < f64::EPSILON);
 
         Ok(())
     }
@@ -6877,8 +6903,8 @@ mod tests {
         truncate_tables(&state.db).await;
 
         // Act & Assert
-        let result = state.get_latest_performance_scores().await;
-        assert!(result.is_err());
+        let result = state.get_latest_performance_scores(1).await;
+        assert!(result.unwrap().is_none());
 
         Ok(())
     }
