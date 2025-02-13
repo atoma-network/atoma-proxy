@@ -1372,12 +1372,6 @@ pub mod openai_api {
         /// It can be either a system message, a user message, an assistant message, or a tool message.
         #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
         #[serde(tag = "role", rename_all = "snake_case")]
-        #[schema(title = "Message", 
-            example = json!({
-                "role": "assistant",
-                "content": "Hello! How can I help you today?"
-            })
-        )]
         pub enum ChatCompletionMessage {
             /// The role of the messages author, in this case system.
             #[schema(title = "System")]
