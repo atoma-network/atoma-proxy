@@ -1146,7 +1146,9 @@ pub mod openai_api {
         pub choices: Vec<completion_choice::ChatCompletionChunkChoice>,
 
         /// Usage statistics for the completion request.
-        #[schema(example = "{\"prompt_tokens\": 100, \"completion_tokens\": 200, \"total_tokens\": 300}")]
+        #[schema(
+            example = "{\"prompt_tokens\": 100, \"completion_tokens\": 200, \"total_tokens\": 300}"
+        )]
         #[serde(skip_serializing_if = "Option::is_none")]
         pub usage: Option<usage::CompletionUsage>,
     }
