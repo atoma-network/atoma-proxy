@@ -230,6 +230,7 @@ pub struct NodeDistribution {
 }
 
 /// Response for getting grafana graphs.
+///
 /// This struct represents the response for the get_grafana_graphs endpoint.
 /// It's vector of tuples where the first element is the name of the dashboard and the second element tuple of panels.
 /// Each panel has a title and a graph data.
