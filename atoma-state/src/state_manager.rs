@@ -5054,7 +5054,7 @@ mod tests {
                 node_metrics,
                 performance_weights,
                 node_performance_scores
-            CASCADE",
+            RESTART IDENTITY CASCADE",
         )
         .execute(db)
         .await
@@ -6679,6 +6679,7 @@ mod tests {
     async fn test_get_performance_weights() -> Result<()> {
         // Create test database
         let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
 
         // Insert test performance weights
         let older_weights = PerformanceWeights {
@@ -6729,59 +6730,62 @@ mod tests {
         let retrieved_weights = state.get_performance_weights().await?;
 
         // Verify that we got the newer weights
-        assert_eq!(
-            retrieved_weights.gpu_score_weight,
-            newer_weights.gpu_score_weight
+        assert!(
+            (retrieved_weights.gpu_score_weight - newer_weights.gpu_score_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.cpu_score_weight,
-            newer_weights.cpu_score_weight
+        assert!(
+            (retrieved_weights.cpu_score_weight - newer_weights.cpu_score_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.ram_score_weight,
-            newer_weights.ram_score_weight
+        assert!(
+            (retrieved_weights.ram_score_weight - newer_weights.ram_score_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.network_score_weight,
-            newer_weights.network_score_weight
+        assert!(
+            (retrieved_weights.network_score_weight - newer_weights.network_score_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.swap_ram_score_weight,
-            newer_weights.swap_ram_score_weight
+        assert!(
+            (retrieved_weights.swap_ram_score_weight - newer_weights.swap_ram_score_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.gpu_vram_weight,
-            newer_weights.gpu_vram_weight
+        assert!(
+            (retrieved_weights.gpu_vram_weight - newer_weights.gpu_vram_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.gpu_exec_avail_weight,
-            newer_weights.gpu_exec_avail_weight
+        assert!(
+            (retrieved_weights.gpu_exec_avail_weight - newer_weights.gpu_exec_avail_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.gpu_temp_weight,
-            newer_weights.gpu_temp_weight
+        assert!(
+            (retrieved_weights.gpu_temp_weight - newer_weights.gpu_temp_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.gpu_power_weight,
-            newer_weights.gpu_power_weight
+        assert!(
+            (retrieved_weights.gpu_power_weight - newer_weights.gpu_power_weight).abs()
+                < f64::EPSILON
         );
-        assert_eq!(
-            retrieved_weights.gpu_temp_threshold,
-            newer_weights.gpu_temp_threshold
+        assert!(
+            (retrieved_weights.gpu_temp_threshold - newer_weights.gpu_temp_threshold).abs()
+                < f64::EPSILON
         );
-        assert_eq!(retrieved_weights.gpu_temp_max, newer_weights.gpu_temp_max);
-        assert_eq!(
-            retrieved_weights.gpu_power_threshold,
-            newer_weights.gpu_power_threshold
+        assert!((retrieved_weights.gpu_temp_max - newer_weights.gpu_temp_max).abs() < f64::EPSILON);
+        assert!(
+            (retrieved_weights.gpu_power_threshold - newer_weights.gpu_power_threshold).abs()
+                < f64::EPSILON
         );
-        assert_eq!(retrieved_weights.gpu_power_max, newer_weights.gpu_power_max);
+        assert!(
+            (retrieved_weights.gpu_power_max - newer_weights.gpu_power_max).abs() < f64::EPSILON
+        );
         assert_eq!(
             retrieved_weights.moving_avg_window_size,
             newer_weights.moving_avg_window_size
         );
-        assert_eq!(
-            retrieved_weights.moving_avg_smooth_factor,
-            newer_weights.moving_avg_smooth_factor
+        assert!(
+            (retrieved_weights.moving_avg_smooth_factor - newer_weights.moving_avg_smooth_factor)
+                .abs()
+                < f64::EPSILON
         );
 
         // Test error case when no weights exist
@@ -6802,6 +6806,7 @@ mod tests {
     async fn test_get_latest_performance_scores() -> Result<()> {
         // Arrange
         let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
 
         // Insert test performance weights first since they're referenced by node_performance_scores
         sqlx::query(
@@ -6859,7 +6864,7 @@ mod tests {
         let latest_scores = state.get_latest_performance_scores().await?;
 
         // Assert
-        assert_eq!(latest_scores.performance_score, 96.5);
+        assert!((latest_scores.performance_score - 96.5).abs() < f64::EPSILON);
 
         Ok(())
     }
@@ -6873,6 +6878,155 @@ mod tests {
 
         // Act & Assert
         let result = state.get_latest_performance_scores().await;
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_success() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights first
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4) // gpu_score_weight
+        .bind(0.2) // cpu_score_weight
+        .bind(0.1) // ram_score_weight
+        .bind(0.1) // network_score_weight
+        .bind(0.2) // swap_ram_score_weight
+        .bind(0.3) // gpu_vram_weight
+        .bind(0.3) // gpu_exec_avail_weight
+        .bind(0.2) // gpu_temp_weight
+        .bind(0.2) // gpu_power_weight
+        .bind(70.0) // gpu_temp_threshold
+        .bind(85.0) // gpu_temp_max
+        .bind(200.0) // gpu_power_threshold
+        .bind(250.0) // gpu_power_max
+        .bind(10) // moving_avg_window_size
+        .bind(0.5) // moving_avg_smooth_factor
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let result = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+
+        // Assert
+        assert!(result.is_ok());
+
+        // Verify the insertion
+        let inserted_score = sqlx::query(
+            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id 
+             FROM node_performance_scores 
+             WHERE node_small_id = $1",
+        )
+        .bind(1)
+        .fetch_one(&state.db)
+        .await?;
+        let inserted_score = NodePerformanceScore::from_row(&inserted_score)?;
+
+        assert_eq!(inserted_score.node_small_id, 1);
+        assert_eq!(inserted_score.timestamp_secs, 1_234_567_890);
+        assert!((inserted_score.performance_score - 95.5).abs() < f64::EPSILON);
+        assert_eq!(inserted_score.weights_id, 1); // First weights record
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_multiple_records() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4)
+        .bind(0.2)
+        .bind(0.1)
+        .bind(0.1)
+        .bind(0.2)
+        .bind(0.3)
+        .bind(0.3)
+        .bind(0.2)
+        .bind(0.2)
+        .bind(70.0)
+        .bind(85.0)
+        .bind(200.0)
+        .bind(250.0)
+        .bind(10)
+        .bind(0.5)
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let result1 = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+        let result2 = state.insert_node_performance(1, 1_234_567_891, 96.5).await;
+        let result3 = state.insert_node_performance(2, 1_234_567_892, 97.5).await;
+
+        // Assert
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert!(result3.is_ok());
+
+        // Verify all insertions
+        let scores = sqlx::query(
+            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id
+             FROM node_performance_scores 
+             ORDER BY timestamp_secs",
+        )
+        .fetch_all(&state.db)
+        .await?;
+        let scores = scores
+            .iter()
+            .map(|row| NodePerformanceScore::from_row(row).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(scores.len(), 3);
+
+        assert_eq!(scores[0].node_small_id, 1);
+        assert_eq!(scores[0].timestamp_secs, 1_234_567_890);
+        assert!((scores[0].performance_score - 95.5).abs() < f64::EPSILON);
+
+        assert_eq!(scores[1].node_small_id, 1);
+        assert_eq!(scores[1].timestamp_secs, 1_234_567_891);
+        assert!((scores[1].performance_score - 96.5).abs() < f64::EPSILON);
+
+        assert_eq!(scores[2].node_small_id, 2);
+        assert_eq!(scores[2].timestamp_secs, 1_234_567_892);
+        assert!((scores[2].performance_score - 97.5).abs() < f64::EPSILON);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_no_weights() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Act
+        let result = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+
+        // Assert
         assert!(result.is_err());
 
         Ok(())
