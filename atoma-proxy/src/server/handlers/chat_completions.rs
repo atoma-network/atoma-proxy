@@ -1286,6 +1286,7 @@ pub mod openai_api {
         #[serde(tag = "role", rename_all = "snake_case")]
         pub enum ChatCompletionMessage {
             /// The role of the messages author, in this case system.
+            #[schema(title = "System")]
             System {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1295,6 +1296,7 @@ pub mod openai_api {
                 name: Option<String>,
             },
             /// The role of the messages author, in this case user.
+            #[schema(title = "User")]
             User {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1304,6 +1306,7 @@ pub mod openai_api {
                 name: Option<String>,
             },
             /// The role of the messages author, in this case assistant.
+            #[schema(title = "Assistant")]
             Assistant {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1319,6 +1322,7 @@ pub mod openai_api {
                 tool_calls: Vec<tools::ToolCall>,
             },
             /// The role of the messages author, in this case tool.
+            #[schema(title = "Tool")]
             Tool {
                 /// The contents of the message.
                 #[serde(default, skip_serializing_if = "Option::is_none")]
