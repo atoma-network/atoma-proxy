@@ -2680,6 +2680,7 @@ pub mod node_performance {
         }
 
         #[tokio::test]
+        #[serial_test::serial]
         async fn test_optimal_performance() {
             let state = setup_test_db().await;
             truncate_tables(&state.db).await;
@@ -2713,6 +2714,7 @@ pub mod node_performance {
         }
 
         #[tokio::test]
+        #[serial_test::serial]
         async fn test_poor_performance() {
             let state = setup_test_db().await;
             truncate_tables(&state.db).await;
@@ -2816,6 +2818,7 @@ pub mod node_performance {
         }
 
         #[tokio::test]
+        #[serial_test::serial]
         async fn test_temperature_thresholds() {
             let state = setup_test_db().await;
             truncate_tables(&state.db).await;
