@@ -583,6 +583,30 @@ paths:
               schema: {}
         '500':
           description: Failed to get node distribution
+  /get_graphs:
+    get:
+      tags:
+      - Stats
+      summary: Get graphs.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing a list of graphs with data
+          - `Ok(Json<Value>)` - Successfully retrieved graphs
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
+      operationId: get_graphs
+      responses:
+        '200':
+          description: Retrieves all graphs
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to get graphs
 components:
   schemas:
     AuthRequest:

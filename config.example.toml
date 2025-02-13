@@ -27,6 +27,9 @@ hf_token = "<API_KEY>" # Hugging face api token, required if you want to access 
 
 [atoma_proxy_service]
 service_bind_address = "0.0.0.0:8081" # This should match the port in the docker-compose.yml
+grafana_url = "" # Grafana URL
+grafana_api_token = "" # Grafana api token (read only access is sufficient)
+grafana_dashboard_tag="" # Only dashboards tagged with this tag will be proxied
 
 [atoma_auth]
 secret_key = "secret_key" # Secret key for the tokens generation

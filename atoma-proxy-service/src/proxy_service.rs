@@ -14,7 +14,7 @@ use tracing::instrument;
 use utoipa::OpenApi;
 
 use crate::{
-    components::openapi::openapi_router,
+    components::{grafana::Grafana, openapi::openapi_router},
     handlers::{
         auth::auth_router, stacks::stacks_router, stats::stats_router,
         subscriptions::subscriptions_router, tasks::tasks_router,
@@ -63,6 +63,9 @@ pub struct ProxyServiceState {
 
     /// List of models and their modalities.
     pub models_with_modalities: HashMap<String, Vec<ModelModality>>,
+
+    /// Grafana client for fetching dashboards.
+    pub grafana: Grafana,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
