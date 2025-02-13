@@ -45,6 +45,12 @@ CREATE TABLE performance_weights (
 
     -- GPU power usage specific weight
     gpu_power_weight DOUBLE PRECISION NOT NULL,
+
+    -- Moving average window size for the time series performance score calculation
+    moving_avg_window_size INTEGER NOT NULL
+
+    -- Moving average smooth factor for the time series performance score calculation
+    moving_avg_smooth_factor DOUBLE PRECISION NOT NULL
 );
 
 -- This table stores the performance scores for each node at a given timestamp

@@ -1662,7 +1662,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
         )));
     }
 
-    let node_performance = utils::node_performance::get_node_performance(
+    let node_performance = node_performance::get_node_performance(
         &state_manager.state,
         f64::from(cpu_usage),
         ram_used as i64,
@@ -1907,240 +1907,242 @@ pub mod utils {
             .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
         Ok(())
     }
+}
 
-    pub mod node_performance {
-        use serde::{Deserialize, Serialize};
-        use sqlx::FromRow;
-        use tracing::instrument;
+pub mod node_performance {
+    use serde::{Deserialize, Serialize};
+    use sqlx::FromRow;
+    use tracing::instrument;
 
-        use crate::{state_manager::Result, types::PerformanceWeights, AtomaState};
+    use crate::{state_manager::Result, types::PerformanceWeights, AtomaState};
 
-        /// Represents the performance metrics and scoring weights for a node in the Atoma network.
-        ///
-        /// This struct combines both the overall performance score of a node and the weights used
-        /// to calculate that score from individual hardware component metrics.
-        #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
-        pub struct NodePerformance {
-            /// The aggregate performance score of the node, calculated by combining
-            /// weighted scores from GPU, CPU, RAM, and network performance metrics
-            pub total_performance_score: f64,
-        }
+    /// Represents the performance metrics and scoring weights for a node in the Atoma network.
+    ///
+    /// This struct combines both the overall performance score of a node and the weights used
+    /// to calculate that score from individual hardware component metrics.
+    #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+    pub struct NodePerformance {
+        /// The aggregate performance score of the node, calculated by combining
+        /// weighted scores from GPU, CPU, RAM, and network performance metrics
+        pub total_performance_score: f64,
+    }
 
-        /// Calculates a comprehensive performance score for a node based on its hardware metrics and resource utilization.
-        ///
-        /// This function evaluates node performance across multiple dimensions including GPU, CPU, RAM, and network metrics.
-        /// It uses configurable weights to compute a normalized score that represents the node's overall capability and
-        /// efficiency.
-        ///
-        /// # Performance Scoring Components
-        ///
-        /// ## GPU Metrics (weighted by `gpu_score_weight`)
-        /// - **VRAM Usage**: Higher is better, indicates KV cache allocation efficiency
-        ///   - Uses minimum usage percentage across all GPUs
-        ///   - Weighted by `gpu_vram_weight`
-        ///
-        /// - **Execution Availability**: Lower is better, indicates GPU availability
-        ///   - Averages execution rates across all GPUs
-        ///   - Weighted by `gpu_exec_avail_weight`
-        ///
-        /// - **Temperature**: Lower is better, using step function:
-        ///   - 1.0 for temps <= threshold (typically 80°C)
-        ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 100°C)
-        ///   - 0.0 for temps >= max
-        ///   - Uses minimum score across all GPUs
-        ///   - Weighted by `gpu_temp_weight`
-        ///
-        /// - **Power Usage**: Lower is better, using step function:
-        ///   - 1.0 for power <= threshold (typically 200W)
-        ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 300W)
-        ///   - 0.0 for power >= max
-        ///   - Averages across all GPUs
-        ///   - Weighted by `gpu_power_weight`
-        ///
-        /// ## CPU Metrics (weighted by `cpu_score_weight`)
-        /// - Balances current usage with available capacity
-        ///
-        /// ## RAM Metrics
-        /// - Main RAM (weighted by `ram_score_weight`): Scores available memory ratio
-        /// - Swap RAM (weighted by `swap_ram_score_weight`): Scores available swap ratio
-        ///
-        /// ## Network Metrics (weighted by `network_score_weight`)
-        /// - Inverse of total network traffic (rx + tx)
-        ///
-        /// # Arguments
-        ///
-        /// * `state` - Reference to AtomaState for accessing performance weight configurations
-        /// * `cpu_usage` - Current CPU usage as a float between 0.0 and 1.0
-        /// * `ram_used` - Currently used RAM in bytes
-        /// * `ram_total` - Total available RAM in bytes
-        /// * `ram_swap_used` - Currently used swap space in bytes
-        /// * `ram_swap_total` - Total available swap space in bytes
-        /// * `network_rx` - Network receive throughput in bytes
-        /// * `network_tx` - Network transmit throughput in bytes
-        /// * `num_gpus` - Number of GPUs in the system
-        /// * `gpu_memory_used` - Vector of used GPU memory per GPU in bytes
-        /// * `gpu_memory_total` - Vector of total GPU memory per GPU in bytes
-        /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages (0.0 to 1.0)
-        /// * `gpu_temperatures` - Vector of GPU temperatures in Celsius
-        /// * `gpu_power_usages` - Vector of GPU power usage in Watts
-        ///
-        /// # Returns
-        ///
-        /// * `Result<NodePerformance>` - Structure containing the calculated total performance score
-        ///
-        /// # Errors
-        ///
-        /// Returns an error if:
-        /// - Unable to retrieve performance weights from state
-        /// - Vector lengths don't match num_gpus
-        ///
-        /// # Example
-        ///
-        /// ```rust,ignore
-        /// let performance = get_node_performance(
-        ///     &state,
-        ///     0.5,                    // 50% CPU usage
-        ///     8_000_000_000,         // 8GB RAM used
-        ///     16_000_000_000,        // 16GB total RAM
-        ///     1_000_000_000,         // 1GB swap used
-        ///     4_000_000_000,         // 4GB total swap
-        ///     1_000_000,             // 1MB/s network rx
-        ///     500_000,               // 500KB/s network tx
-        ///     2,                     // 2 GPUs
-        ///     vec![8000, 7000],      // GPU memory used
-        ///     vec![10000, 10000],    // GPU memory total
-        ///     vec![0.6, 0.7],        // GPU execution %
-        ///     vec![75.0, 78.0],      // GPU temperatures
-        ///     vec![180.0, 190.0],    // GPU power usage
-        /// ).await?;
-        /// ```
-        #[instrument(level = "trace", skip_all)]
-        #[allow(clippy::similar_names)]
-        #[allow(clippy::too_many_arguments)]
-        pub async fn get_node_performance(
-            state: &AtomaState,
-            cpu_usage: f64,
-            ram_used: i64,
-            ram_total: i64,
-            ram_swap_used: i64,
-            ram_swap_total: i64,
-            network_rx: i64,
-            network_tx: i64,
-            num_gpus: i32,
-            gpu_memory_used: Vec<i64>,
-            gpu_memory_total: Vec<i64>,
-            gpu_percentage_time_execution: Vec<f64>,
-            gpu_temperatures: Vec<f64>,
-            gpu_power_usages: Vec<f64>,
-        ) -> Result<NodePerformance> {
-            let PerformanceWeights {
-                gpu_score_weight,
-                cpu_score_weight,
-                ram_score_weight,
-                swap_ram_score_weight,
-                network_score_weight,
-                gpu_vram_weight,
+    /// Calculates a comprehensive performance score for a node based on its hardware metrics and resource utilization.
+    ///
+    /// This function evaluates node performance across multiple dimensions including GPU, CPU, RAM, and network metrics.
+    /// It uses configurable weights to compute a normalized score that represents the node's overall capability and
+    /// efficiency.
+    ///
+    /// # Performance Scoring Components
+    ///
+    /// ## GPU Metrics (weighted by `gpu_score_weight`)
+    /// - **VRAM Usage**: Higher is better, indicates KV cache allocation efficiency
+    ///   - Uses minimum usage percentage across all GPUs
+    ///   - Weighted by `gpu_vram_weight`
+    ///
+    /// - **Execution Availability**: Lower is better, indicates GPU availability
+    ///   - Averages execution rates across all GPUs
+    ///   - Weighted by `gpu_exec_avail_weight`
+    ///
+    /// - **Temperature**: Lower is better, using step function:
+    ///   - 1.0 for temps <= threshold (typically 80°C)
+    ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 100°C)
+    ///   - 0.0 for temps >= max
+    ///   - Uses minimum score across all GPUs
+    ///   - Weighted by `gpu_temp_weight`
+    ///
+    /// - **Power Usage**: Lower is better, using step function:
+    ///   - 1.0 for power <= threshold (typically 200W)
+    ///   - Linear decrease from 1.0 to 0.0 between threshold and max (typically 300W)
+    ///   - 0.0 for power >= max
+    ///   - Averages across all GPUs
+    ///   - Weighted by `gpu_power_weight`
+    ///
+    /// ## CPU Metrics (weighted by `cpu_score_weight`)
+    /// - Balances current usage with available capacity
+    ///
+    /// ## RAM Metrics
+    /// - Main RAM (weighted by `ram_score_weight`): Scores available memory ratio
+    /// - Swap RAM (weighted by `swap_ram_score_weight`): Scores available swap ratio
+    ///
+    /// ## Network Metrics (weighted by `network_score_weight`)
+    /// - Inverse of total network traffic (rx + tx)
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to AtomaState for accessing performance weight configurations
+    /// * `cpu_usage` - Current CPU usage as a float between 0.0 and 1.0
+    /// * `ram_used` - Currently used RAM in bytes
+    /// * `ram_total` - Total available RAM in bytes
+    /// * `ram_swap_used` - Currently used swap space in bytes
+    /// * `ram_swap_total` - Total available swap space in bytes
+    /// * `network_rx` - Network receive throughput in bytes
+    /// * `network_tx` - Network transmit throughput in bytes
+    /// * `num_gpus` - Number of GPUs in the system
+    /// * `gpu_memory_used` - Vector of used GPU memory per GPU in bytes
+    /// * `gpu_memory_total` - Vector of total GPU memory per GPU in bytes
+    /// * `gpu_percentage_time_execution` - Vector of GPU execution time percentages (0.0 to 1.0)
+    /// * `gpu_temperatures` - Vector of GPU temperatures in Celsius
+    /// * `gpu_power_usages` - Vector of GPU power usage in Watts
+    ///
+    /// # Returns
+    ///
+    /// * `Result<NodePerformance>` - Structure containing the calculated total performance score
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Unable to retrieve performance weights from state
+    /// - Vector lengths don't match num_gpus
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let performance = get_node_performance(
+    ///     &state,
+    ///     0.5,                    // 50% CPU usage
+    ///     8_000_000_000,         // 8GB RAM used
+    ///     16_000_000_000,        // 16GB total RAM
+    ///     1_000_000_000,         // 1GB swap used
+    ///     4_000_000_000,         // 4GB total swap
+    ///     1_000_000,             // 1MB/s network rx
+    ///     500_000,               // 500KB/s network tx
+    ///     2,                     // 2 GPUs
+    ///     vec![8000, 7000],      // GPU memory used
+    ///     vec![10000, 10000],    // GPU memory total
+    ///     vec![0.6, 0.7],        // GPU execution %
+    ///     vec![75.0, 78.0],      // GPU temperatures
+    ///     vec![180.0, 190.0],    // GPU power usage
+    /// ).await?;
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    #[allow(clippy::similar_names)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn get_node_performance(
+        state: &AtomaState,
+        cpu_usage: f64,
+        ram_used: i64,
+        ram_total: i64,
+        ram_swap_used: i64,
+        ram_swap_total: i64,
+        network_rx: i64,
+        network_tx: i64,
+        num_gpus: i32,
+        gpu_memory_used: Vec<i64>,
+        gpu_memory_total: Vec<i64>,
+        gpu_percentage_time_execution: Vec<f64>,
+        gpu_temperatures: Vec<f64>,
+        gpu_power_usages: Vec<f64>,
+    ) -> Result<NodePerformance> {
+        let PerformanceWeights {
+            gpu_score_weight,
+            cpu_score_weight,
+            ram_score_weight,
+            swap_ram_score_weight,
+            network_score_weight,
+            gpu_vram_weight,
+            gpu_exec_avail_weight,
+            gpu_temp_weight,
+            gpu_power_weight,
+            gpu_temp_threshold,
+            gpu_temp_max,
+            gpu_power_threshold,
+            gpu_power_max,
+            moving_avg_window_size: _moving_avg_window_size,
+            moving_avg_smooth_factor: _moving_avg_smooth_factor,
+        } = state.get_performance_weights().await?;
+
+        // NOTE: Calculate the GPU VRAM score, since we assume that node operators maximize for KV cache allocation,
+        // having more VRAM usage, that is, higher KV cache allocation is better. We compute the minimum VRAM usage percentage
+        // across all GPUs, and use that as the VRAM score.
+        let gpu_vram_score = gpu_memory_used
+            .iter()
+            .zip(gpu_memory_total.iter())
+            .map(|(used, total)| {
+                #[allow(clippy::cast_precision_loss)]
+                let used_percentage = (*used as f64) / (*total as f64);
+                gpu_vram_weight * used_percentage
+            })
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0f64);
+
+        // NOTE: Calculate the GPU execution score. Having lower execution rate means that the node has faced less overall
+        // load, and is therefore more available. We compute the average execution rate across all GPUs,
+        // and use that as the execution score.
+        let gpu_exec_score = gpu_percentage_time_execution
+            .iter()
+            .map(|&exec_rate| exec_rate * gpu_exec_avail_weight)
+            .sum::<f64>()
+            / f64::from(num_gpus);
+
+        // Calculate temperature factor through a step function that:
+        // - Returns 1.0 for temps <= 80°C
+        // - Linearly decreases from 1.0 to 0.0 between 80°C and 100°C
+        // - Returns 0.0 for temps >= 100°C
+        // NOTE: We take the minimum temperature across all GPUs, and use that as the temperature score.
+        let gpu_temp_score = gpu_temperatures
+            .iter()
+            .map(|&temp| {
+                let temp_factor = f64::max(
+                    0.0,
+                    1.0 - (temp - gpu_temp_threshold) / (gpu_temp_max - gpu_temp_threshold),
+                );
+                temp_factor * gpu_temp_weight
+            })
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0f64);
+
+        // Calculate the GPU power score. We use a step function that:
+        // - Returns 1.0 for power <= 200W
+        // - Linearly decreases from 1.0 to 0.0 between 200W and 300W
+        // - Returns 0.0 for power >= 300W
+        // NOTE: Having lower power usage means that the node is more energy efficient,
+        // and is therefore capable of running for longer periods of time and more sustainably. We compute the average power usage across all GPUs,
+        // and use that as the power score.
+        let gpu_power_score = gpu_power_usages
+            .iter()
+            .map(|&power| {
+                let power_factor = f64::max(
+                    0.0,
+                    1.0 - (power - gpu_power_threshold) / (gpu_power_max - gpu_power_threshold),
+                );
+                power_factor * gpu_power_weight
+            })
+            .sum::<f64>()
+            / f64::from(num_gpus);
+
+        let gpu_performance_score = gpu_vram_score.mul_add(
+            gpu_vram_weight,
+            gpu_exec_score.mul_add(
                 gpu_exec_avail_weight,
-                gpu_temp_weight,
-                gpu_power_weight,
-                gpu_temp_threshold,
-                gpu_temp_max,
-                gpu_power_threshold,
-                gpu_power_max,
-            } = state.get_performance_weights().await?;
+                gpu_temp_score.mul_add(gpu_temp_weight, gpu_power_score * gpu_power_weight),
+            ),
+        );
 
-            // NOTE: Calculate the GPU VRAM score, since we assume that node operators maximize for KV cache allocation,
-            // having more VRAM usage, that is, higher KV cache allocation is better. We compute the minimum VRAM usage percentage
-            // across all GPUs, and use that as the VRAM score.
-            let gpu_vram_score = gpu_memory_used
-                .iter()
-                .zip(gpu_memory_total.iter())
-                .map(|(used, total)| {
-                    #[allow(clippy::cast_precision_loss)]
-                    let used_percentage = (*used as f64) / (*total as f64);
-                    gpu_vram_weight * used_percentage
-                })
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(0f64);
-
-            // NOTE: Calculate the GPU execution score. Having lower execution rate means that the node has faced less overall
-            // load, and is therefore more available. We compute the average execution rate across all GPUs,
-            // and use that as the execution score.
-            let gpu_exec_score = gpu_percentage_time_execution
-                .iter()
-                .map(|&exec_rate| exec_rate * gpu_exec_avail_weight)
-                .sum::<f64>()
-                / f64::from(num_gpus);
-
-            // Calculate temperature factor through a step function that:
-            // - Returns 1.0 for temps <= 80°C
-            // - Linearly decreases from 1.0 to 0.0 between 80°C and 100°C
-            // - Returns 0.0 for temps >= 100°C
-            // NOTE: We take the minimum temperature across all GPUs, and use that as the temperature score.
-            let gpu_temp_score = gpu_temperatures
-                .iter()
-                .map(|&temp| {
-                    let temp_factor = f64::max(
-                        0.0,
-                        1.0 - (temp - gpu_temp_threshold) / (gpu_temp_max - gpu_temp_threshold),
-                    );
-                    temp_factor * gpu_temp_weight
-                })
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(0f64);
-
-            // Calculate the GPU power score. We use a step function that:
-            // - Returns 1.0 for power <= 200W
-            // - Linearly decreases from 1.0 to 0.0 between 200W and 300W
-            // - Returns 0.0 for power >= 300W
-            // NOTE: Having lower power usage means that the node is more energy efficient,
-            // and is therefore capable of running for longer periods of time and more sustainably. We compute the average power usage across all GPUs,
-            // and use that as the power score.
-            let gpu_power_score = gpu_power_usages
-                .iter()
-                .map(|&power| {
-                    let power_factor = f64::max(
-                        0.0,
-                        1.0 - (power - gpu_power_threshold) / (gpu_power_max - gpu_power_threshold),
-                    );
-                    power_factor * gpu_power_weight
-                })
-                .sum::<f64>()
-                / f64::from(num_gpus);
-
-            let gpu_performance_score = gpu_vram_score.mul_add(
-                gpu_vram_weight,
-                gpu_exec_score.mul_add(
-                    gpu_exec_avail_weight,
-                    gpu_temp_score.mul_add(gpu_temp_weight, gpu_power_score * gpu_power_weight),
-                ),
-            );
-
-            let cpu_score =
-                cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
-            #[allow(clippy::cast_precision_loss)]
-            let ram_score = (1.0 - (ram_used as f64) / (ram_total as f64)) * ram_score_weight;
-            #[allow(clippy::cast_precision_loss)]
-            let swap_ram_score =
-                (1.0 - ram_swap_used as f64) / (ram_swap_total as f64) * swap_ram_score_weight;
-            #[allow(clippy::cast_precision_loss)]
-            let network_score = 1.0 / (1.0 + network_rx as f64 + network_tx as f64);
-            let total_performance_score = cpu_score.mul_add(
-                cpu_score_weight,
-                gpu_performance_score.mul_add(
-                    gpu_score_weight,
-                    ram_score.mul_add(
-                        ram_score_weight,
-                        swap_ram_score.mul_add(
-                            swap_ram_score_weight,
-                            network_score.mul_add(network_score_weight, 0.0),
-                        ),
+        let cpu_score =
+            cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
+        #[allow(clippy::cast_precision_loss)]
+        let ram_score = (1.0 - (ram_used as f64) / (ram_total as f64)) * ram_score_weight;
+        #[allow(clippy::cast_precision_loss)]
+        let swap_ram_score =
+            (1.0 - ram_swap_used as f64) / (ram_swap_total as f64) * swap_ram_score_weight;
+        #[allow(clippy::cast_precision_loss)]
+        let network_score = 1.0 / (1.0 + network_rx as f64 + network_tx as f64);
+        let total_performance_score = cpu_score.mul_add(
+            cpu_score_weight,
+            gpu_performance_score.mul_add(
+                gpu_score_weight,
+                ram_score.mul_add(
+                    ram_score_weight,
+                    swap_ram_score.mul_add(
+                        swap_ram_score_weight,
+                        network_score.mul_add(network_score_weight, 0.0),
                     ),
                 ),
-            );
-            Ok(NodePerformance {
-                total_performance_score,
-            })
-        }
+            ),
+        );
+        Ok(NodePerformance {
+            total_performance_score,
+        })
     }
 }

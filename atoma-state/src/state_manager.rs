@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::build_query_with_in;
-use crate::handlers::utils::node_performance::NodePerformance;
+use crate::handlers::node_performance::NodePerformance;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
@@ -488,6 +488,8 @@ impl AtomaState {
             gpu_temp_max,
             gpu_power_threshold,
             gpu_power_max,
+            moving_avg_window_size,
+            moving_avg_smooth_factor,
         } = weights;
 
         sqlx::query(
@@ -505,8 +507,10 @@ impl AtomaState {
                 gpu_temp_max,
                 gpu_power_threshold,
                 gpu_power_max,
+                moving_avg_window_size,
+                moving_avg_smooth_factor,
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
         .bind(gpu_score_weight)
         .bind(cpu_score_weight)
@@ -521,6 +525,8 @@ impl AtomaState {
         .bind(gpu_temp_max)
         .bind(gpu_power_threshold)
         .bind(gpu_power_max)
+        .bind(moving_avg_window_size)
+        .bind(moving_avg_smooth_factor)
         .execute(&self.db)
         .await?;
 
@@ -6663,6 +6669,86 @@ mod tests {
         assert!(metrics.gpu_percentage_time_execution.is_empty());
         assert!(metrics.gpu_temperatures.is_empty());
         assert!(metrics.gpu_power_usages.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_performance_weights() -> Result<()> {
+        // Create test database
+        let state = setup_test_db().await;
+
+        // Insert test performance weights
+        let older_weights = PerformanceWeights {
+            gpu_score_weight: 0.3,
+            cpu_score_weight: 0.2,
+            ram_score_weight: 0.1,
+            network_score_weight: 0.1,
+            swap_ram_score_weight: 0.05,
+            gpu_vram_weight: 0.25,
+            gpu_exec_avail_weight: 0.25,
+            gpu_temp_weight: 0.2,
+            gpu_power_weight: 0.2,
+            gpu_temp_threshold: 65.0,
+            gpu_temp_max: 80.0,
+            gpu_power_threshold: 180.0,
+            gpu_power_max: 220.0,
+            moving_avg_window_size: 10,
+            moving_avg_smooth_factor: 0.2,
+        };
+
+        let newer_weights = PerformanceWeights {
+            gpu_score_weight: 0.4,
+            cpu_score_weight: 0.2,
+            ram_score_weight: 0.1,
+            network_score_weight: 0.1,
+            swap_ram_score_weight: 0.05,
+            gpu_vram_weight: 0.3,
+            gpu_exec_avail_weight: 0.3,
+            gpu_temp_weight: 0.2,
+            gpu_power_weight: 0.2,
+            gpu_temp_threshold: 70.0,
+            gpu_temp_max: 85.0,
+            gpu_power_threshold: 200.0,
+            gpu_power_max: 250.0,
+            moving_avg_window_size: 15,
+            moving_avg_smooth_factor: 0.3,
+        };
+
+        // Insert both weights records
+        state.insert_performance_weights(older_weights.clone()).await?;
+        state.insert_performance_weights(newer_weights.clone()).await?;
+
+        // Test retrieving the most recent weights
+        let retrieved_weights = state.get_performance_weights().await?;
+
+        // Verify that we got the newer weights
+        assert_eq!(retrieved_weights.gpu_score_weight, newer_weights.gpu_score_weight);
+        assert_eq!(retrieved_weights.cpu_score_weight, newer_weights.cpu_score_weight);
+        assert_eq!(retrieved_weights.ram_score_weight, newer_weights.ram_score_weight);
+        assert_eq!(retrieved_weights.network_score_weight, newer_weights.network_score_weight);
+        assert_eq!(retrieved_weights.swap_ram_score_weight, newer_weights.swap_ram_score_weight);
+        assert_eq!(retrieved_weights.gpu_vram_weight, newer_weights.gpu_vram_weight);
+        assert_eq!(retrieved_weights.gpu_exec_avail_weight, newer_weights.gpu_exec_avail_weight);
+        assert_eq!(retrieved_weights.gpu_temp_weight, newer_weights.gpu_temp_weight);
+        assert_eq!(retrieved_weights.gpu_power_weight, newer_weights.gpu_power_weight);
+        assert_eq!(retrieved_weights.gpu_temp_threshold, newer_weights.gpu_temp_threshold);
+        assert_eq!(retrieved_weights.gpu_temp_max, newer_weights.gpu_temp_max);
+        assert_eq!(retrieved_weights.gpu_power_threshold, newer_weights.gpu_power_threshold);
+        assert_eq!(retrieved_weights.gpu_power_max, newer_weights.gpu_power_max);
+        assert_eq!(retrieved_weights.moving_avg_window_size, newer_weights.moving_avg_window_size);
+        assert_eq!(retrieved_weights.moving_avg_smooth_factor, newer_weights.moving_avg_smooth_factor);
+
+        // Test error case when no weights exist
+        // First clear the table
+        sqlx::query("DELETE FROM performance_weights")
+            .execute(&state.db)
+            .await?;
+
+        // Verify that attempting to get weights now returns an error
+        let error_result = state.get_performance_weights().await;
+        assert!(error_result.is_err());
 
         Ok(())
     }

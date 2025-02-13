@@ -302,6 +302,12 @@ pub struct PerformanceWeights {
 
     /// Maximum power usage for GPU (0.0 to 1.0)
     pub gpu_power_max: f64,
+
+    /// Moving average window size for the time series performance score calculation
+    pub moving_avg_window_size: i64,
+
+    /// Moving average smooth factor for the time series performance score calculation
+    pub moving_avg_smooth_factor: f64,
 }
 
 /// Represents the cheapest node settings for a specific model
