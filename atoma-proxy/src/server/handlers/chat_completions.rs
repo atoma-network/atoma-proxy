@@ -1049,6 +1049,7 @@ pub mod openai_api {
         /// If set to 'auto', and the Project is not Scale tier enabled, the request will be processed using the default service tier with a lower uptime SLA and no latency guarantee.
         /// If set to 'default', the request will be processed using the default service tier with a lower uptime SLA and no latency guarantee.
         /// When not set, the default behavior is 'auto'.
+        #[schema(example = "auto")]
         #[serde(skip_serializing_if = "Option::is_none")]
         pub service_tier: Option<String>,
 
@@ -1080,9 +1081,15 @@ pub mod openai_api {
         pub model: String,
 
         /// A list of chat completion choices.
+        #[schema(
+            example = "[{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"Hello! How can you help me today?\"}, \"finish_reason\": null, \"stop_reason\": null}]"
+        )]
         pub choices: Vec<completion_choice::ChatCompletionChoice>,
 
         /// Usage statistics for the completion request.
+        #[schema(
+            example = "{\"prompt_tokens\": 100, \"completion_tokens\": 200, \"total_tokens\": 300}"
+        )]
         pub usage: Option<usage::CompletionUsage>,
 
         /// The system fingerprint for the completion, if applicable.
@@ -1095,6 +1102,7 @@ pub mod openai_api {
         pub object: String,
 
         /// The service tier of the chat completion.
+        #[schema(example = "auto")]
         #[serde(skip_serializing_if = "Option::is_none")]
         pub service_tier: Option<String>,
     }
@@ -1132,9 +1140,13 @@ pub mod openai_api {
         pub model: String,
 
         /// A list of chat completion chunk choices.
+        #[schema(
+            example = "[{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"content\": \"Hello! How can you help me today?\"}, \"logprobs\": null, \"finish_reason\": null, \"stop_reason\": null}]"
+        )]
         pub choices: Vec<completion_choice::ChatCompletionChunkChoice>,
 
         /// Usage statistics for the completion request.
+        #[schema(example = "{\"prompt_tokens\": 100, \"completion_tokens\": 200, \"total_tokens\": 300}")]
         #[serde(skip_serializing_if = "Option::is_none")]
         pub usage: Option<usage::CompletionUsage>,
     }
