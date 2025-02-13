@@ -10,6 +10,7 @@ use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
+use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
@@ -93,11 +94,11 @@ impl RequestModel for RequestModelImageGenerations {
         })
     }
 
-    fn get_model(&self) -> Result<String> {
-        Ok(self.model.clone())
+    fn get_model(&self) -> String {
+        self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, _state: &ProxyState) -> Result<u64> {
+    fn get_compute_units_estimate(&self, _tokenizer: Option<&Tokenizer>) -> Result<u64> {
         // Parse dimensions from size string (e.g., "1024x1024")
         let dimensions: Vec<u64> = self
             .size
@@ -197,6 +198,7 @@ pub async fn image_generations_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -246,6 +248,7 @@ pub async fn confidential_image_generations_create(
         let payload =
             serde_json::to_value(payload).map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to serialize payload: {e}"),
+                client_message: None,
                 endpoint: metadata.endpoint.clone(),
             })?;
         match handle_image_generation_response(
@@ -289,6 +292,7 @@ pub async fn confidential_image_generations_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -358,6 +362,7 @@ async fn handle_image_generation_response(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send image generation request: {err:?}"),
+            client_message: Some("Failed to connect to the node".to_string()),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -374,6 +379,7 @@ async fn handle_image_generation_response(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to parse image generation response: {err:?}"),
+            client_message: Some("Failed to parse node's response".to_string()),
             endpoint: endpoint.to_string(),
         })
         .map(Json)?;
@@ -396,6 +402,7 @@ async fn handle_image_generation_response(
         )
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to update node throughput performance: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -410,6 +417,7 @@ async fn handle_image_generation_response(
                 "Error converting response hash to array, received array of length {}",
                 e.len()
             ),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -421,6 +429,7 @@ async fn handle_image_generation_response(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Error updating stack total hash: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 

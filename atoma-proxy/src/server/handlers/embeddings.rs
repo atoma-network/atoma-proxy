@@ -13,6 +13,7 @@ use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
+use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
@@ -95,30 +96,28 @@ impl RequestModel for RequestModelEmbeddings {
         })
     }
 
-    fn get_model(&self) -> Result<String> {
-        Ok(self.model.clone())
+    fn get_model(&self) -> String {
+        self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, state: &ProxyState) -> Result<u64> {
-        let tokenizer_index = state
-            .models
-            .iter()
-            .position(|m| m == &self.model)
-            .ok_or_else(|| AtomaProxyError::RequestError {
-                message: "Model not supported".to_string(),
+    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64> {
+        let Some(tokenizer) = tokenizer else {
+            return Err(AtomaProxyError::InternalError {
+                message: "Tokenizer not found for current model".to_string(),
                 endpoint: EMBEDDINGS_PATH.to_string(),
-            })?;
-        let tokenizer = &state.tokenizers[tokenizer_index];
-
+            });
+        };
         let num_tokens = tokenizer
             .encode(self.input.as_str(), true)
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to encode input: {err:?}"),
+                client_message: Some(
+                    "Failed to encode message using the model's tokenizer".to_string(),
+                ),
                 endpoint: EMBEDDINGS_PATH.to_string(),
             })?
             .get_ids()
             .len() as u64;
-
         Ok(num_tokens)
     }
 }
@@ -205,6 +204,7 @@ pub async fn embeddings_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -315,6 +315,7 @@ pub async fn confidential_embeddings_create(
     .await
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
         endpoint,
     })?
 }
@@ -383,6 +384,7 @@ async fn handle_embeddings_response(
         .await
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to send embeddings request: {err:?}"),
+            client_message: Some("Failed to connect to the node".to_string()),
             endpoint: endpoint.to_string(),
         })?;
 
@@ -400,6 +402,7 @@ async fn handle_embeddings_response(
             .await
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to parse embeddings response: {err:?}"),
+                client_message: Some("Failed to parse the node response".to_string()),
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -429,6 +432,7 @@ async fn handle_embeddings_response(
         )
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Failed to update node throughput performance: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -445,6 +449,7 @@ async fn handle_embeddings_response(
                 "Error converting response hash to array, received array of length {}",
                 e.len()
             ),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 
@@ -456,6 +461,7 @@ async fn handle_embeddings_response(
         })
         .map_err(|err| AtomaProxyError::InternalError {
             message: format!("Error updating stack total hash: {err:?}"),
+            client_message: None,
             endpoint: endpoint.to_string(),
         })?;
 

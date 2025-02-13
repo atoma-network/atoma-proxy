@@ -249,6 +249,7 @@ pub async fn authenticate_middleware(
             }
             AtomaProxyError::InternalError {
                 message: format!("Failed to convert body to bytes: {e}"),
+                client_message: None,
                 endpoint: req_parts.uri.path().to_string(),
             }
         })?;
@@ -402,6 +403,7 @@ pub async fn confidential_compute_middleware(
             }
             AtomaProxyError::InternalError {
                 message: format!("Failed to convert body to bytes: {e}"),
+                client_message: None,
                 endpoint: req_parts.uri.path().to_string(),
             }
         })?;
@@ -432,6 +434,7 @@ pub async fn confidential_compute_middleware(
         .sign_hash(&plaintext_body_hash)
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to get Sui signature: {e}"),
+            client_message: None,
             endpoint: endpoint.clone(),
         })?;
     let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
@@ -503,6 +506,7 @@ pub mod auth {
     use crate::server::handlers::embeddings::RequestModelEmbeddings;
     use crate::server::handlers::embeddings::EMBEDDINGS_PATH;
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
+    use crate::server::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
     use crate::server::{
         check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
@@ -627,6 +631,7 @@ pub mod auth {
                     message: format!(
                         "Invalid endpoint for current middleware, this should never happen: {endpoint}"
                     ),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 });
             }
@@ -702,9 +707,25 @@ pub mod auth {
     ) -> Result<(Option<Stack>, u64, String, i64)> {
         let user_id = check_auth(&state.state_manager_sender, headers, endpoint).await?;
 
-        // Estimate compute units and the request model
-        let model = request_model.get_model()?;
-        let total_compute_units = request_model.get_compute_units_estimate(state)?;
+        // Retrieve the model and the appropriate tokenizer
+        let model = request_model.get_model();
+        let total_compute_units = if (endpoint != IMAGE_GENERATIONS_PATH)
+            && (endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH)
+        {
+            let tokenizer_index =
+                state
+                    .models
+                    .iter()
+                    .position(|m| m == &model)
+                    .ok_or_else(|| AtomaProxyError::RequestError {
+                        message: "Model not supported".to_string(),
+                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                    })?;
+            let tokenizer = state.tokenizers[tokenizer_index].clone();
+            request_model.get_compute_units_estimate(Some(&tokenizer))?
+        } else {
+            request_model.get_compute_units_estimate(None)?
+        };
 
         let (result_sender, result_receiver) = oneshot::channel();
 
@@ -719,6 +740,7 @@ pub mod auth {
             })
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetStacksForModel event: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -726,10 +748,12 @@ pub mod auth {
             .await
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetStacksForModel result: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetStacksForModel result: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -792,6 +816,7 @@ pub mod auth {
             })
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetNodePublicAddress event: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -799,10 +824,12 @@ pub mod auth {
             .await
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetNodePublicAddress result: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get GetNodePublicAddress result: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .ok_or_else(|| AtomaProxyError::NotFound {
@@ -818,6 +845,7 @@ pub mod auth {
             .get_sui_signature(payload)
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to get Sui signature: {err:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
 
@@ -918,16 +946,19 @@ pub mod auth {
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
             let node = result_receiver
                 .await
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
             let node: atoma_state::types::CheapestNode = match node {
@@ -950,6 +981,7 @@ pub mod auth {
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send DeductFromUsdc event: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
 
@@ -957,6 +989,7 @@ pub mod auth {
                 .await
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?
                 .map_err(|err| AtomaProxyError::BalanceError {
@@ -978,6 +1011,7 @@ pub mod auth {
                 .await
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to acquire new stack entry: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
 
@@ -994,6 +1028,7 @@ pub mod auth {
                 })
                 .map_err(|err| AtomaProxyError::InternalError {
                     message: format!("Failed to send NewStackAcquired event: {err:?}"),
+                    client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
 
@@ -1113,16 +1148,19 @@ pub mod utils {
         let stack_small_id_header = HeaderValue::from_str(&selected_stack_small_id.to_string())
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to convert stack small id to header value: {e:?}"),
+                client_message: None,
                 endpoint: req_parts.uri.path().to_string(),
             })?;
         let signature_header =
             HeaderValue::from_str(&signature).map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to convert signature to header value: {e:?}"),
+                client_message: None,
                 endpoint: req_parts.uri.path().to_string(),
             })?;
         let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to convert content length to header value: {e:?}"),
+                client_message: None,
                 endpoint: req_parts.uri.path().to_string(),
             })?;
         req_parts
@@ -1139,6 +1177,7 @@ pub mod utils {
                 HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
                     AtomaProxyError::InternalError {
                         message: format!("Failed to convert tx digest to header value: {e:?}"),
+                        client_message: None,
                         endpoint: req_parts.uri.path().to_string(),
                     }
                 })?;
@@ -1241,6 +1280,7 @@ pub mod utils {
             )
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetNodePublicAddress event: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
         let is_valid = result_receiver
@@ -1249,6 +1289,7 @@ pub mod utils {
                 message: format!(
                     "Failed to receive VerifyStackForConfidentialComputeRequest result: {e:?}"
                 ),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|e| AtomaProxyError::RequestError {
@@ -1330,16 +1371,19 @@ pub mod utils {
             })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send LockComputeUnitsForStack event: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
         result_receiver
             .await
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to receive LockComputeUnitsForStack result: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to lock compute units for stack: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })
     }
@@ -1405,12 +1449,14 @@ pub mod utils {
             })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send GetNodePublicAddress event: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
         let (node_address, node_small_id) = result_receiver
             .await
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to receive GetNodePublicAddress result: {e:?}"),
+                client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|e| AtomaProxyError::NotFound {
