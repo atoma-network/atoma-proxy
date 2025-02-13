@@ -240,6 +240,24 @@ pub struct NodeMetrics {
     pub gpu_power_usages: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+pub struct NodePerformanceScore {
+    /// Unique identifier for the performance score
+    pub id: i64,
+
+    /// Reference to the weights configuration used for this score
+    pub weights_id: i32,
+
+    /// Small integer identifier for the node
+    pub node_small_id: i32,
+
+    /// Unix timestamp in seconds when this performance score was recorded
+    pub timestamp_secs: i32,
+
+    /// The aggregate performance score of the node
+    pub performance_score: f64,
+}
+
 impl From<TaskRegisteredEvent> for Task {
     fn from(event: TaskRegisteredEvent) -> Self {
         Self {
@@ -304,7 +322,7 @@ pub struct PerformanceWeights {
     pub gpu_power_max: f64,
 
     /// Moving average window size for the time series performance score calculation
-    pub moving_avg_window_size: i64,
+    pub moving_avg_window_size: i32,
 
     /// Moving average smooth factor for the time series performance score calculation
     pub moving_avg_smooth_factor: f64,

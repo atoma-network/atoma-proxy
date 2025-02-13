@@ -1911,7 +1911,6 @@ pub mod utils {
 
 pub mod node_performance {
     use serde::{Deserialize, Serialize};
-    use sqlx::FromRow;
     use tracing::instrument;
 
     use crate::{state_manager::Result, types::PerformanceWeights, AtomaState};
@@ -1920,7 +1919,7 @@ pub mod node_performance {
     ///
     /// This struct combines both the overall performance score of a node and the weights used
     /// to calculate that score from individual hardware component metrics.
-    #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct NodePerformance {
         /// The aggregate performance score of the node, calculated by combining
         /// weighted scores from GPU, CPU, RAM, and network performance metrics
@@ -2119,8 +2118,7 @@ pub mod node_performance {
             ),
         );
 
-        let cpu_score =
-            cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
+        let cpu_score = cpu_usage.mul_add(cpu_score_weight, (1.0 - cpu_usage) * cpu_score_weight);
         #[allow(clippy::cast_precision_loss)]
         let ram_score = (1.0 - (ram_used as f64) / (ram_total as f64)) * ram_score_weight;
         #[allow(clippy::cast_precision_loss)]

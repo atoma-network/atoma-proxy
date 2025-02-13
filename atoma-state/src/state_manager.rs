@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use crate::build_query_with_in;
-use crate::handlers::node_performance::NodePerformance;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, PerformanceWeights, Stack,
-    StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, UserProfile,
+    NodeDistribution, NodePerformanceScore, NodePublicKey, NodeSubscription, PerformanceWeights,
+    Stack, StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
 use atoma_p2p::AtomaP2pEvent;
@@ -346,11 +345,11 @@ impl AtomaState {
     ///     state_manager.get_latest_performance_scores().await
     /// }
     #[instrument(level = "trace", skip_all)]
-    pub async fn get_latest_performance_scores(&self) -> Result<NodePerformance> {
+    pub async fn get_latest_performance_scores(&self) -> Result<NodePerformanceScore> {
         let scores = sqlx::query("SELECT * FROM node_performance_scores ORDER BY id DESC LIMIT 1")
             .fetch_one(&self.db)
             .await?;
-        Ok(NodePerformance::from_row(&scores)?)
+        Ok(NodePerformanceScore::from_row(&scores)?)
     }
 
     /// Inserts a new performance score for a node into the database.
@@ -395,7 +394,7 @@ impl AtomaState {
         performance_score: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_performance_scores (node_small_id, timestamp, performance_score, weights_id) 
+            "INSERT INTO node_performance_scores (node_small_id, timestamp_secs, performance_score, weights_id) 
              SELECT $1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1)"
         )
         .bind(node_small_id)
@@ -508,7 +507,7 @@ impl AtomaState {
                 gpu_power_threshold,
                 gpu_power_max,
                 moving_avg_window_size,
-                moving_avg_smooth_factor,
+                moving_avg_smooth_factor
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
@@ -5052,7 +5051,9 @@ mod tests {
                 node_public_keys,
                 users,
                 key_rotations,
-                node_metrics
+                node_metrics,
+                performance_weights,
+                node_performance_scores
             CASCADE",
         )
         .execute(db)
@@ -6717,28 +6718,71 @@ mod tests {
         };
 
         // Insert both weights records
-        state.insert_performance_weights(older_weights.clone()).await?;
-        state.insert_performance_weights(newer_weights.clone()).await?;
+        state
+            .insert_performance_weights(older_weights.clone())
+            .await?;
+        state
+            .insert_performance_weights(newer_weights.clone())
+            .await?;
 
         // Test retrieving the most recent weights
         let retrieved_weights = state.get_performance_weights().await?;
 
         // Verify that we got the newer weights
-        assert_eq!(retrieved_weights.gpu_score_weight, newer_weights.gpu_score_weight);
-        assert_eq!(retrieved_weights.cpu_score_weight, newer_weights.cpu_score_weight);
-        assert_eq!(retrieved_weights.ram_score_weight, newer_weights.ram_score_weight);
-        assert_eq!(retrieved_weights.network_score_weight, newer_weights.network_score_weight);
-        assert_eq!(retrieved_weights.swap_ram_score_weight, newer_weights.swap_ram_score_weight);
-        assert_eq!(retrieved_weights.gpu_vram_weight, newer_weights.gpu_vram_weight);
-        assert_eq!(retrieved_weights.gpu_exec_avail_weight, newer_weights.gpu_exec_avail_weight);
-        assert_eq!(retrieved_weights.gpu_temp_weight, newer_weights.gpu_temp_weight);
-        assert_eq!(retrieved_weights.gpu_power_weight, newer_weights.gpu_power_weight);
-        assert_eq!(retrieved_weights.gpu_temp_threshold, newer_weights.gpu_temp_threshold);
+        assert_eq!(
+            retrieved_weights.gpu_score_weight,
+            newer_weights.gpu_score_weight
+        );
+        assert_eq!(
+            retrieved_weights.cpu_score_weight,
+            newer_weights.cpu_score_weight
+        );
+        assert_eq!(
+            retrieved_weights.ram_score_weight,
+            newer_weights.ram_score_weight
+        );
+        assert_eq!(
+            retrieved_weights.network_score_weight,
+            newer_weights.network_score_weight
+        );
+        assert_eq!(
+            retrieved_weights.swap_ram_score_weight,
+            newer_weights.swap_ram_score_weight
+        );
+        assert_eq!(
+            retrieved_weights.gpu_vram_weight,
+            newer_weights.gpu_vram_weight
+        );
+        assert_eq!(
+            retrieved_weights.gpu_exec_avail_weight,
+            newer_weights.gpu_exec_avail_weight
+        );
+        assert_eq!(
+            retrieved_weights.gpu_temp_weight,
+            newer_weights.gpu_temp_weight
+        );
+        assert_eq!(
+            retrieved_weights.gpu_power_weight,
+            newer_weights.gpu_power_weight
+        );
+        assert_eq!(
+            retrieved_weights.gpu_temp_threshold,
+            newer_weights.gpu_temp_threshold
+        );
         assert_eq!(retrieved_weights.gpu_temp_max, newer_weights.gpu_temp_max);
-        assert_eq!(retrieved_weights.gpu_power_threshold, newer_weights.gpu_power_threshold);
+        assert_eq!(
+            retrieved_weights.gpu_power_threshold,
+            newer_weights.gpu_power_threshold
+        );
         assert_eq!(retrieved_weights.gpu_power_max, newer_weights.gpu_power_max);
-        assert_eq!(retrieved_weights.moving_avg_window_size, newer_weights.moving_avg_window_size);
-        assert_eq!(retrieved_weights.moving_avg_smooth_factor, newer_weights.moving_avg_smooth_factor);
+        assert_eq!(
+            retrieved_weights.moving_avg_window_size,
+            newer_weights.moving_avg_window_size
+        );
+        assert_eq!(
+            retrieved_weights.moving_avg_smooth_factor,
+            newer_weights.moving_avg_smooth_factor
+        );
 
         // Test error case when no weights exist
         // First clear the table
@@ -6749,6 +6793,87 @@ mod tests {
         // Verify that attempting to get weights now returns an error
         let error_result = state.get_performance_weights().await;
         assert!(error_result.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_latest_performance_scores() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+
+        // Insert test performance weights first since they're referenced by node_performance_scores
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4) // gpu_score_weight
+        .bind(0.2) // cpu_score_weight
+        .bind(0.1) // ram_score_weight
+        .bind(0.1) // network_score_weight
+        .bind(0.2) // swap_ram_score_weight
+        .bind(0.3) // gpu_vram_weight
+        .bind(0.3) // gpu_exec_avail_weight
+        .bind(0.2) // gpu_temp_weight
+        .bind(0.2) // gpu_power_weight
+        .bind(70.0) // gpu_temp_threshold
+        .bind(85.0) // gpu_temp_max
+        .bind(200.0) // gpu_power_threshold
+        .bind(250.0) // gpu_power_max
+        .bind(10) // moving_avg_window_size
+        .bind(0.5) // moving_avg_smooth_factor
+        .execute(&state.db)
+        .await?;
+
+        // Insert test performance scores
+        sqlx::query(
+            "INSERT INTO node_performance_scores (
+                node_small_id, timestamp_secs, performance_score, weights_id
+            ) VALUES ($1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1))",
+        )
+        .bind(1) // node_small_id
+        .bind(1_234_567_890) // timestamp_secs
+        .bind(95.5) // performance_score
+        .execute(&state.db)
+        .await?;
+
+        // Insert another score with a later timestamp
+        sqlx::query(
+            "INSERT INTO node_performance_scores (
+                node_small_id, timestamp_secs, performance_score, weights_id
+            ) VALUES ($1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1))",
+        )
+        .bind(1) // node_small_id
+        .bind(1_234_567_891) // timestamp_secs
+        .bind(96.5) // performance_score
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let latest_scores = state.get_latest_performance_scores().await?;
+
+        // Assert
+        assert_eq!(latest_scores.performance_score, 96.5);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_latest_performance_scores_empty_table() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Act & Assert
+        let result = state.get_latest_performance_scores().await;
+        assert!(result.is_err());
 
         Ok(())
     }
