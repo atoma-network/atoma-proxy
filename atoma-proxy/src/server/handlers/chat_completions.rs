@@ -839,6 +839,7 @@ impl RequestModel for RequestModelChatCompletions {
         const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
         let Some(tokenizer) = tokenizer else {
             return Err(AtomaProxyError::InternalError {
+                client_message: Some("No available tokenizer found for current model, try again later or open a ticket".to_string()),
                 message: "Tokenizer not found for current model".to_string(),
                 endpoint: CHAT_COMPLETIONS_PATH.to_string(),
             });
