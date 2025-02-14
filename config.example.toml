@@ -46,6 +46,7 @@ swap_ram_usage_weight = 0.5
 moving_average_window = 10
 # Moving average smoothing factor
 moving_average_smoothing = 0.9
+moving_avg_window_size = 10
 
 [atoma_service]
 service_bind_address = "0.0.0.0:8080" # Address to bind the service to, this should match the port in the docker-compose.yml
@@ -80,5 +81,5 @@ bootstrap_nodes = [
     "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
     "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc",
+    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
 ]
