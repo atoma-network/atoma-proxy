@@ -1587,6 +1587,7 @@ pub(crate) async fn handle_node_metrics_registration_event(
     );
     let NodeMetrics {
         cpu_usage,
+        cpu_frequency,
         ram_used,
         ram_total,
         ram_swap_used,
@@ -1665,7 +1666,9 @@ pub(crate) async fn handle_node_metrics_registration_event(
     let node_performance = node_performance::get_node_performance(
         &state_manager.state,
         node_small_id,
+        num_cpus,
         f64::from(cpu_usage),
+        cpu_frequency,
         ram_used as i64,
         ram_total as i64,
         ram_swap_used as i64,
@@ -1987,7 +1990,10 @@ pub mod node_performance {
     /// # Arguments
     ///
     /// * `state` - Reference to AtomaState for accessing performance weights
+    /// * `node_small_id` - The small ID of the node
+    /// * `num_cpus` - The number of CPUs on the node
     /// * `cpu_usage` - CPU usage (0.0 to 1.0)
+    /// * `cpu_frequency` - CPU frequency in MHz
     /// * `ram_used` - Used RAM in bytes
     /// * `ram_total` - Total RAM in bytes
     /// * `ram_swap_used` - Used swap space in bytes
@@ -2016,7 +2022,9 @@ pub mod node_performance {
     pub async fn get_node_performance(
         state: &AtomaState,
         node_small_id: i64,
+        num_cpus: u32,
         cpu_usage: f64,
+        cpu_frequency: u64,
         ram_used: i64,
         ram_total: i64,
         ram_swap_used: i64,
@@ -2073,7 +2081,7 @@ pub mod node_performance {
             gpu_score_weight * (gpu_vram_score + gpu_exec_score + gpu_temp_score + gpu_power_score);
 
         // --- CPU Subscore --- //
-        let cpu_score = compute_cpu_score(cpu_usage, cpu_score_weight);
+        let cpu_score = compute_cpu_score(cpu_usage, num_cpus, cpu_frequency, cpu_score_weight);
 
         // --- Memory Subscore --- //
         let ram_score = compute_ram_score(ram_used, ram_total, ram_score_weight);
@@ -2375,39 +2383,64 @@ pub mod node_performance {
                 .unwrap_or(0.0)
     }
 
-    /// Calculates a normalized CPU usage score based on the percentage of CPU time used.
+    /// Calculates a normalized CPU performance score based on CPU usage, number of cores, and frequency.
     ///
-    /// This function computes a score based on the percentage of CPU time used, where lower usage
-    /// indicates better performance. The score is linearly scaled between 0.0 and 1.0, with 0.0
-    /// representing 100% CPU usage and 1.0 representing 0% CPU usage.
+    /// This function computes a weighted score that considers both CPU utilization and frequency:
+    /// - CPU usage is normalized by the number of cores and inverted so lower usage yields higher scores
+    /// - CPU frequency is normalized assuming a typical range of 1.0 to 5.0 GHz
+    /// - The final score combines usage and frequency with equal weights
     ///
     /// # Arguments
     ///
-    /// * `cpu_usage` - A f64 value representing the percentage of CPU time used (0.0 to 1.0)
-    /// * `cpu_score_weight` - A weight factor to scale the final score (typically between 0.0 and 1.0)
+    /// * `cpu_usage` - CPU utilization as a fraction between 0.0 and 1.0 (e.g., 0.5 = 50% usage)
+    /// * `num_cpus` - Number of CPU cores available
+    /// * `cpu_frequency` - Current CPU frequency in GHz (e.g., 3.5 for 3.5 GHz)
+    /// * `cpu_score_weight` - Weight factor to scale the final score (typically between 0.0 and 1.0)
     ///
     /// # Returns
     ///
-    /// Returns a f64 score between 0.0 and 1.0 where:
-    /// - 0.0 indicates 100% CPU usage
-    /// - 1.0 indicates 0% CPU usage
-    /// - Values between 0.0 and 1.0 indicate linear degradation based on CPU usage
+    /// Returns a weighted score between 0.0 and `cpu_score_weight` where higher values indicate better CPU availability
+    /// and performance. The score is calculated as:
+    /// ```text
+    /// cpu_score_weight * (0.5 * usage_score + 0.5 * freq_score)
+    /// ```
+    /// where:
+    /// - `usage_score` = 1.0 - (cpu_usage / num_cpus)
+    /// - `freq_score` = min(cpu_frequency / 5.0, 1.0)
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust,ignore
-    /// let cpu_usage = 0.5;
-    /// let weight = 0.3;
-    ///
-    /// let score = compute_cpu_score(cpu_usage, weight);
-    /// // Returns 0.15 because:
+    /// # use your_crate::compute_cpu_score;
+    /// // CPU at 50% usage across 4 cores (12.5% per core), 3.2 GHz, weight of 0.2
+    /// let score = compute_cpu_score(0.5, 4, 3.2, 0.2);
+    /// // Returns ~0.17 because:
+    /// // usage_score = 1.0 - (0.5/4) = 0.875
+    /// // freq_score = 3.2/5.0 = 0.64
+    /// // final_score = 0.2 * (0.5 * 0.875 + 0.5 * 0.64) = 0.2 * 0.7575 = 0.1515
     /// ```
     ///
     /// # Notes
     ///
-    /// - Returns 0.0 if the input is 100% CPU usage
-    fn compute_cpu_score(cpu_usage: f64, cpu_score_weight: f64) -> f64 {
-        cpu_usage.mul_add(-cpu_score_weight, 1.0)
+    /// - CPU usage is normalized by the number of cores to better represent per-core availability
+    /// - Frequency is normalized assuming 5.0 GHz as a typical maximum
+    /// - The score equally weights normalized usage and frequency
+    /// - Higher scores indicate better CPU performance and availability for tasks
+    #[allow(clippy::cast_precision_loss)]
+    fn compute_cpu_score(
+        cpu_usage: f64,
+        num_cpus: u32,
+        cpu_frequency: u64,
+        cpu_score_weight: f64,
+    ) -> f64 {
+        // Normalize CPU usage score (0.0 to 1.0, higher is better)
+        let usage_score = (cpu_usage / f64::from(num_cpus)).mul_add(-1.0, 1.0);
+
+        // NOTE: Normalize frequency score (assuming typical range of 1.0 to 5.0 GHz)
+        let freq_score = (cpu_frequency as f64 / 5000.0).clamp(0.0, 1.0);
+
+        // Combine scores with equal weight between usage and frequency
+        cpu_score_weight * 0.5f64.mul_add(usage_score, 0.5 * freq_score)
     }
 
     /// Calculates a normalized RAM usage score based on memory utilization.
@@ -2691,7 +2724,9 @@ pub mod node_performance {
             let result = get_node_performance(
                 &state,
                 1,
+                1,
                 0.5,                     // Balanced CPU usage
+                2500,                    // 2.5 GHz CPU frequency
                 8 * 1024 * 1024 * 1024,  // 8GB RAM used
                 16 * 1024 * 1024 * 1024, // 16GB RAM total
                 0,                       // No swap used
@@ -2707,7 +2742,7 @@ pub mod node_performance {
             .await
             .unwrap();
             assert!(
-                result.total_performance_score > 1.3,
+                result.total_performance_score > 0.57,
                 "Expected high performance score, got {}",
                 result.total_performance_score
             );
@@ -2725,7 +2760,9 @@ pub mod node_performance {
             let result = get_node_performance(
                 &state,
                 1,
+                1,
                 0.95,                    // High CPU usage
+                2000,                    // 2 GHz CPU frequency
                 15 * 1024 * 1024 * 1024, // Nearly full RAM
                 16 * 1024 * 1024 * 1024,
                 7 * 1024 * 1024 * 1024, // High swap usage
@@ -2760,7 +2797,9 @@ pub mod node_performance {
             let result = get_node_performance(
                 &state,
                 1,
+                1,
                 0.6,
+                2500,
                 8 * 1024 * 1024 * 1024,
                 16 * 1024 * 1024 * 1024,
                 0,
@@ -2794,7 +2833,9 @@ pub mod node_performance {
             let result = get_node_performance(
                 &state,
                 1,
+                1,
                 0.5,
+                2500,
                 8 * 1024 * 1024 * 1024,
                 16 * 1024 * 1024 * 1024,
                 8 * 1024 * 1024 * 1024,
@@ -2837,7 +2878,9 @@ pub mod node_performance {
                 let result = get_node_performance(
                     &state,
                     1,
+                    1,
                     0.5,
+                    2500,
                     8 * 1024 * 1024 * 1024,
                     16 * 1024 * 1024 * 1024,
                     0,
@@ -2854,18 +2897,18 @@ pub mod node_performance {
                 .unwrap();
                 match scenario {
                     "below threshold" => assert!(
-                        result.total_performance_score > 1.31,
+                        result.total_performance_score > 0.52,
                         "Expected higher score for low temperatures, got {}",
                         result.total_performance_score
                     ),
                     "between threshold and max" => assert!(
-                        result.total_performance_score > 1.28
-                            && result.total_performance_score < 1.29,
+                        result.total_performance_score > 0.48
+                            && result.total_performance_score < 0.49,
                         "Expected medium score for medium temperatures, got {}",
                         result.total_performance_score
                     ),
                     "above max" => assert!(
-                        result.total_performance_score < 1.25,
+                        result.total_performance_score < 0.45,
                         "Expected low score for high temperatures, got {}",
                         result.total_performance_score
                     ),
@@ -2894,7 +2937,9 @@ pub mod node_performance {
                 let result = get_node_performance(
                     &state,
                     1,
+                    1,
                     0.5,
+                    2500,
                     8 * 1024 * 1024 * 1024,
                     16 * 1024 * 1024 * 1024,
                     0,
@@ -2911,18 +2956,18 @@ pub mod node_performance {
                 .unwrap();
                 match scenario {
                     "below threshold" => assert!(
-                        result.total_performance_score > 1.32,
+                        result.total_performance_score > 0.52,
                         "Expected higher score for low power usage, got {}",
                         result.total_performance_score
                     ),
                     "between threshold and max" => assert!(
-                        result.total_performance_score > 1.28
-                            && result.total_performance_score < 1.29,
+                        result.total_performance_score > 0.48
+                            && result.total_performance_score < 0.49,
                         "Expected medium score for medium power usage, got {}",
                         result.total_performance_score
                     ),
                     "above max" => assert!(
-                        result.total_performance_score < 1.25,
+                        result.total_performance_score < 0.45,
                         "Expected low score for high power usage, got {}",
                         result.total_performance_score
                     ),
