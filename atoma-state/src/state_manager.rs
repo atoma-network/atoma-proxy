@@ -4,8 +4,8 @@ use crate::build_query_with_in;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task, UserProfile,
+    NodeDistribution, NodePerformanceScore, NodePublicKey, NodeSubscription, PerformanceWeights,
+    Stack, StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
 
 use atoma_p2p::AtomaP2pEvent;
@@ -285,6 +285,259 @@ impl AtomaState {
             .fetch_one(&self.db)
             .await?;
         Ok(Task::from_row(&task)?)
+    }
+
+    /// Retrieves the most recent performance weights from the database.
+    ///
+    /// This method fetches the latest performance weights record from the `performance_weights` table,
+    /// which contains the weights used to evaluate node performance metrics.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<PerformanceWeights>`: A result containing either:
+    ///   - `Ok(PerformanceWeights)`: The most recent performance weights configuration.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database row into a `PerformanceWeights` object.
+    /// - No performance weights records exist in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_weights(state_manager: &AtomaStateManager) -> Result<PerformanceWeights, AtomaStateManagerError> {
+    ///     state_manager.get_performance_weights().await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_performance_weights(&self) -> Result<PerformanceWeights> {
+        let weights = sqlx::query("SELECT * FROM performance_weights ORDER BY id DESC LIMIT 1")
+            .fetch_one(&self.db)
+            .await?;
+        Ok(PerformanceWeights::from_row(&weights)?)
+    }
+
+    /// Retrieves the latest performance scores from the database.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<NodePerformance>`: A result containing either:
+    ///   - `Ok(NodePerformance)`: The latest performance scores.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - No performance scores exist in the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_latest_performance_scores(state_manager: &AtomaStateManager) -> Result<NodePerformance, AtomaStateManagerError> {
+    ///     state_manager.get_latest_performance_scores().await
+    /// }
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_latest_performance_scores(
+        &self,
+        node_small_id: i64,
+    ) -> Result<Option<NodePerformanceScore>> {
+        let scores = sqlx::query("SELECT * FROM node_performance_scores WHERE node_small_id = $1 ORDER BY id DESC LIMIT 1")
+            .bind(node_small_id)
+            .fetch_optional(&self.db)
+            .await?;
+        scores
+            .map(|scores| {
+                NodePerformanceScore::from_row(&scores).map_err(AtomaStateManagerError::from)
+            })
+            .transpose()
+    }
+
+    /// Inserts a new performance score for a node into the database.
+    ///
+    /// This method records a node's performance score along with the latest performance weights configuration.
+    /// The weights_id is automatically selected as the most recent entry from the performance_weights table.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique small identifier of the node.
+    /// * `timestamp` - The Unix timestamp when the performance was measured.
+    /// * `performance_score` - The calculated performance score for the node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - No performance weights exist in the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn record_performance(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_id = 1;
+    ///     let timestamp = chrono::Utc::now().timestamp();
+    ///     let score = 95.5;
+    ///
+    ///     state_manager.insert_node_performance(node_id, timestamp, score).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn insert_node_performance(
+        &self,
+        node_small_id: i64,
+        timestamp: i64,
+        performance_score: f64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO node_performance_scores (node_small_id, timestamp_secs, performance_score, weights_id) 
+             SELECT $1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1)"
+        )
+        .bind(node_small_id)
+        .bind(timestamp)
+        .bind(performance_score)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Inserts a new set of performance weights into the database.
+    ///
+    /// This method stores configuration parameters used to calculate node performance scores.
+    /// The weights determine how different hardware metrics contribute to the overall
+    /// performance evaluation of a node.
+    ///
+    /// # Arguments
+    ///
+    /// * `weights` - A `PerformanceWeights` struct containing:
+    ///   - `gpu_score_weight`: Weight factor for overall GPU score
+    ///   - `cpu_score_weight`: Weight factor for CPU utilization
+    ///   - `ram_score_weight`: Weight factor for RAM usage
+    ///   - `network_score_weight`: Weight factor for network performance
+    ///   - `swap_ram_score_weight`: Weight factor for swap memory usage
+    ///   - `gpu_vram_weight`: Weight factor for GPU VRAM usage
+    ///   - `gpu_exec_avail_weight`: Weight factor for GPU execution availability
+    ///   - `gpu_temp_weight`: Weight factor for GPU temperature
+    ///   - `gpu_power_weight`: Weight factor for GPU power consumption
+    ///   - `gpu_temp_threshold`: Temperature threshold for GPU performance
+    ///   - `gpu_temp_max`: Maximum acceptable GPU temperature
+    ///   - `gpu_power_threshold`: Power consumption threshold for GPU
+    ///   - `gpu_power_max`: Maximum acceptable GPU power consumption
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (`Ok(())`) or failure (`Err(AtomaStateManagerError)`).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's a connection issue with the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, PerformanceWeights};
+    ///
+    /// async fn configure_weights(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let weights = PerformanceWeights {
+    ///         gpu_score_weight: 0.4,
+    ///         cpu_score_weight: 0.2,
+    ///         ram_score_weight: 0.1,
+    ///         network_score_weight: 0.1,
+    ///         swap_ram_score_weight: 0.05,
+    ///         gpu_vram_weight: 0.3,
+    ///         gpu_exec_avail_weight: 0.3,
+    ///         gpu_temp_weight: 0.2,
+    ///         gpu_power_weight: 0.2,
+    ///         gpu_temp_threshold: 70.0,
+    ///         gpu_temp_max: 85.0,
+    ///         gpu_power_threshold: 200.0,
+    ///         gpu_power_max: 250.0,
+    ///     };
+    ///
+    ///     state_manager.insert_performance_weights(weights).await
+    /// }
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// The weights are used in performance scoring calculations and should be carefully
+    /// calibrated based on the relative importance of each metric for your specific use case.
+    /// The sum of weights within each category (overall scores and GPU-specific scores)
+    /// should typically equal 1.0 for proper normalization.
+    #[instrument(level = "trace", skip_all)]
+    pub async fn insert_performance_weights(&self, weights: PerformanceWeights) -> Result<()> {
+        let PerformanceWeights {
+            gpu_score_weight,
+            cpu_score_weight,
+            ram_score_weight,
+            network_score_weight,
+            swap_ram_score_weight,
+            gpu_vram_weight,
+            gpu_exec_avail_weight,
+            gpu_temp_weight,
+            gpu_power_weight,
+            gpu_temp_threshold,
+            gpu_temp_max,
+            gpu_power_threshold,
+            gpu_power_max,
+            moving_avg_window_size,
+            moving_avg_smooth_factor,
+        } = weights;
+
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight,
+                cpu_score_weight,
+                ram_score_weight,
+                network_score_weight,
+                swap_ram_score_weight,
+                gpu_vram_weight,
+                gpu_exec_avail_weight,
+                gpu_temp_weight,
+                gpu_power_weight,
+                gpu_temp_threshold,
+                gpu_temp_max,
+                gpu_power_threshold,
+                gpu_power_max,
+                moving_avg_window_size,
+                moving_avg_smooth_factor
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(gpu_score_weight)
+        .bind(cpu_score_weight)
+        .bind(ram_score_weight)
+        .bind(network_score_weight)
+        .bind(swap_ram_score_weight)
+        .bind(gpu_vram_weight)
+        .bind(gpu_exec_avail_weight)
+        .bind(gpu_temp_weight)
+        .bind(gpu_power_weight)
+        .bind(gpu_temp_threshold)
+        .bind(gpu_temp_max)
+        .bind(gpu_power_threshold)
+        .bind(gpu_power_max)
+        .bind(moving_avg_window_size)
+        .bind(moving_avg_smooth_factor)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
     }
 
     /// Get a stack by its unique identifier.
@@ -4692,6 +4945,8 @@ pub enum AtomaStateManagerError {
     InvalidCountry(String),
     #[error("URL is not valid: {0}")]
     InvalidUrl(String),
+    #[error("Invalid GPU metrics: {0}")]
+    InvalidGpuMetrics(String),
 }
 
 pub mod validation {
@@ -4777,21 +5032,39 @@ pub mod validation {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::types::NodeMetrics;
 
     use super::*;
     use uuid::Uuid;
 
-    const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
+    pub const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
 
-    async fn setup_test_db() -> AtomaState {
+    /// Creates a new AtomaState instance for testing.
+    ///
+    /// # Returns
+    ///
+    /// - `AtomaState`: A new AtomaState instance.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the database connection pool is not valid.
+    pub async fn setup_test_db() -> AtomaState {
         AtomaState::new_from_url(POSTGRES_TEST_DB_URL)
             .await
             .unwrap()
     }
 
-    async fn truncate_tables(db: &sqlx::PgPool) {
+    /// Truncates all tables in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - The database connection pool.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the database connection pool is not valid.
+    pub async fn truncate_tables(db: &sqlx::PgPool) {
         // List all your tables here
         sqlx::query(
             "TRUNCATE TABLE
@@ -4804,8 +5077,10 @@ mod tests {
                 node_public_keys,
                 users,
                 key_rotations,
-                node_metrics
-            CASCADE",
+                node_metrics,
+                performance_weights,
+                node_performance_scores
+            RESTART IDENTITY CASCADE",
         )
         .execute(db)
         .await
@@ -6421,6 +6696,364 @@ mod tests {
         assert!(metrics.gpu_percentage_time_execution.is_empty());
         assert!(metrics.gpu_temperatures.is_empty());
         assert!(metrics.gpu_power_usages.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_performance_weights() -> Result<()> {
+        // Create test database
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights
+        let older_weights = PerformanceWeights {
+            gpu_score_weight: 0.3,
+            cpu_score_weight: 0.2,
+            ram_score_weight: 0.1,
+            network_score_weight: 0.1,
+            swap_ram_score_weight: 0.05,
+            gpu_vram_weight: 0.25,
+            gpu_exec_avail_weight: 0.25,
+            gpu_temp_weight: 0.2,
+            gpu_power_weight: 0.2,
+            gpu_temp_threshold: 65.0,
+            gpu_temp_max: 80.0,
+            gpu_power_threshold: 180.0,
+            gpu_power_max: 220.0,
+            moving_avg_window_size: 10,
+            moving_avg_smooth_factor: 0.2,
+        };
+
+        let newer_weights = PerformanceWeights {
+            gpu_score_weight: 0.4,
+            cpu_score_weight: 0.2,
+            ram_score_weight: 0.1,
+            network_score_weight: 0.1,
+            swap_ram_score_weight: 0.05,
+            gpu_vram_weight: 0.3,
+            gpu_exec_avail_weight: 0.3,
+            gpu_temp_weight: 0.2,
+            gpu_power_weight: 0.2,
+            gpu_temp_threshold: 70.0,
+            gpu_temp_max: 85.0,
+            gpu_power_threshold: 200.0,
+            gpu_power_max: 250.0,
+            moving_avg_window_size: 15,
+            moving_avg_smooth_factor: 0.3,
+        };
+
+        // Insert both weights records
+        state
+            .insert_performance_weights(older_weights.clone())
+            .await?;
+        state
+            .insert_performance_weights(newer_weights.clone())
+            .await?;
+
+        // Test retrieving the most recent weights
+        let retrieved_weights = state.get_performance_weights().await?;
+
+        // Verify that we got the newer weights
+        assert!(
+            (retrieved_weights.gpu_score_weight - newer_weights.gpu_score_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.cpu_score_weight - newer_weights.cpu_score_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.ram_score_weight - newer_weights.ram_score_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.network_score_weight - newer_weights.network_score_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.swap_ram_score_weight - newer_weights.swap_ram_score_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_vram_weight - newer_weights.gpu_vram_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_exec_avail_weight - newer_weights.gpu_exec_avail_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_temp_weight - newer_weights.gpu_temp_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_power_weight - newer_weights.gpu_power_weight).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_temp_threshold - newer_weights.gpu_temp_threshold).abs()
+                < f64::EPSILON
+        );
+        assert!((retrieved_weights.gpu_temp_max - newer_weights.gpu_temp_max).abs() < f64::EPSILON);
+        assert!(
+            (retrieved_weights.gpu_power_threshold - newer_weights.gpu_power_threshold).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (retrieved_weights.gpu_power_max - newer_weights.gpu_power_max).abs() < f64::EPSILON
+        );
+        assert_eq!(
+            retrieved_weights.moving_avg_window_size,
+            newer_weights.moving_avg_window_size
+        );
+        assert!(
+            (retrieved_weights.moving_avg_smooth_factor - newer_weights.moving_avg_smooth_factor)
+                .abs()
+                < f64::EPSILON
+        );
+
+        // Test error case when no weights exist
+        // First clear the table
+        sqlx::query("DELETE FROM performance_weights")
+            .execute(&state.db)
+            .await?;
+
+        // Verify that attempting to get weights now returns an error
+        let error_result = state.get_performance_weights().await;
+        assert!(error_result.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_latest_performance_scores() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights first since they're referenced by node_performance_scores
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4) // gpu_score_weight
+        .bind(0.2) // cpu_score_weight
+        .bind(0.1) // ram_score_weight
+        .bind(0.1) // network_score_weight
+        .bind(0.2) // swap_ram_score_weight
+        .bind(0.3) // gpu_vram_weight
+        .bind(0.3) // gpu_exec_avail_weight
+        .bind(0.2) // gpu_temp_weight
+        .bind(0.2) // gpu_power_weight
+        .bind(70.0) // gpu_temp_threshold
+        .bind(85.0) // gpu_temp_max
+        .bind(200.0) // gpu_power_threshold
+        .bind(250.0) // gpu_power_max
+        .bind(10) // moving_avg_window_size
+        .bind(0.5) // moving_avg_smooth_factor
+        .execute(&state.db)
+        .await?;
+
+        // Insert test performance scores
+        sqlx::query(
+            "INSERT INTO node_performance_scores (
+                node_small_id, timestamp_secs, performance_score, weights_id
+            ) VALUES ($1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1))",
+        )
+        .bind(1) // node_small_id
+        .bind(1_234_567_890) // timestamp_secs
+        .bind(95.5) // performance_score
+        .execute(&state.db)
+        .await?;
+
+        // Insert another score with a later timestamp
+        sqlx::query(
+            "INSERT INTO node_performance_scores (
+                node_small_id, timestamp_secs, performance_score, weights_id
+            ) VALUES ($1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1))",
+        )
+        .bind(1) // node_small_id
+        .bind(1_234_567_891) // timestamp_secs
+        .bind(96.5) // performance_score
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let latest_scores = state.get_latest_performance_scores(1).await?;
+
+        // Assert
+        assert!((latest_scores.unwrap().performance_score - 96.5).abs() < f64::EPSILON);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_get_latest_performance_scores_empty_table() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Act & Assert
+        let result = state.get_latest_performance_scores(1).await;
+        assert!(result.unwrap().is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_success() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights first
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4) // gpu_score_weight
+        .bind(0.2) // cpu_score_weight
+        .bind(0.1) // ram_score_weight
+        .bind(0.1) // network_score_weight
+        .bind(0.2) // swap_ram_score_weight
+        .bind(0.3) // gpu_vram_weight
+        .bind(0.3) // gpu_exec_avail_weight
+        .bind(0.2) // gpu_temp_weight
+        .bind(0.2) // gpu_power_weight
+        .bind(70.0) // gpu_temp_threshold
+        .bind(85.0) // gpu_temp_max
+        .bind(200.0) // gpu_power_threshold
+        .bind(250.0) // gpu_power_max
+        .bind(10) // moving_avg_window_size
+        .bind(0.5) // moving_avg_smooth_factor
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let result = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+
+        // Assert
+        assert!(result.is_ok());
+
+        // Verify the insertion
+        let inserted_score = sqlx::query(
+            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id 
+             FROM node_performance_scores 
+             WHERE node_small_id = $1",
+        )
+        .bind(1)
+        .fetch_one(&state.db)
+        .await?;
+        let inserted_score = NodePerformanceScore::from_row(&inserted_score)?;
+
+        assert_eq!(inserted_score.node_small_id, 1);
+        assert_eq!(inserted_score.timestamp_secs, 1_234_567_890);
+        assert!((inserted_score.performance_score - 95.5).abs() < f64::EPSILON);
+        assert_eq!(inserted_score.weights_id, 1); // First weights record
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_multiple_records() -> Result<()> {
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Insert test performance weights
+        sqlx::query(
+            "INSERT INTO performance_weights (
+                gpu_score_weight, cpu_score_weight, ram_score_weight, network_score_weight,
+                swap_ram_score_weight, gpu_vram_weight, gpu_exec_avail_weight,
+                gpu_temp_weight, gpu_power_weight, gpu_temp_threshold,
+                gpu_temp_max, gpu_power_threshold, gpu_power_max,
+                moving_avg_window_size, moving_avg_smooth_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(0.4)
+        .bind(0.2)
+        .bind(0.1)
+        .bind(0.1)
+        .bind(0.2)
+        .bind(0.3)
+        .bind(0.3)
+        .bind(0.2)
+        .bind(0.2)
+        .bind(70.0)
+        .bind(85.0)
+        .bind(200.0)
+        .bind(250.0)
+        .bind(10)
+        .bind(0.5)
+        .execute(&state.db)
+        .await?;
+
+        // Act
+        let result1 = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+        let result2 = state.insert_node_performance(1, 1_234_567_891, 96.5).await;
+        let result3 = state.insert_node_performance(2, 1_234_567_892, 97.5).await;
+
+        // Assert
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert!(result3.is_ok());
+
+        // Verify all insertions
+        let scores = sqlx::query(
+            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id
+             FROM node_performance_scores 
+             ORDER BY timestamp_secs",
+        )
+        .fetch_all(&state.db)
+        .await?;
+        let scores = scores
+            .iter()
+            .map(|row| NodePerformanceScore::from_row(row).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(scores.len(), 3);
+
+        assert_eq!(scores[0].node_small_id, 1);
+        assert_eq!(scores[0].timestamp_secs, 1_234_567_890);
+        assert!((scores[0].performance_score - 95.5).abs() < f64::EPSILON);
+
+        assert_eq!(scores[1].node_small_id, 1);
+        assert_eq!(scores[1].timestamp_secs, 1_234_567_891);
+        assert!((scores[1].performance_score - 96.5).abs() < f64::EPSILON);
+
+        assert_eq!(scores[2].node_small_id, 2);
+        assert_eq!(scores[2].timestamp_secs, 1_234_567_892);
+        assert!((scores[2].performance_score - 97.5).abs() < f64::EPSILON);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_insert_node_performance_no_weights() -> Result<()> {
+        // Arrange
+        let state = setup_test_db().await;
+        truncate_tables(&state.db).await;
+
+        // Act
+        let result = state.insert_node_performance(1, 1_234_567_890, 95.5).await;
+
+        // Assert
+        assert!(result.is_err());
 
         Ok(())
     }
