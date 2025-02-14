@@ -24,5 +24,6 @@ utoipa = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
+proptest = { workspace = true }
 serial_test = { workspace = true }
 uuid = { workspace = true }

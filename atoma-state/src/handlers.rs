@@ -2660,7 +2660,9 @@ pub mod node_performance {
     #[cfg(test)]
     mod tests {
         use super::*;
+
         use crate::state_manager::tests::{setup_test_db, truncate_tables};
+        use proptest::{collection::vec, prop_assert, prop_assert_eq, proptest};
 
         #[test]
         fn test_exponential_moving_average() {
@@ -2973,6 +2975,451 @@ pub mod node_performance {
                     ),
                     _ => unreachable!(),
                 }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn test_compute_gpu_vram_score(
+                // Generate base free memory values and increases
+                free1 in vec(1_i64..500_000_000_000_i64, 10),
+                free_increase in vec(1_i64..500_000_000_000_i64, 10),
+                total in vec(1_000_000_000_000_i64..2_000_000_000_000_i64, 10),
+                weight in 0.0..1.0f64,
+            ) {
+                // Create second free vector by adding increases
+                let free2: Vec<i64> = free1.iter()
+                    .zip(free_increase.iter())
+                    .map(|(&f1, &inc)| f1 + inc)
+                    .collect();
+
+                // Ensure all vectors have the same length
+                prop_assert_eq!(free1.len(), 10);
+                prop_assert_eq!(free2.len(), 10);
+                prop_assert_eq!(total.len(), 10);
+
+                let score1 = compute_gpu_vram_utilization_score(&free1, &total, weight);
+                let score2 = compute_gpu_vram_utilization_score(&free2, &total, weight);
+
+                // Basic range check
+                prop_assert!(score1 >= -1.0 && score1 <= weight);
+                prop_assert!(score2 >= -1.0 && score2 <= weight);
+
+                // Verify that score increases with more free memory
+                prop_assert!(score2 > score1,
+                    "Score should increase with more free memory. Score1: {}, Score2: {}, Free1: {:?}, Free2: {:?}",
+                    score1, score2, free1, free2
+                );
+            }
+
+            #[test]
+            #[allow(clippy::cast_precision_loss)]
+            fn test_compute_gpu_execution_score(
+                // Generate base execution times and increases (as percentages)
+                exec_times1 in vec(0.0..0.9f64, 10),
+                exec_increase in vec(0.01..0.1f64, 10),
+                weight in 0.0..1.0f64,
+            ) {
+                // Create second execution times vector by adding increases
+                let exec_times2: Vec<f64> = exec_times1.iter()
+                    .zip(exec_increase.iter())
+                    .map(|(&e1, &inc)| (e1 + inc).min(1.0))
+                    .collect();
+
+                // Ensure all vectors have the same length
+                prop_assert_eq!(exec_times1.len(), 10);
+                prop_assert_eq!(exec_times2.len(), 10);
+
+                let score1 = compute_gpu_execution_score(&exec_times1, weight);
+                let score2 = compute_gpu_execution_score(&exec_times2, weight);
+
+                // Basic range check
+                prop_assert!(score1 >= -1.0 && score1 <= weight);
+                prop_assert!(score2 >= -1.0 && score2 <= weight);
+
+                // Verify that score decreases with more execution time
+                prop_assert!(score2 < score1,
+                    "Score should decrease with more execution time. Score1: {}, Score2: {}, Exec1: {:?}, Exec2: {:?}",
+                    score1, score2, exec_times1, exec_times2
+                );
+
+                // Verify linear relationship
+                let avg_exec1: f64 = exec_times1.iter().sum::<f64>() / exec_times1.len() as f64;
+                let avg_exec2: f64 = exec_times2.iter().sum::<f64>() / exec_times2.len() as f64;
+                let exec_diff = avg_exec2 - avg_exec1;
+                let score_diff = score1 - score2;
+
+                // The score difference should be proportional to execution time difference
+                // score = weight * (1 - avg_exec)
+                // Therefore: score_diff = weight * exec_diff
+                prop_assert!(weight.mul_add(-exec_diff, score_diff).abs() < 1e-10,
+                    "Score difference should be proportional to execution time difference. \
+                    Expected: {}, Actual: {}, Exec diff: {}, Weight: {}",
+                    weight * exec_diff, score_diff, exec_diff, weight
+                );
+            }
+
+            #[test]
+            fn test_compute_gpu_temp_score(
+                // Generate temperatures in three ranges: below threshold, between, and above max
+                temps_below in vec(20.0..80.0f64, 1..5),     // Below threshold (80°C)
+                temps_between in vec(80.0..100.0f64, 1..5),  // Between threshold and max
+                temps_above in vec(100.0..120.0f64, 1..5),   // Above max (100°C)
+                threshold in 75.0..85.0f64,                   // Allow some variance in threshold
+                max in 95.0..105.0f64,                       // Allow some variance in max
+                weight in 0.0..1.0f64,
+            ) {
+                // Verify threshold is less than max
+                prop_assert!(threshold < max);
+
+                // Test temperatures below threshold (should all give weight)
+                if temps_below.iter().all(|&t| t <= threshold) {
+                    let score_below = compute_gpu_temp_score(&temps_below, threshold, max, weight);
+                    prop_assert!((score_below - weight).abs() < 1e-10,
+                        "Temperatures below threshold should give full weight score. \
+                        Expected: {}, Got: {}, Temps: {:?}",
+                        weight, score_below, temps_below
+                    );
+                }
+
+                // Test temperatures above max (should all give 0)
+                if temps_above.iter().all(|&t| t >= max) {
+                    let score_above = compute_gpu_temp_score(&temps_above, threshold, max, weight);
+                    prop_assert!(score_above.abs() < 1e-10,
+                        "Temperatures above max should give zero score. \
+                        Got: {}, Temps: {:?}",
+                        score_above, temps_above
+                    );
+                }
+
+                // Test linear scaling for temperatures between threshold and max
+                if !temps_between.is_empty() {
+                    let score_between = compute_gpu_temp_score(&temps_between, threshold, max, weight);
+
+                    // Get the highest temperature (worst case determines score)
+                    let max_temp = temps_between.iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+
+                    if (*max_temp < max) && (*max_temp > threshold) {
+                        // Calculate expected score for the highest temperature
+                        let expected_score = weight * (1.0 - (*max_temp - threshold) / (max - threshold));
+
+                        prop_assert!((score_between - expected_score).abs() < 1e-10,
+                            "Temperature between threshold and max should scale linearly. \
+                            Expected: {}, Got: {}, Max Temp: {}, Threshold: {}, Max: {}",
+                            expected_score, score_between, max_temp, threshold, max
+                        );
+                    } else if *max_temp < threshold {
+                        prop_assert!((score_between - weight).abs() < 1e-10,
+                            "Temperature between threshold and max should scale linearly. \
+                            Got: {}, Expected: {}, Max Temp: {}, Threshold: {}, Max: {}",
+                            score_between, weight, max_temp, threshold, max
+                        );
+                    } else  {
+                        prop_assert!(score_between.abs() < 1e-10,
+                            "Temperature between threshold and max should scale linearly. \
+                            Got: {}, Max Temp: {}, Threshold: {}, Max: {}",
+                            score_between, max_temp, threshold, max
+                        );
+                    }
+                }
+
+                // Test monotonic decrease across ranges
+                let mut all_temps = Vec::new();
+                all_temps.extend(temps_below);
+                all_temps.extend(temps_between);
+                all_temps.extend(temps_above);
+
+                if all_temps.len() >= 2 {
+                    let scores: Vec<(f64, f64)> = all_temps.windows(2)
+                        .map(|window| {
+                            let score1 = compute_gpu_temp_score(&[window[0]], threshold, max, weight);
+                            let score2 = compute_gpu_temp_score(&[window[1]], threshold, max, weight);
+                            if window[0] < window[1] {
+                                (score1, score2)
+                            } else {
+                                (score2, score1)
+                            }
+                        })
+                        .collect();
+
+                    for (score1, score2) in scores {
+                        prop_assert!(score1 >= score2,
+                            "Scores should monotonically decrease with increasing temperature. \
+                            Score1: {}, Score2: {}",
+                            score1, score2
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn test_compute_gpu_power_score(
+                // Generate power usage in three ranges: below threshold, between, and above max
+                power_below in vec(50.0..200.0f64, 1..5),     // Below threshold (200W)
+                power_between in vec(200.0..300.0f64, 1..5),  // Between threshold and max
+                power_above in vec(300.0..400.0f64, 1..5),    // Above max (300W)
+                threshold in 180.0..220.0f64,                 // Allow some variance in threshold
+                max in 280.0..320.0f64,                       // Allow some variance in max
+                weight in 0.0..1.0f64,
+            ) {
+                // Verify threshold is less than max
+                prop_assert!(threshold < max);
+
+                // Test power usage below threshold (should all give weight)
+                if power_below.iter().all(|&p| p <= threshold) {
+                    let score_below = compute_gpu_power_score(&power_below, threshold, max, weight);
+                    prop_assert!((score_below - weight).abs() < 1e-10,
+                        "Power usage below threshold should give full weight score. \
+                        Expected: {}, Got: {}, Power: {:?}",
+                        weight, score_below, power_below
+                    );
+                }
+
+                // Test power usage above max (should all give 0)
+                if power_above.iter().all(|&p| p >= max) {
+                    let score_above = compute_gpu_power_score(&power_above, threshold, max, weight);
+                    prop_assert!(score_above.abs() < 1e-10,
+                        "Power usage above max should give zero score. \
+                        Got: {}, Power: {:?}",
+                        score_above, power_above
+                    );
+                }
+
+                // Test linear scaling for power usage between threshold and max
+                if !power_between.is_empty() {
+                    let score_between = compute_gpu_power_score(&power_between, threshold, max, weight);
+
+                    // Get the highest power usage (worst case determines score)
+                    let max_power = power_between.iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+
+                    if (*max_power < max) && (*max_power > threshold) {
+                        // Calculate expected score for the highest power usage
+                        let expected_score = weight * (1.0 - (*max_power - threshold) / (max - threshold));
+
+                        prop_assert!((score_between - expected_score).abs() < 1e-10,
+                            "Power usage between threshold and max should scale linearly. \
+                            Expected: {}, Got: {}, Max Power: {}, Threshold: {}, Max: {}",
+                            expected_score, score_between, max_power, threshold, max
+                        );
+                    } else if *max_power < threshold {
+                        prop_assert!((score_between - weight).abs() < 1e-10,
+                            "Power usage between threshold and max should scale linearly. \
+                            Got: {}, Expected: {}, Max Power: {}, Threshold: {}, Max: {}",
+                            score_between, weight, max_power, threshold, max
+                        );
+                    } else {
+                        prop_assert!(score_between.abs() < 1e-10,
+                            "Power usage between threshold and max should scale linearly. \
+                            Got: {}, Max Power: {}, Threshold: {}, Max: {}",
+                            score_between, max_power, threshold, max
+                        );
+                    }
+                }
+
+                // Test monotonic decrease across ranges
+                let mut all_power = Vec::new();
+                all_power.extend(power_below);
+                all_power.extend(power_between);
+                all_power.extend(power_above);
+
+                if all_power.len() >= 2 {
+                    let scores: Vec<(f64, f64)> = all_power.windows(2)
+                        .map(|window| {
+                            let score1 = compute_gpu_power_score(&[window[0]], threshold, max, weight);
+                            let score2 = compute_gpu_power_score(&[window[1]], threshold, max, weight);
+                            if window[0] < window[1] {
+                                (score1, score2)
+                            } else {
+                                (score2, score1)
+                            }
+                        })
+                        .collect();
+
+                    for (score1, score2) in scores {
+                        prop_assert!(score1 >= score2,
+                            "Scores should monotonically decrease with increasing power usage. \
+                            Score1: {}, Score2: {}",
+                            score1, score2
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn test_compute_cpu_score(
+                cpu_usage in 0.0..1.0f64,
+                num_cpus in 1u32..128u32,
+                cpu_frequency in 1000u64..5000u64,  // 1-5 GHz
+                weight in 0.0..1.0f64,
+            ) {
+                let score = compute_cpu_score(cpu_usage, num_cpus, cpu_frequency, weight);
+
+                // Basic range check
+                prop_assert!(score >= 0.0 && score <= weight);
+
+                // Test monotonicity with respect to CPU usage (higher usage should give lower score)
+                if cpu_usage < 0.9 {  // Leave room for increase
+                    let higher_usage_score = compute_cpu_score(cpu_usage + 0.1, num_cpus, cpu_frequency, weight);
+                    prop_assert!(higher_usage_score < score,
+                        "Score should decrease with higher CPU usage. Original: {}, Higher Usage: {}",
+                        score, higher_usage_score
+                    );
+                }
+
+                // Test monotonicity with respect to CPU frequency (higher frequency should give higher score)
+                if cpu_frequency < 4900 {  // Leave room for increase
+                    let higher_freq_score = compute_cpu_score(cpu_usage, num_cpus, cpu_frequency + 100, weight);
+                    prop_assert!(higher_freq_score > score,
+                        "Score should increase with higher CPU frequency. Original: {}, Higher Freq: {}",
+                        score, higher_freq_score
+                    );
+                }
+
+                // Test scaling with weight
+                let half_weight_score = compute_cpu_score(cpu_usage, num_cpus, cpu_frequency, weight / 2.0);
+                prop_assert!(half_weight_score.mul_add(2.0, -score) < 1e-10,
+                    "Score should scale linearly with weight. Full: {}, Half: {}",
+                    score, half_weight_score
+                );
+            }
+
+            #[test]
+            #[allow(clippy::cast_precision_loss)]
+            fn test_compute_ram_score(
+                // Generate RAM values ensuring used <= total
+                ram_total in 1_000_000_000i64..1_000_000_000_000i64,
+                ram_used_percentage in 0.0..1.0f64,
+                weight in 0.0..1.0f64,
+            ) {
+                let ram_used = (ram_total as f64 * ram_used_percentage) as i64;
+                let score = compute_ram_score(ram_used, ram_total, weight);
+
+                // Basic range check
+                prop_assert!(score >= 0.0 && score <= weight);
+
+                // Test perfect score when no RAM is used
+                let perfect_score = compute_ram_score(0, ram_total, weight);
+                prop_assert!((perfect_score - weight).abs() < 1e-10,
+                    "Should get maximum score when no RAM is used. Expected: {}, Got: {}",
+                    weight, perfect_score
+                );
+
+                // Test zero score when all RAM is used
+                let worst_score = compute_ram_score(ram_total, ram_total, weight);
+                prop_assert!(worst_score.abs() < 1e-10,
+                    "Should get zero score when all RAM is used. Got: {}",
+                    worst_score
+                );
+
+                // Test monotonicity
+                if ram_used < ram_total {
+                    let higher_usage_score = compute_ram_score(ram_used + 1, ram_total, weight);
+                    prop_assert!(higher_usage_score < score,
+                        "Score should decrease with higher RAM usage. Original: {}, Higher Usage: {}",
+                        score, higher_usage_score
+                    );
+                }
+
+                // Test linear scaling with weight
+                let half_weight_score = compute_ram_score(ram_used, ram_total, weight / 2.0);
+                prop_assert!(half_weight_score.mul_add(2.0, -score) < 1e-10,
+                    "Score should scale linearly with weight. Full: {}, Half: {}",
+                    score, half_weight_score
+                );
+            }
+
+            #[test]
+            #[allow(clippy::cast_precision_loss)]
+            fn test_compute_swap_ram_score(
+                // Generate swap values ensuring used <= total
+                swap_total in 1_000_000_000i64..1_000_000_000_000i64,
+                swap_used_percentage in 0.0..1.0f64,
+                weight in 0.0..1.0f64,
+            ) {
+                let swap_used = (swap_total as f64 * swap_used_percentage) as i64;
+                let score = compute_swap_ram_score(swap_used, swap_total, weight);
+
+                // Basic range check
+                prop_assert!(score >= 0.0 && score <= weight);
+
+                // Test perfect score when no swap is used
+                let perfect_score = compute_swap_ram_score(0, swap_total, weight);
+                prop_assert!((perfect_score - weight).abs() < 1e-10,
+                    "Should get maximum score when no swap is used. Expected: {}, Got: {}",
+                    weight, perfect_score
+                );
+
+                // Test zero score when all swap is used
+                let worst_score = compute_swap_ram_score(swap_total, swap_total, weight);
+                prop_assert!(worst_score.abs() < 1e-10,
+                    "Should get zero score when all swap is used. Got: {}",
+                    worst_score
+                );
+
+                // Test monotonicity
+                if swap_used < swap_total {
+                    let higher_usage_score = compute_swap_ram_score(swap_used + 1, swap_total, weight);
+                    prop_assert!(higher_usage_score < score,
+                        "Score should decrease with higher swap usage. Original: {}, Higher Usage: {}",
+                        score, higher_usage_score
+                    );
+                }
+
+                // Test linear scaling with weight
+                let half_weight_score = compute_swap_ram_score(swap_used, swap_total, weight / 2.0);
+                prop_assert!(half_weight_score.mul_add(2.0, -score) < 1e-10,
+                    "Score should scale linearly with weight. Full: {}, Half: {}",
+                    score, half_weight_score
+                );
+            }
+
+            #[test]
+            fn test_compute_network_score(
+                // Generate network traffic values
+                network_rx in 0i64..1_000_000_000i64,
+                network_tx in 0i64..1_000_000_000i64,
+                weight in 0.01..1.0f64,
+            ) {
+                let score = compute_network_score(network_rx, network_tx, weight);
+
+                // Basic range check
+                prop_assert!(score >= 0.0 && score <= weight);
+
+                // Test perfect score with no network traffic
+                let perfect_score = compute_network_score(0, 0, weight);
+                prop_assert!((perfect_score - weight).abs() < 1e-10,
+                    "Should get weight/2 score when no network traffic. Expected: {}, Got: {}",
+                    weight, perfect_score
+                );
+
+                // Test monotonicity with respect to receive traffic
+                if network_rx < 1_000_000_000 - 1000 {
+                    let higher_rx_score = compute_network_score(network_rx + 1000, network_tx, weight);
+                    prop_assert!(higher_rx_score < score,
+                        "Score should decrease with higher receive traffic. Original: {}, Higher RX: {}",
+                        score, higher_rx_score
+                    );
+                }
+
+                // Test monotonicity with respect to transmit traffic
+                if network_tx < 1_000_000_000 - 1000 {
+                    let higher_tx_score = compute_network_score(network_rx, network_tx + 1000, weight);
+                    prop_assert!(higher_tx_score < score,
+                        "Score should decrease with higher transmit traffic. Original: {}, Higher TX: {}",
+                        score, higher_tx_score
+                    );
+                }
+
+                // Test scaling with weight
+                let half_weight_score = compute_network_score(network_rx, network_tx, weight / 2.0);
+                prop_assert!(half_weight_score.mul_add(2.0, -score) < 1e-10,
+                    "Score should scale linearly with weight. Full: {}, Half: {}",
+                    score, half_weight_score
+                );
             }
         }
     }
