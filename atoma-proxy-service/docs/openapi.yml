@@ -595,7 +595,7 @@ paths:
 
         # Returns
 
-        * `Result<Json<Value>>` - A JSON response containing a list of graphs with data
+        * `Result<Json<Value>>` - A JSON response containing a list of graphs
           - `Ok(Json<Value>)` - Successfully retrieved graphs
           - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
       operationId: get_graphs

@@ -3,7 +3,6 @@ use atoma_sui::events::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sqlx::FromRow;
 use tokio::sync::oneshot;
 use utoipa::ToSchema;
@@ -228,13 +227,6 @@ pub struct NodeDistribution {
     pub country: Option<String>,
     pub count: i64,
 }
-
-/// Response for getting grafana graphs.
-///
-/// This struct represents the response for the get_grafana_graphs endpoint.
-/// It's vector of tuples where the first element is the name of the dashboard and the second element tuple of panels.
-/// Each panel has a title and a graph data.
-pub type GraphsResponse = Vec<(String, Vec<(String, Value)>)>;
 
 /// Represents a stack of compute units for a specific task
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
