@@ -1777,12 +1777,15 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
 }
 
 pub mod utils {
+    use crate::errors::QuoteVerificationError;
+
     use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
     use dcap_qvl::quote::{Quote, Report};
     use dcap_qvl::verify::verify;
     use std::time::Duration;
+    use tracing::{error, trace};
 
     /// The timeout to use for quote verification.
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -1837,8 +1840,16 @@ pub mod utils {
         quote_bytes: &[u8],
         new_public_key: &[u8],
     ) -> Result<()> {
+        trace!(
+            target = "atoma-state-quote-verification",
+            quote_len = quote_bytes.len(),
+            pubkey_len = new_public_key.len(),
+            "Starting quote verification"
+        );
+
         let quote = Quote::parse(quote_bytes)
-            .map_err(|e| AtomaStateManagerError::FailedToParseQuote(format!("{e:?}")))?;
+            .map_err(|e| QuoteVerificationError::InvalidQuoteFormat(e.to_string()))?;
+
         let fmspc = quote
             .fmspc()
             .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
@@ -1856,27 +1867,50 @@ pub mod utils {
             .as_secs();
         match quote.report {
             Report::SgxEnclave(_) => {
-                return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                    "Report SGX type not supported".to_string(),
-                ));
+                error!(
+                    target = "atoma-state-quote-verification",
+                    "Unsupported SGX enclave report type"
+                );
+                return Err(QuoteVerificationError::UnsupportedReportType("SGX".into()).into());
             }
             Report::TD10(report) => {
+                trace!(
+                    target = "atoma-state-quote-verification",
+                    report_data_len = report.report_data.len(),
+                    "Verifying TD10 report data"
+                );
                 if report.report_data != new_public_key {
-                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                        "Report TD10 data does not match new public key".to_string(),
-                    ));
+                    error!(
+                        target = "atoma-state-quote-verification",
+                        expected_len = new_public_key.len(),
+                        actual_len = report.report_data.len(),
+                        "TD10 report data mismatch"
+                    );
+                    return Err(QuoteVerificationError::InvalidReportData {
+                        expected: new_public_key.to_vec(),
+                        actual: report.report_data.to_vec(),
+                    }
+                    .into());
                 }
             }
             Report::TD15(report) => {
                 if report.base.report_data != new_public_key {
-                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                        "Report TD15 data does not match new public key".to_string(),
-                    ));
+                    return Err(QuoteVerificationError::InvalidReportData {
+                        expected: new_public_key.to_vec(),
+                        actual: report.base.report_data.to_vec(),
+                    }
+                    .into());
                 }
             }
         }
+
         verify(quote_bytes, &collateral, now)
             .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
+
+        trace!(
+            target = "atoma-state-quote-verification",
+            "Quote verification completed successfully"
+        );
         Ok(())
     }
 }

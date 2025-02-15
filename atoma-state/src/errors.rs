@@ -20,6 +20,24 @@ pub enum GpuMetricError {
 }
 
 #[derive(Error, Debug)]
+pub enum QuoteVerificationError {
+    #[error("Invalid quote format: {0}")]
+    InvalidQuoteFormat(String),
+
+    #[error("Collateral retrieval timeout after {timeout_secs} seconds")]
+    CollateralRetrievalTimeout { timeout_secs: u64 },
+
+    #[error("Report data mismatch - expected: {expected:?}, got: {actual:?}")]
+    InvalidReportData { expected: Vec<u8>, actual: Vec<u8> },
+
+    #[error("Unsupported report type: {0}")]
+    UnsupportedReportType(String),
+
+    #[error("Verification failed: {0}")]
+    VerificationFailed(String),
+}
+
+#[derive(Error, Debug)]
 pub enum AtomaStateManagerError {
     #[error("Failed to connect to the database: {0}")]
     DatabaseConnectionError(#[from] sqlx::Error),
@@ -65,6 +83,8 @@ pub enum AtomaStateManagerError {
     InvalidUrl(String),
     #[error("{0}")]
     GpuMetricError(#[from] GpuMetricError),
+    #[error("{0}")]
+    QuoteVerificationError(#[from] QuoteVerificationError),
 }
 
 #[allow(clippy::too_many_arguments)]
