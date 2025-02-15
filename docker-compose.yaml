@@ -87,6 +87,7 @@ services:
     ports:
       - "${ATOMA_SERVICE_PORT:-8080}:8080"
       - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
+      - "${ATOMA_P2P_SERVICE_PORT:-8083}:8083"
 
   # Cloud proxy configuration
   atoma-proxy-cloud:
@@ -98,6 +99,8 @@ services:
       args:
         <<: *atoma-proxy-base-build-args
         PROFILE: cloud
+    ports:
+      - "${ATOMA_P2P_PORT:-8083}:8083/udp"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
