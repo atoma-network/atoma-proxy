@@ -11,6 +11,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
 use crate::{
+    errors::validate_gpu_metrics,
     state_manager::Result,
     timestamp_to_datetime_or_now,
     types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
@@ -1599,6 +1600,23 @@ pub(crate) async fn handle_node_metrics_registration_event(
         gpus,
     } = node_metrics;
 
+    validate_gpu_metrics(
+        num_gpus,
+        &gpus.iter().map(|gpu| gpu.memory_used).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.memory_total).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.memory_free).collect::<Vec<_>>(),
+        &gpus
+            .iter()
+            .map(|gpu| gpu.percentage_time_read_write)
+            .collect::<Vec<_>>(),
+        &gpus
+            .iter()
+            .map(|gpu| gpu.percentage_time_gpu_execution)
+            .collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.temperature).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.power_usage).collect::<Vec<_>>(),
+    )?;
+
     // Collect each metric using iterators
     let gpu_memory_used: Vec<_> = gpus.iter().map(|gpu| gpu.memory_used).collect();
     let gpu_memory_total: Vec<_> = gpus.iter().map(|gpu| gpu.memory_total).collect();
@@ -1613,55 +1631,6 @@ pub(crate) async fn handle_node_metrics_registration_event(
         .collect();
     let gpu_temperatures: Vec<_> = gpus.iter().map(|gpu| gpu.temperature).collect();
     let gpu_power_usages: Vec<_> = gpus.iter().map(|gpu| gpu.power_usage).collect();
-
-    if num_gpus > 0
-        && (gpu_memory_used.len() != num_gpus as usize
-            || gpu_memory_total.len() != num_gpus as usize
-            || gpu_memory_free.len() != num_gpus as usize
-            || gpu_percentage_time_read_write.len() != num_gpus as usize
-            || gpu_percentage_time_execution.len() != num_gpus as usize
-            || gpu_temperatures.len() != num_gpus as usize
-            || gpu_power_usages.len() != num_gpus as usize)
-    {
-        error!(
-            target = "atoma-state-handlers",
-            event = "handle-node-metrics-registration-event",
-            "Invalid GPU metrics:\n\
-             Expected {num_gpus} GPUs, got:\n\
-             - {} GPU memory used\n\
-             - {} GPU memory total\n\
-             - {} GPU memory free\n\
-             - {} GPU percentage time read/write\n\
-             - {} GPU percentage time execution\n\
-             - {} GPU temperatures\n\
-             - {} GPU power usages",
-            gpu_memory_used.len(),
-            gpu_memory_total.len(),
-            gpu_memory_free.len(),
-            gpu_percentage_time_read_write.len(),
-            gpu_percentage_time_execution.len(),
-            gpu_temperatures.len(),
-            gpu_power_usages.len()
-        );
-        return Err(AtomaStateManagerError::InvalidGpuMetrics(format!(
-            "Invalid GPU metrics:\n\
-             Expected {num_gpus} GPUs, got:\n\
-             - {} GPU memory used\n\
-             - {} GPU memory total\n\
-             - {} GPU memory free\n\
-             - {} GPU percentage time read/write\n\
-             - {} GPU percentage time execution\n\
-             - {} GPU temperatures\n\
-             - {} GPU power usages",
-            gpu_memory_used.len(),
-            gpu_memory_total.len(),
-            gpu_memory_free.len(),
-            gpu_percentage_time_read_write.len(),
-            gpu_percentage_time_execution.len(),
-            gpu_temperatures.len(),
-            gpu_power_usages.len()
-        )));
-    }
 
     let node_performance = node_performance::get_node_performance(
         &state_manager.state,
