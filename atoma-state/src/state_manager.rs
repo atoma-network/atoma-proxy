@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use crate::build_query_with_in;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
     NodeDistribution, NodePerformanceScore, NodePublicKey, NodeSubscription, PerformanceWeights,
     Stack, StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, UserProfile,
 };
+use crate::{build_query_with_in, AtomaStateManagerError};
 
 use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::AtomaEvent;
@@ -14,7 +14,6 @@ use chrono::{DateTime, Timelike, Utc};
 use flume::Receiver as FlumeReceiver;
 use sqlx::PgPool;
 use sqlx::{FromRow, Row};
-use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::sync::watch::Receiver;
 use tracing::instrument;
@@ -402,7 +401,7 @@ impl AtomaState {
         performance_score: f64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_performance_scores (node_small_id, timestamp_secs, performance_score, weights_id) 
+            "INSERT INTO node_performance_scores (node_small_id, timestamp_secs, performance_score, weights_id)
              SELECT $1, $2, $3, (SELECT id FROM performance_weights ORDER BY id DESC LIMIT 1)"
         )
         .bind(node_small_id)
@@ -3089,9 +3088,9 @@ impl AtomaState {
         country: String,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE nodes 
-             SET public_address = $2, country = $3 
-             WHERE node_small_id = $1 
+            "UPDATE nodes
+             SET public_address = $2, country = $3
+             WHERE node_small_id = $1
              AND (public_address IS DISTINCT FROM $2 OR country IS DISTINCT FROM $3)",
         )
         .bind(small_id)
@@ -3705,11 +3704,11 @@ impl AtomaState {
 
         for retry in 0..NUM_RETRIES {
             let result = sqlx::query(
-                "UPDATE nodes 
-                    SET public_address = $2, 
+                "UPDATE nodes
+                    SET public_address = $2,
                         timestamp = $3,
                         country = $4
-                    WHERE node_small_id = $1 
+                    WHERE node_small_id = $1
                     AND (timestamp IS NULL OR timestamp < $3)
                     AND (public_address IS DISTINCT FROM $2 OR country IS DISTINCT FROM $4)",
             )
@@ -3785,7 +3784,7 @@ impl AtomaState {
     /// async fn record_metrics(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
     ///     let node_id = 1;
     ///     let timestamp = chrono::Utc::now().timestamp();
-    ///     
+    ///
     ///     state_manager.insert_node_metrics(
     ///         node_id,
     ///         timestamp,
@@ -3840,8 +3839,8 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "WITH latest_timestamp AS (
-                SELECT MAX(timestamp) as max_ts 
-                FROM node_metrics 
+                SELECT MAX(timestamp) as max_ts
+                FROM node_metrics
                 WHERE node_small_id = $1
             )
             INSERT INTO node_metrics (
@@ -3864,11 +3863,11 @@ impl AtomaState {
                 gpu_temperatures,
                 gpu_power_usages
             )
-            SELECT 
+            SELECT
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18
             WHERE NOT EXISTS (
-                SELECT 1 FROM latest_timestamp 
+                SELECT 1 FROM latest_timestamp
                 WHERE max_ts >= $2
             )",
         )
@@ -4899,54 +4898,6 @@ impl AtomaState {
             .await?;
         Ok(())
     }
-}
-
-#[derive(Error, Debug)]
-pub enum AtomaStateManagerError {
-    #[error("Failed to connect to the database: {0}")]
-    DatabaseConnectionError(#[from] sqlx::Error),
-    #[error("Database url is malformed")]
-    DatabaseUrlError,
-    #[error("Stack not found")]
-    StackNotFound,
-    #[error("Attestation node not found: {0}")]
-    AttestationNodeNotFound(i64),
-    #[error("Invalid Merkle leaf length")]
-    InvalidMerkleLeafLength,
-    #[error("Invalid committed stack proof length")]
-    InvalidCommittedStackProofLength,
-    #[error("Failed to parse JSON: {0}")]
-    JsonParseError(#[from] serde_json::Error),
-    #[error("Failed to retrieve existing total hash for stack: `{0}`")]
-    FailedToRetrieveExistingTotalHash(i64),
-    #[error("Failed to send result to channel")]
-    ChannelSendError,
-    #[error("Invalid timestamp")]
-    InvalidTimestamp,
-    #[error("Failed to run migrations")]
-    FailedToRunMigrations(#[from] sqlx::migrate::MigrateError),
-    #[error("Node not found")]
-    NodeNotFound,
-    #[error("Node small id ownership verification failed")]
-    NodeSmallIdOwnershipVerificationFailed,
-    #[error("Failed to verify quote: `{0}`")]
-    FailedToVerifyQuote(String),
-    #[error("Failed to parse quote: `{0}`")]
-    FailedToParseQuote(String),
-    #[error("Unix time went backwards: `{0}`")]
-    UnixTimeWentBackwards(String),
-    #[error("Failed to retrieve collateral: `{0}`")]
-    FailedToRetrieveCollateral(String),
-    #[error("Failed to retrieve fmspc: `{0}`")]
-    FailedToRetrieveFmspc(String),
-    #[error("Insufficient balance")]
-    InsufficientBalance,
-    #[error("Country is not a valid ISO 3166-1 alpha-2 code: {0}")]
-    InvalidCountry(String),
-    #[error("URL is not valid: {0}")]
-    InvalidUrl(String),
-    #[error("Invalid GPU metrics: {0}")]
-    InvalidGpuMetrics(String),
 }
 
 pub mod validation {
@@ -6952,8 +6903,8 @@ pub mod tests {
 
         // Verify the insertion
         let inserted_score = sqlx::query(
-            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id 
-             FROM node_performance_scores 
+            "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id
+             FROM node_performance_scores
              WHERE node_small_id = $1",
         )
         .bind(1)
@@ -7016,7 +6967,7 @@ pub mod tests {
         // Verify all insertions
         let scores = sqlx::query(
             "SELECT id, node_small_id, timestamp_secs, performance_score, weights_id
-             FROM node_performance_scores 
+             FROM node_performance_scores
              ORDER BY timestamp_secs",
         )
         .fetch_all(&state.db)

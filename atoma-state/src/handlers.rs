@@ -11,6 +11,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
 use crate::{
+    errors::validate_gpu_metrics,
     state_manager::Result,
     timestamp_to_datetime_or_now,
     types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
@@ -1599,6 +1600,23 @@ pub(crate) async fn handle_node_metrics_registration_event(
         gpus,
     } = node_metrics;
 
+    validate_gpu_metrics(
+        num_gpus,
+        &gpus.iter().map(|gpu| gpu.memory_used).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.memory_total).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.memory_free).collect::<Vec<_>>(),
+        &gpus
+            .iter()
+            .map(|gpu| gpu.percentage_time_read_write)
+            .collect::<Vec<_>>(),
+        &gpus
+            .iter()
+            .map(|gpu| gpu.percentage_time_gpu_execution)
+            .collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.temperature).collect::<Vec<_>>(),
+        &gpus.iter().map(|gpu| gpu.power_usage).collect::<Vec<_>>(),
+    )?;
+
     // Collect each metric using iterators
     let gpu_memory_used: Vec<_> = gpus.iter().map(|gpu| gpu.memory_used).collect();
     let gpu_memory_total: Vec<_> = gpus.iter().map(|gpu| gpu.memory_total).collect();
@@ -1613,55 +1631,6 @@ pub(crate) async fn handle_node_metrics_registration_event(
         .collect();
     let gpu_temperatures: Vec<_> = gpus.iter().map(|gpu| gpu.temperature).collect();
     let gpu_power_usages: Vec<_> = gpus.iter().map(|gpu| gpu.power_usage).collect();
-
-    if num_gpus > 0
-        && (gpu_memory_used.len() != num_gpus as usize
-            || gpu_memory_total.len() != num_gpus as usize
-            || gpu_memory_free.len() != num_gpus as usize
-            || gpu_percentage_time_read_write.len() != num_gpus as usize
-            || gpu_percentage_time_execution.len() != num_gpus as usize
-            || gpu_temperatures.len() != num_gpus as usize
-            || gpu_power_usages.len() != num_gpus as usize)
-    {
-        error!(
-            target = "atoma-state-handlers",
-            event = "handle-node-metrics-registration-event",
-            "Invalid GPU metrics:\n\
-             Expected {num_gpus} GPUs, got:\n\
-             - {} GPU memory used\n\
-             - {} GPU memory total\n\
-             - {} GPU memory free\n\
-             - {} GPU percentage time read/write\n\
-             - {} GPU percentage time execution\n\
-             - {} GPU temperatures\n\
-             - {} GPU power usages",
-            gpu_memory_used.len(),
-            gpu_memory_total.len(),
-            gpu_memory_free.len(),
-            gpu_percentage_time_read_write.len(),
-            gpu_percentage_time_execution.len(),
-            gpu_temperatures.len(),
-            gpu_power_usages.len()
-        );
-        return Err(AtomaStateManagerError::InvalidGpuMetrics(format!(
-            "Invalid GPU metrics:\n\
-             Expected {num_gpus} GPUs, got:\n\
-             - {} GPU memory used\n\
-             - {} GPU memory total\n\
-             - {} GPU memory free\n\
-             - {} GPU percentage time read/write\n\
-             - {} GPU percentage time execution\n\
-             - {} GPU temperatures\n\
-             - {} GPU power usages",
-            gpu_memory_used.len(),
-            gpu_memory_total.len(),
-            gpu_memory_free.len(),
-            gpu_percentage_time_read_write.len(),
-            gpu_percentage_time_execution.len(),
-            gpu_temperatures.len(),
-            gpu_power_usages.len()
-        )));
-    }
 
     let node_performance = node_performance::get_node_performance(
         &state_manager.state,
@@ -1808,12 +1777,15 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
 }
 
 pub mod utils {
+    use crate::errors::QuoteVerificationError;
+
     use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
     use dcap_qvl::quote::{Quote, Report};
     use dcap_qvl::verify::verify;
     use std::time::Duration;
+    use tracing::{error, trace};
 
     /// The timeout to use for quote verification.
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -1868,8 +1840,16 @@ pub mod utils {
         quote_bytes: &[u8],
         new_public_key: &[u8],
     ) -> Result<()> {
+        trace!(
+            target = "atoma-state-quote-verification",
+            quote_len = quote_bytes.len(),
+            pubkey_len = new_public_key.len(),
+            "Starting quote verification"
+        );
+
         let quote = Quote::parse(quote_bytes)
-            .map_err(|e| AtomaStateManagerError::FailedToParseQuote(format!("{e:?}")))?;
+            .map_err(|e| QuoteVerificationError::InvalidQuoteFormat(e.to_string()))?;
+
         let fmspc = quote
             .fmspc()
             .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
@@ -1887,27 +1867,50 @@ pub mod utils {
             .as_secs();
         match quote.report {
             Report::SgxEnclave(_) => {
-                return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                    "Report SGX type not supported".to_string(),
-                ));
+                error!(
+                    target = "atoma-state-quote-verification",
+                    "Unsupported SGX enclave report type"
+                );
+                return Err(QuoteVerificationError::UnsupportedReportType("SGX".into()).into());
             }
             Report::TD10(report) => {
+                trace!(
+                    target = "atoma-state-quote-verification",
+                    report_data_len = report.report_data.len(),
+                    "Verifying TD10 report data"
+                );
                 if report.report_data != new_public_key {
-                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                        "Report TD10 data does not match new public key".to_string(),
-                    ));
+                    error!(
+                        target = "atoma-state-quote-verification",
+                        expected_len = new_public_key.len(),
+                        actual_len = report.report_data.len(),
+                        "TD10 report data mismatch"
+                    );
+                    return Err(QuoteVerificationError::InvalidReportData {
+                        expected: new_public_key.to_vec(),
+                        actual: report.report_data.to_vec(),
+                    }
+                    .into());
                 }
             }
             Report::TD15(report) => {
                 if report.base.report_data != new_public_key {
-                    return Err(AtomaStateManagerError::FailedToVerifyQuote(
-                        "Report TD15 data does not match new public key".to_string(),
-                    ));
+                    return Err(QuoteVerificationError::InvalidReportData {
+                        expected: new_public_key.to_vec(),
+                        actual: report.base.report_data.to_vec(),
+                    }
+                    .into());
                 }
             }
         }
+
         verify(quote_bytes, &collateral, now)
             .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
+
+        trace!(
+            target = "atoma-state-quote-verification",
+            "Quote verification completed successfully"
+        );
         Ok(())
     }
 }

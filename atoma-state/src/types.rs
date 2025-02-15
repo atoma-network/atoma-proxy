@@ -440,7 +440,7 @@ pub struct StackSettlementTicket {
 }
 
 impl TryFrom<StackTrySettleEvent> for StackSettlementTicket {
-    type Error = crate::state_manager::AtomaStateManagerError;
+    type Error = crate::errors::AtomaStateManagerError;
 
     fn try_from(event: StackTrySettleEvent) -> std::result::Result<Self, Self::Error> {
         let num_attestation_nodes = event.requested_attestation_nodes.len();
