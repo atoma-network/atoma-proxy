@@ -704,7 +704,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#dd5f973d660b0cce370ae095172d932db47167f3"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#39fde0bbc27e5f750a26281a74eb16f6fe039b84"
 dependencies = [
  "blake3",
  "chrono",
@@ -830,7 +830,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#dd5f973d660b0cce370ae095172d932db47167f3"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#39fde0bbc27e5f750a26281a74eb16f6fe039b84"
 dependencies = [
  "anyhow",
  "config",
@@ -849,7 +849,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#dd5f973d660b0cce370ae095172d932db47167f3"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#39fde0bbc27e5f750a26281a74eb16f6fe039b84"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -4172,15 +4172,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6846,7 +6837,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
