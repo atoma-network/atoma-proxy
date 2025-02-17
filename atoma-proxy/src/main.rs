@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{Context, Result};
 use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_p2p::{AtomaP2pNode, AtomaP2pNodeConfig};
-use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
+use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, Grafana, ProxyServiceState};
 use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
 use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
@@ -156,10 +156,17 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to bind proxy service TCP listener")?;
 
+    let grafana = Grafana::new(
+        config.proxy_service.grafana_url,
+        config.proxy_service.grafana_api_token,
+        config.proxy_service.grafana_dashboard_tag,
+    );
+
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
         auth,
         models_with_modalities,
+        grafana,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

@@ -14,9 +14,12 @@ base64.workspace = true
 chrono.workspace = true
 config.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
+serde_json.workspace = true
 sui-sdk.workspace = true
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tower-http = { workspace = true, features = ["cors"] }
 tracing-subscriber.workspace = true
