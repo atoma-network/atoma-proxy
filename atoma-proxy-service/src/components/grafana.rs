@@ -27,6 +27,8 @@ struct Panel {
     targets: Value,
     /// The title of the panel
     title: String,
+    /// The panel description
+    description: String,
 }
 
 /// The inner dashboard struct from grafana, but incomplete, because we don't care about everything.
@@ -66,7 +68,7 @@ pub struct Query {
 }
 
 /// Convert a `Dashboard` into a vector of queries
-impl From<Dashboard> for Vec<(String, Query)> {
+impl From<Dashboard> for Vec<(String, String, Query)> {
     fn from(dashboard: Dashboard) -> Self {
         let Time { from, to } = dashboard.dashboard.time;
         dashboard
@@ -76,6 +78,7 @@ impl From<Dashboard> for Vec<(String, Query)> {
             .map(|panel| {
                 (
                     panel.title,
+                    panel.description,
                     Query {
                         queries: panel.targets,
                         from: from.clone(),

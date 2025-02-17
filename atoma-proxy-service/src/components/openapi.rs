@@ -21,7 +21,7 @@ use crate::{
             GET_CURRENT_STACKS_PATH,
         },
         stats::{
-            GetComputeUnitsProcessed, GetGRaphData, GetGraphs, GetLatency, GetNodeDistribution,
+            GetComputeUnitsProcessed, GetGraphData, GetGraphs, GetLatency, GetNodeDistribution,
             GetStatsStacks, COMPUTE_UNITS_PROCESSED_PATH, GET_GRAPHS_PATH, GET_GRAPH_DATA_PATH,
             GET_NODES_DISTRIBUTION_PATH, GET_STATS_STACKS_PATH, LATENCY_PATH,
         },

@@ -23,7 +23,7 @@ type Result<T> = std::result::Result<T, StatusCode>;
 /// This struct represents the response for the get_grafana_graphs endpoint.
 /// It's vector of tuples where the first element is the name of the dashboard and the second element tuple of panels.
 /// Each panel has a title and a graph data.
-pub type GraphsResponse = Vec<(String, Vec<(String, grafana::Query)>)>;
+pub type GraphsResponse = Vec<(String, Vec<(String, String, grafana::Query)>)>;
 
 /// The path for the compute_units_processed endpoint.
 pub const COMPUTE_UNITS_PROCESSED_PATH: &str = "/compute_units_processed";
@@ -337,7 +337,7 @@ async fn get_graphs(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         let dashboard_title = dashboard.title();
-        let queries: Vec<(String, grafana::Query)> = dashboard.into();
+        let queries: Vec<(String, String, grafana::Query)> = dashboard.into();
         results.push((dashboard_title, queries));
     }
 
