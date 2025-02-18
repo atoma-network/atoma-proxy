@@ -1,0 +1,143 @@
+# Base configurations that are common between environments
+x-atoma-proxy-base: &atoma-proxy-base
+  build: &atoma-proxy-base-build
+    context: .
+    dockerfile: Dockerfile
+    args: &atoma-proxy-base-build-args
+      TRACE_LEVEL: ${TRACE_LEVEL:-info}
+  volumes:
+    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
+    - ./logs:/app/logs
+    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
+  env_file:
+    - .env
+
+  depends_on:
+    db:
+      condition: service_healthy
+  networks:
+    - atoma-network
+
+services:
+  traefik:
+    profiles: ["cloud"]
+    image: traefik:v2.9
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--log.level=INFO"
+      # EntryPoints
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      # Let's Encrypt (ACME) configuration
+      - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
+      - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
+      - "--certificatesResolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesResolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - atoma-network
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`traefik.atoma.network`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8090"
+
+  db:
+    profiles: ["local", "cloud"]
+    image: postgres:13
+    restart: always
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - atoma-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_PORT} || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Local proxy configuration
+  atoma-proxy-local:
+    profiles: ["local"]
+    <<: *atoma-proxy-base
+    image: ghcr.io/atoma-network/atoma-proxy:local-latest
+    build:
+      <<: *atoma-proxy-base-build
+      args:
+        <<: *atoma-proxy-base-build-args
+        PROFILE: local
+    ports:
+      - "${ATOMA_SERVICE_PORT:-8080}:8080"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
+
+  # Cloud proxy configuration
+  atoma-proxy-cloud:
+    profiles: ["cloud"]
+    <<: *atoma-proxy-base
+    image: ghcr.io/atoma-network/atoma-proxy:latest
+    build:
+      <<: *atoma-proxy-base-build
+      args:
+        <<: *atoma-proxy-base-build-args
+        PROFILE: cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.routers.api.service=api_service"
+      - "traefik.http.services.api_service.loadbalancer.server.port=8080" # This is the internal port of the docker, this have to match the port in the config.toml
+      - "traefik.http.routers.credentials.rule=Host(`credentials.atoma.network`)"
+      - "traefik.http.routers.credentials.entrypoints=websecure"
+      - "traefik.http.routers.credentials.tls.certresolver=myresolver"
+      - "traefik.http.routers.credentials.service=credentials_service"
+      - "traefik.http.services.credentials_service.loadbalancer.server.port=8081" # This is the internal port of the docker, this have to match the port in the config.toml
+
+  backend:
+    profiles: ["cloud"]
+    image: mysten/zklogin:prover-stable
+    volumes:
+      # The ZKEY environment variable must be set to the path of the zkey file.
+      - ${ZKEY}:/app/binaries/zkLogin.zkey
+    environment:
+      - ZKEY=/app/binaries/zkLogin.zkey
+      - WITNESS_BINARIES=/app/binaries
+    networks:
+      - atoma-network
+
+  frontend:
+    profiles: ["cloud"]
+    image: mysten/zklogin:prover-fe-stable
+    command: "8080"
+    environment:
+      - PROVER_URI=http://backend:8080/input
+      - NODE_ENV=production
+      - DEBUG=zkLogin:info,jwks
+      # The default timeout is 15 seconds. Uncomment the following line to change it.
+      # - PROVER_TIMEOUT=30
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prover.rule=Host(`prover.atoma.network`)"
+      - "traefik.http.routers.prover.entrypoints=websecure"
+      - "traefik.http.routers.prover.tls.certresolver=myresolver"
+      - "traefik.http.routers.prover.service=prover_service"
+      - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
+    networks:
+      - atoma-network
+
+networks:
+  atoma-network:
+    driver: bridge
