@@ -61,6 +61,9 @@ hf_token = "<API_KEY>" # Hugging face api token, required if you want to access 
 
 [atoma_proxy_service]
 service_bind_address = "0.0.0.0:8081" # This should match the port in the docker-compose.yml
+grafana_url = "" # Grafana URL
+grafana_api_token = "" # Grafana api token (read only access is sufficient)
+grafana_dashboard_tag="" # Only dashboards tagged with this tag will be proxied
 
 [atoma_auth]
 secret_key = "secret_key" # Secret key for the tokens generation
@@ -74,7 +77,7 @@ heartbeat_interval = { secs = 30, nanos = 0 }
 # Maximum duration a connection can remain idle before closing (in seconds)
 idle_connection_timeout = { secs = 60, nanos = 0 }
 # Address to listen for incoming QUIC connections (format: "/ip4/x.x.x.x/udp/x")
-listen_addr = "/ip4/0.0.0.0/udp/4001/quic-v1"
+listen_addr = "/ip4/0.0.0.0/udp/8083/quic-v1"
 # List of bootstrap nodes to connect to
 bootstrap_nodes = [
     "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",

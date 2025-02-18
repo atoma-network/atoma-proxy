@@ -583,6 +583,56 @@ paths:
               schema: {}
         '500':
           description: Failed to get node distribution
+  /get_graphs:
+    get:
+      tags:
+      - Stats
+      summary: Get graphs.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing a list of graphs
+          - `Ok(Json<Value>)` - Successfully retrieved graphs
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
+      operationId: get_graphs
+      responses:
+        '200':
+          description: Retrieves all graphs
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to get graphs
+  /get_graph_data:
+    post:
+      tags:
+      - Stats
+      summary: Get graph data.
+      description: |+
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `query` - The query for grafana
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the graph data
+          - `Ok(Json<Value>)` - Successfully retrieved graph data
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graph data from state manager
+
+      operationId: get_graph_data
+      responses:
+        '200':
+          description: Retrieves graph data
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to get graph data
 components:
   schemas:
     AuthRequest:

@@ -4,15 +4,26 @@ use atoma_state::types::{
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
+use serde_json::Value;
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
-use crate::{ComputeUnitsProcessedQuery, LatencyQuery, ProxyServiceState, StatsStackQuery};
+use crate::{
+    components::grafana::{self},
+    ComputeUnitsProcessedQuery, LatencyQuery, ProxyServiceState, StatsStackQuery,
+};
 
 type Result<T> = std::result::Result<T, StatusCode>;
+
+/// Response for getting grafana graphs.
+///
+/// This struct represents the response for the get_grafana_graphs endpoint.
+/// It's vector of tuples where the first element is the name of the dashboard and the second element tuple of panels.
+/// Each panel has a title and a graph data.
+pub type GraphsResponse = Vec<(String, Vec<(String, String, grafana::Query)>)>;
 
 /// The path for the compute_units_processed endpoint.
 pub const COMPUTE_UNITS_PROCESSED_PATH: &str = "/compute_units_processed";
@@ -22,6 +33,10 @@ pub const LATENCY_PATH: &str = "/latency";
 pub const GET_STATS_STACKS_PATH: &str = "/get_stats_stacks";
 /// The path for the get_nodes_distribution endpoint.
 pub const GET_NODES_DISTRIBUTION_PATH: &str = "/get_nodes_distribution";
+/// The path for the get_graphs endpoint.
+pub const GET_GRAPHS_PATH: &str = "/get_graphs";
+/// The path for the graph's data endpoint.
+pub const GET_GRAPH_DATA_PATH: &str = "/get_graph_data";
 
 /// Returns a router with the stats endpoint.
 ///
@@ -36,6 +51,8 @@ pub fn stats_router() -> Router<ProxyServiceState> {
         .route(LATENCY_PATH, get(get_latency))
         .route(GET_STATS_STACKS_PATH, get(get_stats_stacks))
         .route(GET_NODES_DISTRIBUTION_PATH, get(get_nodes_distribution))
+        .route(GET_GRAPHS_PATH, get(get_graphs))
+        .route(GET_GRAPH_DATA_PATH, post(get_graph_data))
 }
 
 /// OpenAPI documentation for the get_compute_units_processed endpoint.
@@ -274,4 +291,99 @@ async fn get_nodes_distribution(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?,
     ))
+}
+
+/// OpenAPI documentation for the get_graphs endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_graphs
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_graphs))]
+pub struct GetGraphs;
+
+/// Get graphs.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+///
+/// # Returns
+///
+/// * `Result<Json<Value>>` - A JSON response containing a list of graphs
+///   - `Ok(Json<Value>)` - Successfully retrieved graphs
+///   - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
+#[utoipa::path(
+    get,
+    path = "",
+    responses(
+        (status = OK, description = "Retrieves all graphs", body = Value),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get graphs")
+    )
+)]
+#[instrument(level = "trace", skip_all)]
+async fn get_graphs(
+    State(proxy_service_state): State<ProxyServiceState>,
+) -> Result<Json<GraphsResponse>> {
+    let grafana = &proxy_service_state.grafana;
+    let uids = grafana.get_dashboard_uids().await.map_err(|e| {
+        error!("Failed to get dashboard uids: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let mut results = Vec::new();
+    for uid in uids {
+        let dashboard = grafana.get_dashboard(uid).await.map_err(|e| {
+            error!("Failed to get dashboard: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let dashboard_title = dashboard.title();
+        let queries: Vec<(String, String, grafana::Query)> = dashboard.into();
+        results.push((dashboard_title, queries));
+    }
+
+    Ok(Json(results))
+}
+
+/// OpenAPI documentation for the get_graph_data endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_graph_data
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_graph_data))]
+pub struct GetGraphData;
+
+/// Get graph data.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `query` - The query for grafana
+///
+/// # Returns
+///
+/// * `Result<Json<Value>>` - A JSON response containing the graph data
+///   - `Ok(Json<Value>)` - Successfully retrieved graph data
+///   - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graph data from state manager
+///
+#[utoipa::path(
+    post,
+    path = "",
+    responses(
+        (status = OK, description = "Retrieves graph data", body = Value),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get graph data")
+    )
+)]
+#[axum::debug_handler]
+#[instrument(level = "trace", skip_all)]
+async fn get_graph_data(
+    State(proxy_service_state): State<ProxyServiceState>,
+    Json(query): Json<grafana::Query>,
+) -> Result<Json<Value>> {
+    let grafana = &proxy_service_state.grafana;
+    let data = grafana.get_query_data(query).await.map_err(|e| {
+        error!("Failed to get graph data: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(data))
 }

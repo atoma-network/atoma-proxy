@@ -10,6 +10,15 @@ pub struct AtomaProxyServiceConfig {
     /// The address and port where the service will listen for connections
     /// Format: "host:port" (e.g., "127.0.0.1:8080")
     pub service_bind_address: String,
+
+    /// Grafana URL
+    pub grafana_url: String,
+
+    /// Grafana api token (read only access is sufficient)
+    pub grafana_api_token: String,
+
+    /// Only dashboards tagged with this tag will be proxied
+    pub grafana_dashboard_tag: String,
 }
 
 impl AtomaProxyServiceConfig {
