@@ -5,10 +5,6 @@ x-atoma-proxy-base: &atoma-proxy-base
     dockerfile: Dockerfile
     args: &atoma-proxy-base-build-args
       TRACE_LEVEL: ${TRACE_LEVEL:-info}
-  volumes:
-    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
-    - ./logs:/app/logs
-    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
   env_file:
     - .env
 
@@ -40,9 +36,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "./letsencrypt:/letsencrypt"
     networks:
       - atoma-network
     labels:
@@ -109,9 +102,6 @@ services:
   backend:
     profiles: ["cloud"]
     image: mysten/zklogin:prover-stable
-    volumes:
-      # The ZKEY environment variable must be set to the path of the zkey file.
-      - ${ZKEY}:/app/binaries/zkLogin.zkey
     environment:
       - ZKEY=/app/binaries/zkLogin.zkey
       - WITNESS_BINARIES=/app/binaries
