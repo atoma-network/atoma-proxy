@@ -7,6 +7,11 @@ x-atoma-proxy-base: &atoma-proxy-base
       TRACE_LEVEL: ${TRACE_LEVEL:-info}
   env_file:
     - .env
+  volumes:
+    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
+    - ./logs:/app/logs
+    - sui-config-volume:/root/.sui/sui_config
+    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
 
   depends_on:
     db:
@@ -128,6 +133,9 @@ services:
       - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
     networks:
       - atoma-network
+
+volumes:
+  sui-config-volume:
 
 networks:
   atoma-network:
