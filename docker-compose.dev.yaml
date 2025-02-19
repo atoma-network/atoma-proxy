@@ -48,6 +48,7 @@ services:
     profiles: ["local", "cloud"]
     image: postgres:13
     restart: always
+    env_file: .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -58,7 +59,7 @@ services:
       - atoma-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_INTERNAL_PORT} || exit 1"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
