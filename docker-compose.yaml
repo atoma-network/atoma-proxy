@@ -184,6 +184,8 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     env_file: .env
+    environment:
+      - GF_SERVER_ROOT_URL=http://${GRAFANA_DOMAIN:-213.130.147.75}:${GRAFANA_PORT:-3000}/
     networks:
       - atoma-network
     depends_on:
