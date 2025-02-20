@@ -39,7 +39,7 @@ RUN if [ "$PROFILE" = "cloud" ]; then \
     fi
 
 # Final stage
-FROM --platform=$TARGETPLATFORM debian:bullseye-slim
+FROM ubuntu:24.04
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
