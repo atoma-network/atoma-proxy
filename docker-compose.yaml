@@ -69,7 +69,7 @@ services:
     networks:
       - atoma-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_PORT} || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p 5432 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -184,6 +184,8 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     env_file: .env
+    environment:
+      - GF_SERVER_ROOT_URL=http://${GRAFANA_DOMAIN}:${GRAFANA_PORT:-3000}/
     networks:
       - atoma-network
     depends_on:

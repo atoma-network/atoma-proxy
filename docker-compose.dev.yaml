@@ -7,6 +7,11 @@ x-atoma-proxy-base: &atoma-proxy-base
       TRACE_LEVEL: ${TRACE_LEVEL:-info}
   env_file:
     - .env
+  volumes:
+    - ${CONFIG_PATH:-./config.toml}:/app/config.toml
+    - ./logs:/app/logs
+    - sui-config-volume:/root/.sui/sui_config
+    - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
 
   depends_on:
     db:
@@ -48,6 +53,7 @@ services:
     profiles: ["local", "cloud"]
     image: postgres:13
     restart: always
+    env_file: .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -57,8 +63,8 @@ services:
     networks:
       - atoma-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_PORT} || exit 1"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p 5432 || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -127,6 +133,9 @@ services:
       - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
     networks:
       - atoma-network
+
+volumes:
+  sui-config-volume:
 
 networks:
   atoma-network:
