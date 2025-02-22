@@ -6,6 +6,7 @@
 pub mod config;
 pub mod errors;
 pub mod handlers;
+pub mod metrics;
 pub mod state_manager;
 pub mod types;
 
@@ -15,6 +16,7 @@ pub use errors::AtomaStateManagerError;
 pub use sqlx::PgPool;
 use sqlx::Postgres;
 pub use state_manager::{AtomaState, AtomaStateManager};
+
 /// Builds a query with an IN clause and optional additional conditions
 ///
 /// # Arguments

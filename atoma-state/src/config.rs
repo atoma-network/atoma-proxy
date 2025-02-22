@@ -8,6 +8,9 @@ pub struct AtomaStateManagerConfig {
     /// The URL of the Postgres database.
     pub database_url: String,
 
+    /// The URL of the Prometheus metrics endpoint.
+    pub metrics_url: String,
+
     /// Component score weights (0.0 to 1.0)
     pub component_weights: ComponentsWeights,
 
@@ -87,6 +90,7 @@ impl AtomaStateManagerConfig {
     #[must_use]
     pub const fn new(
         database_url: String,
+        metrics_url: String,
         component_weights: ComponentsWeights,
         gpu: GpuMetricsWeights,
         ram: RamMetricsWeights,
@@ -94,6 +98,7 @@ impl AtomaStateManagerConfig {
     ) -> Self {
         Self {
             database_url,
+            metrics_url,
             component_weights,
             gpu,
             ram,
