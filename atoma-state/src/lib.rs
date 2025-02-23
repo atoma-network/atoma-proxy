@@ -8,6 +8,7 @@ pub mod errors;
 pub mod handlers;
 pub mod metrics;
 pub mod state_manager;
+pub mod timer;
 pub mod types;
 
 use chrono::{DateTime, Utc};

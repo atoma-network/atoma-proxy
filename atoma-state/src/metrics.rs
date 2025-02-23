@@ -6,7 +6,20 @@ use atoma_p2p::metrics::{
 use once_cell::sync::Lazy;
 use prometheus::{GaugeVec, Opts, Registry};
 use serde::Deserialize;
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinHandle,
+};
 use tracing::instrument;
+
+use crate::{
+    errors::MetricsServiceError,
+    timer::{trigger_new_metrics_collection_task, Modalities},
+};
+
+/// Duration until next top k best available nodes selection
+pub(crate) const DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION: std::time::Duration =
+    std::time::Duration::from_secs(3 * 60); // 3 minutes
 
 /// Metrics timeout, in seconds
 const METRICS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -16,6 +29,9 @@ const MODEL_LABEL: &str = "model";
 
 /// Node small id label
 const NODE_SMALL_ID_LABEL: &str = "node_small_id";
+
+/// Default top k best available nodes
+pub(crate) const DEFAULT_TOP_K_BEST_AVAILABLE_NODES: usize = 10;
 
 type Result<T> = std::result::Result<T, MetricsServiceError>;
 
@@ -69,12 +85,24 @@ pub struct NodeMetricsCollector {
 
     /// The URL of the Prometheus metrics endpoint.
     metrics_url: String,
+
+    /// The receiver of the best available nodes.
+    receiver_best_available_nodes: mpsc::UnboundedReceiver<Vec<(Modalities, Vec<i64>)>>,
+
+    /// The join handle of the timer task.
+    timer_join_handle: JoinHandle<Result<()>>,
 }
 
 impl NodeMetricsCollector {
     /// Constructor
     #[allow(clippy::similar_names)]
-    pub fn new(metrics_url: String) -> Self {
+    pub fn new(
+        metrics_url: String,
+        models: Vec<(Modalities, String)>,
+        top_k: Option<usize>,
+        shutdown_signal: watch::Receiver<bool>,
+    ) -> Self {
+        let (tx_best_available_nodes, receiver_best_available_nodes) = mpsc::unbounded_channel();
         let registry = Registry::new();
 
         let (
@@ -90,6 +118,14 @@ impl NodeMetricsCollector {
         let (image_generation_latency, image_generation_num_running_requests) =
             Self::image_generation_registry(&registry);
 
+        let timer_join_handle = trigger_new_metrics_collection_task(
+            metrics_url.clone(),
+            models,
+            top_k,
+            tx_best_available_nodes,
+            shutdown_signal,
+        );
+
         Self {
             registry,
             chat_completions_gpu_usage,
@@ -103,16 +139,60 @@ impl NodeMetricsCollector {
             image_generation_latency,
             image_generation_num_running_requests,
             metrics_url,
+            receiver_best_available_nodes,
+            timer_join_handle,
         }
     }
 
-    #[instrument(level = "debug", skip_all)]
-    pub async fn retrieve_best_available_node_for_chat_completions(
-        &self,
+    /// Retrieves the best available nodes for chat completions based on performance metrics.
+    ///
+    /// This method queries the Prometheus metrics to find the most efficient nodes for handling
+    /// chat completion requests. The selection is based on a combination of:
+    /// - Time to first token (TTFT)
+    /// - Time per output token (TPOT)
+    /// - Load balancing consideration (ratio of waiting to running requests)
+    ///
+    /// The nodes are ranked using a scoring formula that considers both latency metrics (TTFT + TPOT)
+    /// and excludes overloaded nodes where the ratio of waiting to running requests exceeds 10%.
+    ///
+    /// # Arguments
+    ///
+    /// * `metrics_url` - The URL of the Prometheus metrics endpoint
+    /// * `model` - The model identifier to filter metrics for specific model types
+    /// * `top_k` - Optional number of best nodes to return. Defaults to [`DEFAULT_TOP_K_BEST_AVAILABLE_NODES`]
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
+    /// (best performing nodes first). Returns an error if the Prometheus query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use your_crate::NodeMetricsCollector;
+    /// # async fn example(collector: &NodeMetricsCollector) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Get top 5 best nodes for the "gpt-4" model
+    /// let best_nodes = collector.retrieve_best_available_node_for_chat_completions("gpt-4", Some(5)).await?;
+    /// println!("Best nodes for chat completions: {:?}", best_nodes);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            model = model,
+            top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES),
+        )
+    )]
+    pub async fn retrieve_best_available_nodes_for_chat_completions(
+        metrics_url: &str,
         model: &str,
-    ) -> Result<i64> {
+        top_k: Option<usize>,
+    ) -> Result<Vec<i64>> {
+        let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
         let query = format!(
-            r#"topk(10,
+            r#"topk({top_k},
                 -1 * (
                     (
                         chat_time_to_first_token{{model="{model}"}} + 
@@ -126,7 +206,7 @@ impl NodeMetricsCollector {
         );
 
         let node_metrics: PromQueryResponse = HTTP_CLIENT
-            .get(self.metrics_url.clone())
+            .get(metrics_url)
             .query(&[("query", query)])
             .send()
             .await?
@@ -134,15 +214,150 @@ impl NodeMetricsCollector {
             .json()
             .await?;
 
-        // Reset the running requests metrics
-        self.chat_completions_cpu_usage.reset();
-        self.chat_completions_gpu_usage.reset();
-        self.chat_completions_ttft.reset();
-        self.chat_completions_tpot.reset();
-        self.chat_completions_num_running_requests.reset();
-        self.chat_completions_num_waiting_requests.reset();
+        let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
+        for result in node_metrics.data.result {
+            let node_small_id = result.metric.get(NODE_SMALL_ID_LABEL).unwrap();
+            let node_small_id = node_small_id.parse::<i64>().unwrap();
+            best_available_node_small_ids.push(node_small_id);
+        }
 
-        Ok(node_metrics)
+        Ok(best_available_node_small_ids)
+    }
+
+    /// Retrieves the best available nodes for embeddings based on performance metrics.
+    ///
+    /// This method queries the Prometheus metrics to find the most efficient nodes for handling
+    /// embedding operations. The selection is based on the processing latency for embedding requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `metrics_url` - The URL of the Prometheus metrics endpoint
+    /// * `model` - The model identifier to filter metrics for specific model types
+    /// * `top_k` - Optional number of best nodes to return. Defaults to [`DEFAULT_TOP_K_BEST_AVAILABLE_NODES`]
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
+    /// (best performing nodes first). Returns an error if the Prometheus query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use your_crate::NodeMetricsCollector;
+    /// # async fn example(collector: &NodeMetricsCollector) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Get top 5 best nodes for the "gpt-4" model
+    /// let best_nodes = collector.retrieve_best_available_nodes_for_embeddings("gpt-4", Some(5)).await?;
+    /// println!("Best nodes for embeddings: {:?}", best_nodes);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            model = model,
+            top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES),
+        )
+    )]
+    pub async fn retrieve_best_available_nodes_for_embeddings(
+        metrics_url: &str,
+        model: &str,
+        top_k: Option<usize>,
+    ) -> Result<Vec<i64>> {
+        let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
+        let query = format!(
+            r#"topk({top_k},
+                -1 * (
+                    embeddings_latency{{model="{model}"}}
+                )
+            )"#,
+        );
+
+        let node_metrics: PromQueryResponse = HTTP_CLIENT
+            .get(metrics_url)
+            .query(&[("query", query)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
+        for result in node_metrics.data.result {
+            let node_small_id = result.metric.get(NODE_SMALL_ID_LABEL).unwrap();
+            let node_small_id = node_small_id.parse::<i64>().unwrap();
+            best_available_node_small_ids.push(node_small_id);
+        }
+
+        Ok(best_available_node_small_ids)
+    }
+
+    /// Retrieves the best available nodes for image generation based on performance metrics.
+    ///
+    /// This method queries the Prometheus metrics to find the most efficient nodes for handling
+    /// image generation operations. The selection is based on the processing latency for image generation requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `metrics_url` - The URL of the Prometheus metrics endpoint
+    /// * `model` - The model identifier to filter metrics for specific model types
+    /// * `top_k` - Optional number of best nodes to return. Defaults to [`DEFAULT_TOP_K_BEST_AVAILABLE_NODES`]
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
+    /// (best performing nodes first). Returns an error if the Prometheus query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// # use your_crate::NodeMetricsCollector;
+    /// # async fn example(collector: &NodeMetricsCollector) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Get top 5 best nodes for the "gpt-4" model
+    /// let best_nodes = collector.retrieve_best_available_nodes_for_image_generation("gpt-4", Some(5)).await?;
+    /// println!("Best nodes for image generation: {:?}", best_nodes);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            model = model,
+            top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES),
+        )
+    )]
+    pub async fn retrieve_best_available_nodes_for_image_generation(
+        metrics_url: &str,
+        model: &str,
+        top_k: Option<usize>,
+    ) -> Result<Vec<i64>> {
+        let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
+        let query = format!(
+            r#"topk({top_k},
+                -1 * (
+                    image_generation_latency{{model="{model}"}}
+                )
+            )"#,
+        );
+
+        let node_metrics: PromQueryResponse = HTTP_CLIENT
+            .get(metrics_url)
+            .query(&[("query", query)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
+        for result in node_metrics.data.result {
+            let node_small_id = result.metric.get(NODE_SMALL_ID_LABEL).unwrap();
+            let node_small_id = node_small_id.parse::<i64>().unwrap();
+            best_available_node_small_ids.push(node_small_id);
+        }
+
+        Ok(best_available_node_small_ids)
     }
 
     /// Stores metrics collected from a node into the Prometheus registry.
@@ -466,17 +681,7 @@ impl NodeMetricsCollector {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum MetricsServiceError {
-    #[error("IO error: {0}")]
-    Io(std::io::Error),
-    #[error("Prometheus error: {0}")]
-    Prometheus(#[from] prometheus::Error),
-    #[error("Reqwest error: {0}")]
-    Reqwest(#[from] reqwest::Error),
-}
-
-/// Prometheus query response format following the API description of 
+/// Prometheus query response format following the API description of
 /// https://prometheus.io/docs/prometheus/latest/querying/api/
 #[derive(Deserialize)]
 struct PromQueryResponse {

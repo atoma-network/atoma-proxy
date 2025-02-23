@@ -10,8 +10,9 @@ atoma-sui = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
 dcap-qvl = { workspace = true }
-fastrand = "2.3.0"
+fastrand = { workspace = true }
 flume = { workspace = true }
+futures = { workspace = true }
 isocountry = { workspace = true }
 prometheus = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

@@ -1,6 +1,8 @@
 use thiserror::Error;
 use tracing::{error, instrument, trace};
 
+use crate::timer::Modalities;
+
 #[derive(Error, Debug)]
 pub enum GpuMetricError {
     #[error("GPU memory used: expected {expected}, found {found}")]
@@ -17,6 +19,22 @@ pub enum GpuMetricError {
     TemperatureMismatch { expected: usize, found: usize },
     #[error("GPU power usage: expected {expected}, found {found}")]
     PowerUsageMismatch { expected: usize, found: usize },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MetricsServiceError {
+    #[error("IO error: {0}")]
+    Io(std::io::Error),
+    #[error("Prometheus error: {0}")]
+    Prometheus(#[from] prometheus::Error),
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Failed to trigger new metrics collection task: {0}")]
+    TimerError(String),
+    #[error("Failed to send best available nodes to channel: {0}")]
+    FailedToSendBestAvailableNodesToChannel(
+        #[from] tokio::sync::mpsc::error::SendError<Vec<(Modalities, Vec<i64>)>>,
+    ),
 }
 
 #[derive(Error, Debug)]
