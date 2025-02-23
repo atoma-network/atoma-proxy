@@ -17,10 +17,6 @@ use crate::{
     timer::{trigger_new_metrics_collection_task, Modalities},
 };
 
-/// Duration until next top k best available nodes selection
-pub(crate) const DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION: std::time::Duration =
-    std::time::Duration::from_secs(3 * 60); // 3 minutes
-
 /// Metrics timeout, in seconds
 const METRICS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
