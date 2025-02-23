@@ -26,7 +26,7 @@ const LOG_FILE: &str = "atoma-proxy-service.log";
 
 // Default Grafana OTLP endpoint if not specified in environment
 
-const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
+const DEFAULT_OTLP_ENDPOINT: &str = "http://otel-collector:4317";
 
 static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
@@ -139,7 +139,8 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
         .with(console_layer)
         .with(file_layer)
         .with(opentelemetry_layer)
-        .init();
+        .try_init()
+        .context("Failed to set global default subscriber")?;
 
     // Return both guards so they can be stored in main
     Ok((file_guard, stdout_guard))
