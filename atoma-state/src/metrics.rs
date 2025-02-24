@@ -74,38 +74,40 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     level = "debug",
     skip_all,
     fields(
-        metrics_url = %metrics_collection.metrics_url,
-        models = ?metrics_collection.models,
-        top_k = ?metrics_collection.top_k
+        metrics_url = %metrics_collection_config.metrics_url,
+        models = ?metrics_collection_config.models,
+        top_k = ?metrics_collection_config.top_k
     )
 )]
 pub async fn trigger_new_metrics_collection_task(
     node_metrics_collector: NodeMetricsCollector,
-    metrics_collection: MetricsCollectionConfig,
+    metrics_collection_config: MetricsCollectionConfig,
     rx_collected_metrics: FlumeReceiver<(i64, NodeMetrics)>,
     request_best_available_models_receiver: FlumeReceiver<(String, oneshot::Sender<Vec<i64>>)>,
     mut shutdown_signal: watch::Receiver<bool>,
 ) -> Result<()> {
     let best_available_nodes = Arc::new(RwLock::new(HashMap::with_capacity(
-        metrics_collection.models.len(),
+        metrics_collection_config.models.len(),
     )));
     loop {
         tokio::select! {
             () = tokio::time::sleep(DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION) => {
                 if let Err(e) = collect_best_available_nodes(
                     best_available_nodes.clone(),
-                    &metrics_collection,
-                    &metrics_collection.models,
+                    &metrics_collection_config,
                 )
                 .await
-            {
-                tracing::error!(
-                    target = "atoma-state-manager",
-                    event = "collect_and_send_best_available_nodes_error",
-                    error = %e,
-                    "Error collecting and sending best available nodes"
+                {
+                    tracing::error!(
+                        target = "atoma-state-manager",
+                        event = "collect_and_send_best_available_nodes_error",
+                        error = %e,
+                        "Error collecting and sending best available nodes"
                     );
                 }
+                // NOTE: We reset the prometheus metrics, as we retrieve the best available nodes
+                // batch for the current time period.
+                node_metrics_collector.reset_metrics();
             }
             rx_collected_metrics = rx_collected_metrics.recv_async() => {
                 match rx_collected_metrics {
@@ -245,58 +247,61 @@ async fn send_best_available_nodes(
     level = "debug",
     skip_all,
     fields(
-        metrics_url = %config.metrics_url,
-        models = ?models,
-        top_k = ?config.top_k
+        metrics_url = %metrics_collection_config.metrics_url,
+        models = ?metrics_collection_config.models,
+        top_k = ?metrics_collection_config.top_k
     )
 )]
 async fn collect_best_available_nodes(
     best_available_nodes: Arc<RwLock<HashMap<String, Vec<i64>>>>,
-    config: &MetricsCollectionConfig,
-    models: &[(Modalities, String)],
+    metrics_collection_config: &MetricsCollectionConfig,
 ) -> Result<()> {
-    let futures = models.iter().map(|(modality, modality_model)| {
-        let metrics_url = config.metrics_url.clone();
-        let best_available_nodes = best_available_nodes.clone();
-        async move {
-            let model_best_available_nodes = match modality {
-                Modalities::ChatCompletions => {
-                    NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
-                        &metrics_url,
-                        modality_model,
-                        config.top_k,
-                    )
-                    .await?
-                }
-                Modalities::Embeddings => {
-                    NodeMetricsCollector::retrieve_best_available_nodes_for_embeddings(
-                        &metrics_url,
-                        modality_model,
-                        config.top_k,
-                    )
-                    .await?
-                }
-                Modalities::ImageGeneration => {
-                    NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
-                        &metrics_url,
-                        modality_model,
-                        config.top_k,
-                    )
-                    .await?
-                }
-            };
+    let futures = metrics_collection_config
+        .models
+        .iter()
+        .map(|(modality, modality_model)| {
+            let metrics_url = metrics_collection_config.metrics_url.clone();
+            let best_available_nodes = best_available_nodes.clone();
+            async move {
+                let model_best_available_nodes = match modality {
+                    Modalities::ChatCompletions => {
+                        NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+                            &metrics_url,
+                            modality_model,
+                            metrics_collection_config.top_k,
+                        )
+                        .await?
+                    }
+                    Modalities::Embeddings => {
+                        NodeMetricsCollector::retrieve_best_available_nodes_for_embeddings(
+                            &metrics_url,
+                            modality_model,
+                            metrics_collection_config.top_k,
+                        )
+                        .await?
+                    }
+                    Modalities::ImageGeneration => {
+                        NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
+                            &metrics_url,
+                            modality_model,
+                            metrics_collection_config.top_k,
+                        )
+                        .await?
+                    }
+                };
 
-            best_available_nodes
-                .write()
-                .await
-                .entry(modality_model.to_string())
-                .or_insert(model_best_available_nodes);
+                best_available_nodes
+                    .write()
+                    .await
+                    .entry(modality_model.to_string())
+                    .or_insert(model_best_available_nodes);
 
-            Ok::<_, MetricsServiceError>((modality_model.to_string(), best_available_nodes))
-        }
-    });
+                Ok::<_, MetricsServiceError>((modality_model.to_string(), best_available_nodes))
+            }
+        });
 
     futures::future::try_join_all(futures).await?;
+
     Ok(())
 }
 
@@ -429,7 +434,7 @@ impl NodeMetricsCollector {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
         let query = Self::chat_completions_query(model, top_k);
 
-        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
+        Self::retrieve_prometheus_metrics(metrics_url, &query, top_k).await
     }
 
     /// Retrieves the best available nodes for embeddings based on performance metrics.
@@ -475,7 +480,7 @@ impl NodeMetricsCollector {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
         let query = Self::embeddings_query(model, top_k);
 
-        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
+        Self::retrieve_prometheus_metrics(metrics_url, &query, top_k).await
     }
 
     /// Retrieves the best available nodes for image generation based on performance metrics.
@@ -521,7 +526,7 @@ impl NodeMetricsCollector {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
         let query = Self::image_generation_query(model, top_k);
 
-        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
+        Self::retrieve_prometheus_metrics(metrics_url, &query, top_k).await
     }
 
     /// Queries Prometheus and parses the response to get node IDs.
@@ -552,7 +557,7 @@ impl NodeMetricsCollector {
     ///     -1 * (embeddings_latency{model="text-embedding-ada-002"})
     /// )"#;
     ///
-    /// let node_ids = push_metrics_to_prometheus(
+    /// let node_ids = retrieve_prometheus_metrics(
     ///     "http://prometheus:9090",
     ///     query,
     ///     Some(5)
@@ -567,13 +572,13 @@ impl NodeMetricsCollector {
             top_k = top_k,
         )
     )]
-    async fn push_metrics_to_prometheus(
+    async fn retrieve_prometheus_metrics(
         metrics_url: &str,
         query: &str,
         top_k: usize,
     ) -> Result<Vec<i64>> {
         let node_metrics: PromQueryResponse = HTTP_CLIENT
-            .get(metrics_url)
+            .get(format!("{metrics_url}/api/v1/query"))
             .query(&[("query", query)])
             .send()
             .await?
@@ -995,11 +1000,25 @@ impl NodeMetricsCollector {
             )"#,
         )
     }
+
+    /// Resets all the metrics in the Prometheus registry.
+    pub fn reset_metrics(&self) {
+        self.chat_completions_gpu_usage.reset();
+        self.chat_completions_cpu_usage.reset();
+        self.chat_completions_ttft.reset();
+        self.chat_completions_tpot.reset();
+        self.chat_completions_num_running_requests.reset();
+        self.chat_completions_num_waiting_requests.reset();
+        self.embeddings_latency.reset();
+        self.embeddings_num_running_requests.reset();
+        self.image_generation_latency.reset();
+        self.image_generation_num_running_requests.reset();
+    }
 }
 
 /// Prometheus query response format following the API description of
 /// https://prometheus.io/docs/prometheus/latest/querying/api/
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct PromQueryResponse {
     /// The status of the query
     #[allow(dead_code)]
@@ -1009,7 +1028,7 @@ struct PromQueryResponse {
 }
 
 /// The data of the query
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct PromData {
     /// The type of the result
     #[serde(rename = "resultType")]
@@ -1020,7 +1039,7 @@ struct PromData {
 }
 
 /// The result of the query
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct PromResult {
     /// The metric of the result with the label name as the key and the label value as the value
     metric: HashMap<String, String>,
@@ -1031,8 +1050,6 @@ struct PromResult {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     use atoma_p2p::metrics::ChatCompletionsMetrics;
@@ -1426,43 +1443,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_retrieve_best_available_nodes_for_chat_completions() {
-        // Push test metrics to Prometheus
-        let metrics = r#"
-            # TYPE chat_time_to_first_token gauge
-            chat_time_to_first_token{model="gpt-4",node_small_id="42"} 0.15
-            chat_time_to_first_token{model="gpt-4",node_small_id="43"} 0.25
-            # TYPE chat_time_per_output_token gauge
-            chat_time_per_output_token{model="gpt-4",node_small_id="42"} 0.05
-            chat_time_per_output_token{model="gpt-4",node_small_id="43"} 0.08
-            # TYPE chat_num_waiting_requests gauge
-            chat_num_waiting_requests{model="gpt-4",node_small_id="42"} 0
-            chat_num_waiting_requests{model="gpt-4",node_small_id="43"} 0
-            # TYPE chat_num_running_requests gauge
-            chat_num_running_requests{model="gpt-4",node_small_id="42"} 2
-            chat_num_running_requests{model="gpt-4",node_small_id="43"} 3
-        "#;
+        // Create a new NodeMetricsCollector
+        let collector = NodeMetricsCollector::new().unwrap();
 
-        // Use the Prometheus API to push metrics
-        let client = reqwest::Client::new();
-        client
-            .post(format!("{PROMETHEUS_URL}/metrics"))
-            .body(metrics.to_string())
-            .send()
-            .await
-            .unwrap();
+        // Create test metrics for two nodes
+        let chat_completions_1 = ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 75.5,
+            cpu_kv_cache_usage_perc: 45.2,
+            time_to_first_token: 0.15,
+            time_per_output_token: 0.05,
+            num_running_requests: 2,
+            num_waiting_requests: 0,
+        };
 
-        // Give Prometheus time to scrape the metrics
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        let chat_completions_2 = ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 60.0,
+            cpu_kv_cache_usage_perc: 30.0,
+            time_to_first_token: 0.25,
+            time_per_output_token: 0.08,
+            num_running_requests: 3,
+            num_waiting_requests: 0,
+        };
 
-        // // Test retrieving best available nodes
-        // let result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
-        //     PROMETHEUS_URL,
-        //     "gpt-4",
-        //     Some(2),
-        // )
-        // .await
-        // .expect("Failed to retrieve best available nodes");
+        // Store metrics using the collector
+        collector.store_chat_completions_metrics(&chat_completions_1, "gpt-4", 42);
+        collector.store_chat_completions_metrics(&chat_completions_2, "gpt-4", 43);
 
-        // assert_eq!(result, vec![42, 43]);
+        // Test retrieving best available nodes
+        let result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+            &format!("{PROMETHEUS_URL}/api/v1/query"),
+            "gpt-4",
+            Some(2),
+        )
+        .await
+        .expect("Failed to retrieve best available nodes");
+
+        assert_eq!(result, vec![42, 43]);
     }
 }
