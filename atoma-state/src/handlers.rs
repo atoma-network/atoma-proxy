@@ -1,4 +1,4 @@
-use atoma_p2p::{metrics::NodeMetrics, AtomaP2pEvent};
+use atoma_p2p::{broadcast_metrics::NodeMetrics, AtomaP2pEvent};
 use atoma_sui::events::{
     AtomaEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
     NodePublicKeyCommittmentEvent, NodeRegisteredEvent, NodeSubscribedToTaskEvent,

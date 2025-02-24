@@ -8,7 +8,7 @@ use crate::types::{
 };
 use crate::{build_query_with_in, AtomaStateManagerError};
 
-use atoma_p2p::metrics::NodeMetrics;
+use atoma_p2p::broadcast_metrics::NodeMetrics;
 use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::AtomaEvent;
 use chrono::{DateTime, Timelike, Utc};

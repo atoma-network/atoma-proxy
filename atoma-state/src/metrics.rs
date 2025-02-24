@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use atoma_p2p::metrics::{
+use atoma_p2p::broadcast_metrics::{
     ChatCompletionsMetrics, EmbeddingsMetrics, ImageGenerationMetrics, ModelMetrics, NodeMetrics,
 };
 use flume::Receiver as FlumeReceiver;
@@ -946,10 +946,10 @@ impl NodeMetricsCollector {
             r#"topk({top_k},
                 -1 * (
                     (
-                        chat_time_to_first_token{{model="{model}"}} + 
+                        chat_time_to_first_token{{model="{model}"}} +
                         chat_time_per_output_token{{model="{model}"}}
                     ) unless (
-                        chat_num_waiting_requests{{model="{model}"}} / 
+                        chat_num_waiting_requests{{model="{model}"}} /
                         (chat_num_running_requests{{model="{model}"}} or vector(1)) >= 0.1
                     )
                 )
@@ -1052,7 +1052,7 @@ struct PromResult {
 mod tests {
     use super::*;
 
-    use atoma_p2p::metrics::ChatCompletionsMetrics;
+    use atoma_p2p::broadcast_metrics::ChatCompletionsMetrics;
 
     const PROMETHEUS_URL: &str = "http://localhost:9090";
 
