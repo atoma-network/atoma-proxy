@@ -816,6 +816,7 @@ dependencies = [
  "futures",
  "isocountry",
  "once_cell",
+ "opentelemetry",
  "prometheus",
  "proptest",
  "reqwest 0.12.12",

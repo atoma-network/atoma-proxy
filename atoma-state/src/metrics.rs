@@ -427,40 +427,9 @@ impl NodeMetricsCollector {
         top_k: Option<usize>,
     ) -> Result<Vec<i64>> {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
-        let query = format!(
-            r#"topk({top_k},
-                -1 * (
-                    (
-                        chat_time_to_first_token{{model="{model}"}} + 
-                        chat_time_per_output_token{{model="{model}"}}
-                    ) unless (
-                        chat_num_waiting_requests{{model="{model}"}} / 
-                        (chat_num_running_requests{{model="{model}"}} or vector(1)) >= 0.1
-                    )
-                )
-            )"#,
-        );
+        let query = Self::chat_completions_query(model, top_k);
 
-        let node_metrics: PromQueryResponse = HTTP_CLIENT
-            .get(metrics_url)
-            .query(&[("query", query)])
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
-        for result in node_metrics.data.result {
-            let node_small_id = result
-                .metric
-                .get(NODE_SMALL_ID_LABEL)
-                .ok_or(MetricsServiceError::NodeSmallIdLabelNotFound)?;
-            let node_small_id = node_small_id.parse::<i64>().unwrap();
-            best_available_node_small_ids.push(node_small_id);
-        }
-
-        Ok(best_available_node_small_ids)
+        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
     }
 
     /// Retrieves the best available nodes for embeddings based on performance metrics.
@@ -504,31 +473,9 @@ impl NodeMetricsCollector {
         top_k: Option<usize>,
     ) -> Result<Vec<i64>> {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
-        let query = format!(
-            r#"topk({top_k},
-                -1 * (
-                    embeddings_latency{{model="{model}"}}
-                )
-            )"#,
-        );
+        let query = Self::embeddings_query(model, top_k);
 
-        let node_metrics: PromQueryResponse = HTTP_CLIENT
-            .get(metrics_url)
-            .query(&[("query", query)])
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
-        for result in node_metrics.data.result {
-            let node_small_id = result.metric.get(NODE_SMALL_ID_LABEL).unwrap();
-            let node_small_id = node_small_id.parse::<i64>().unwrap();
-            best_available_node_small_ids.push(node_small_id);
-        }
-
-        Ok(best_available_node_small_ids)
+        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
     }
 
     /// Retrieves the best available nodes for image generation based on performance metrics.
@@ -572,14 +519,59 @@ impl NodeMetricsCollector {
         top_k: Option<usize>,
     ) -> Result<Vec<i64>> {
         let top_k = top_k.unwrap_or(DEFAULT_TOP_K_BEST_AVAILABLE_NODES);
-        let query = format!(
-            r#"topk({top_k},
-                -1 * (
-                    image_generation_latency{{model="{model}"}}
-                )
-            )"#,
-        );
+        let query = Self::image_generation_query(model, top_k);
 
+        Self::push_metrics_to_prometheus(metrics_url, &query, top_k).await
+    }
+
+    /// Queries Prometheus and parses the response to get node IDs.
+    ///
+    /// This helper function handles the common pattern of querying Prometheus and extracting
+    /// node IDs from the response. It's used by the various `retrieve_best_available_nodes_*`
+    /// functions to avoid code duplication.
+    ///
+    /// # Arguments
+    ///
+    /// * `metrics_url` - The URL of the Prometheus endpoint to query
+    /// * `query` - The PromQL query string to execute
+    /// * `top_k` - Optional limit on number of results to return. Defaults to [`DEFAULT_TOP_K_BEST_AVAILABLE_NODES`]
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing a vector of node small IDs (i64) sorted according to the query criteria.
+    /// Returns an error if:
+    /// - The HTTP request fails
+    /// - The response status is not successful
+    /// - The response JSON cannot be parsed
+    /// - A node ID cannot be parsed as an i64
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let query = r#"topk(5,
+    ///     -1 * (embeddings_latency{model="text-embedding-ada-002"})
+    /// )"#;
+    ///
+    /// let node_ids = push_metrics_to_prometheus(
+    ///     "http://prometheus:9090",
+    ///     query,
+    ///     Some(5)
+    /// ).await?;
+    /// ```
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            metrics_url = metrics_url,
+            query = query,
+            top_k = top_k,
+        )
+    )]
+    async fn push_metrics_to_prometheus(
+        metrics_url: &str,
+        query: &str,
+        top_k: usize,
+    ) -> Result<Vec<i64>> {
         let node_metrics: PromQueryResponse = HTTP_CLIENT
             .get(metrics_url)
             .query(&[("query", query)])
@@ -930,6 +922,79 @@ impl NodeMetricsCollector {
 
         Ok((image_generation_latency, num_running_requests))
     }
+
+    /// Creates a Prometheus query string for chat completions metrics.
+    ///
+    /// This function generates a Prometheus query string that retrieves the top `top_k` nodes
+    /// with the lowest chat completions latency for a given model.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model identifier string
+    /// * `top_k` - The number of top nodes to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A string containing the Prometheus query.
+    fn chat_completions_query(model: &str, top_k: usize) -> String {
+        format!(
+            r#"topk({top_k},
+                -1 * (
+                    (
+                        chat_time_to_first_token{{model="{model}"}} + 
+                        chat_time_per_output_token{{model="{model}"}}
+                    ) unless (
+                        chat_num_waiting_requests{{model="{model}"}} / 
+                        (chat_num_running_requests{{model="{model}"}} or vector(1)) >= 0.1
+                    )
+                )
+            )"#,
+        )
+    }
+
+    /// Creates a Prometheus query string for embeddings metrics.
+    ///
+    /// This function generates a Prometheus query string that retrieves the top `top_k` nodes
+    /// with the lowest embeddings latency for a given model.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model identifier string
+    /// * `top_k` - The number of top nodes to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A string containing the Prometheus query.
+    fn embeddings_query(model: &str, top_k: usize) -> String {
+        format!(
+            r#"topk({top_k},
+                -1 * (embeddings_latency{{model="{model}"}})
+            )"#,
+        )
+    }
+
+    /// Creates a Prometheus query string for image generation metrics.
+    ///
+    /// This function generates a Prometheus query string that retrieves the top `top_k` nodes
+    /// with the lowest image generation latency for a given model.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model identifier string
+    /// * `top_k` - The number of top nodes to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A string containing the Prometheus query.
+    fn image_generation_query(model: &str, top_k: usize) -> String {
+        format!(
+            r#"topk({top_k},
+                -1 * (
+                    image_generation_latency{{model="{model}"}}
+                )
+            )"#,
+        )
+    }
 }
 
 /// Prometheus query response format following the API description of
@@ -962,4 +1027,442 @@ struct PromResult {
     /// The value of the result as a tuple of [timestamp, value_as_string]
     #[allow(dead_code)]
     value: (f64, String),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    use atoma_p2p::metrics::ChatCompletionsMetrics;
+
+    const PROMETHEUS_URL: &str = "http://localhost:9090";
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_store_chat_completions_metrics() {
+        // Create a new NodeMetricsCollector instance
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Create test data
+        let chat_completions = ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 75.5,
+            cpu_kv_cache_usage_perc: 45.2,
+            time_to_first_token: 0.15,
+            time_per_output_token: 0.05,
+            num_running_requests: 3,
+            num_waiting_requests: 2,
+        };
+        let model = "gpt-4";
+        let node_small_id = 42;
+
+        // Store the metrics
+        collector.store_chat_completions_metrics(&chat_completions, model, node_small_id);
+
+        // Verify each metric was stored correctly
+        let labels = [model, &node_small_id.to_string()];
+
+        assert_eq!(
+            collector
+                .chat_completions_gpu_usage
+                .with_label_values(&labels)
+                .get(),
+            75.5_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_cpu_usage
+                .with_label_values(&labels)
+                .get(),
+            45.2_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_ttft
+                .with_label_values(&labels)
+                .get(),
+            0.15_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_tpot
+                .with_label_values(&labels)
+                .get(),
+            0.05_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_running_requests
+                .with_label_values(&labels)
+                .get(),
+            3.0_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_waiting_requests
+                .with_label_values(&labels)
+                .get(),
+            2.0_f64
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    #[allow(clippy::too_many_lines)]
+    fn test_store_chat_completions_metrics_multiple_models() {
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Test data for first model
+        let chat_completions_1 = ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 75.5,
+            cpu_kv_cache_usage_perc: 45.2,
+            time_to_first_token: 0.15,
+            time_per_output_token: 0.05,
+            num_running_requests: 3,
+            num_waiting_requests: 2,
+        };
+        let model_1 = "gpt-4";
+        let node_small_id_1 = 42;
+
+        // Test data for second model
+        let chat_completions_2 = ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 60.0,
+            cpu_kv_cache_usage_perc: 30.0,
+            time_to_first_token: 0.1,
+            time_per_output_token: 0.03,
+            num_running_requests: 1,
+            num_waiting_requests: 0,
+        };
+        let model_2 = "gpt-3.5-turbo";
+        let node_small_id_2 = 43;
+
+        // Store metrics for both models
+        collector.store_chat_completions_metrics(&chat_completions_1, model_1, node_small_id_1);
+        collector.store_chat_completions_metrics(&chat_completions_2, model_2, node_small_id_2);
+
+        // Verify metrics for first model
+        let labels_1 = [model_1, &node_small_id_1.to_string()];
+        assert_eq!(
+            collector
+                .chat_completions_gpu_usage
+                .with_label_values(&labels_1)
+                .get(),
+            75.5_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_cpu_usage
+                .with_label_values(&labels_1)
+                .get(),
+            45.2_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_ttft
+                .with_label_values(&labels_1)
+                .get(),
+            0.15_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_tpot
+                .with_label_values(&labels_1)
+                .get(),
+            0.05_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_running_requests
+                .with_label_values(&labels_1)
+                .get(),
+            3.0_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_waiting_requests
+                .with_label_values(&labels_1)
+                .get(),
+            2.0_f64
+        );
+
+        // Verify metrics for second model
+        let labels_2 = [model_2, &node_small_id_2.to_string()];
+        assert_eq!(
+            collector
+                .chat_completions_gpu_usage
+                .with_label_values(&labels_2)
+                .get(),
+            60.0_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_cpu_usage
+                .with_label_values(&labels_2)
+                .get(),
+            30.0_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_ttft
+                .with_label_values(&labels_2)
+                .get(),
+            0.1_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_tpot
+                .with_label_values(&labels_2)
+                .get(),
+            0.03_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_running_requests
+                .with_label_values(&labels_2)
+                .get(),
+            1.0_f64
+        );
+        assert_eq!(
+            collector
+                .chat_completions_num_waiting_requests
+                .with_label_values(&labels_2)
+                .get(),
+            0.0_f64
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_store_embeddings_metrics() {
+        // Create a new NodeMetricsCollector instance
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Create test data
+        let embeddings = EmbeddingsMetrics {
+            embeddings_latency: 0.25,
+            num_running_requests: 5,
+        };
+        let model = "text-embedding-ada-002";
+        let node_small_id = 42;
+
+        // Store the metrics
+        collector.store_embeddings_metrics(&embeddings, model, node_small_id);
+
+        // Verify each metric was stored correctly
+        let labels = [model, &node_small_id.to_string()];
+
+        assert_eq!(
+            collector
+                .embeddings_latency
+                .with_label_values(&labels)
+                .get(),
+            0.25
+        );
+        assert_eq!(
+            collector
+                .embeddings_num_running_requests
+                .with_label_values(&labels)
+                .get(),
+            5.0
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_store_embeddings_metrics_multiple_models() {
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Test data for first model
+        let embeddings_1 = EmbeddingsMetrics {
+            embeddings_latency: 0.25,
+            num_running_requests: 5,
+        };
+        let model_1 = "text-embedding-ada-002";
+        let node_small_id_1 = 42;
+
+        // Test data for second model
+        let embeddings_2 = EmbeddingsMetrics {
+            embeddings_latency: 0.15,
+            num_running_requests: 2,
+        };
+        let model_2 = "text-embedding-3-small";
+        let node_small_id_2 = 43;
+
+        // Store metrics for both models
+        collector.store_embeddings_metrics(&embeddings_1, model_1, node_small_id_1);
+        collector.store_embeddings_metrics(&embeddings_2, model_2, node_small_id_2);
+
+        // Verify metrics for first model
+        let labels_1 = [model_1, &node_small_id_1.to_string()];
+        assert_eq!(
+            collector
+                .embeddings_latency
+                .with_label_values(&labels_1)
+                .get(),
+            0.25
+        );
+        assert_eq!(
+            collector
+                .embeddings_num_running_requests
+                .with_label_values(&labels_1)
+                .get(),
+            5.0
+        );
+
+        // Verify metrics for second model
+        let labels_2 = [model_2, &node_small_id_2.to_string()];
+        assert_eq!(
+            collector
+                .embeddings_latency
+                .with_label_values(&labels_2)
+                .get(),
+            0.15
+        );
+        assert_eq!(
+            collector
+                .embeddings_num_running_requests
+                .with_label_values(&labels_2)
+                .get(),
+            2.0
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_store_image_generation_metrics() {
+        // Create a new NodeMetricsCollector instance
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Create test data
+        let image_generation = ImageGenerationMetrics {
+            image_generation_latency: 1.5,
+            num_running_requests: 2,
+        };
+        let model = "dall-e-3";
+        let node_small_id = 42;
+
+        // Store the metrics
+        collector.store_image_generation_metrics(&image_generation, model, node_small_id);
+
+        // Verify each metric was stored correctly
+        let labels = [model, &node_small_id.to_string()];
+
+        assert_eq!(
+            collector
+                .image_generation_latency
+                .with_label_values(&labels)
+                .get(),
+            1.5
+        );
+        assert_eq!(
+            collector
+                .image_generation_num_running_requests
+                .with_label_values(&labels)
+                .get(),
+            2.0
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_store_image_generation_metrics_multiple_models() {
+        let collector = NodeMetricsCollector::new().unwrap();
+
+        // Test data for first model
+        let image_generation_1 = ImageGenerationMetrics {
+            image_generation_latency: 1.5,
+            num_running_requests: 2,
+        };
+        let model_1 = "dall-e-3";
+        let node_small_id_1 = 42;
+
+        // Test data for second model
+        let image_generation_2 = ImageGenerationMetrics {
+            image_generation_latency: 0.8,
+            num_running_requests: 1,
+        };
+        let model_2 = "dall-e-2";
+        let node_small_id_2 = 43;
+
+        // Store metrics for both models
+        collector.store_image_generation_metrics(&image_generation_1, model_1, node_small_id_1);
+        collector.store_image_generation_metrics(&image_generation_2, model_2, node_small_id_2);
+
+        // Verify metrics for first model
+        let labels_1 = [model_1, &node_small_id_1.to_string()];
+        assert_eq!(
+            collector
+                .image_generation_latency
+                .with_label_values(&labels_1)
+                .get(),
+            1.5
+        );
+        assert_eq!(
+            collector
+                .image_generation_num_running_requests
+                .with_label_values(&labels_1)
+                .get(),
+            2.0
+        );
+
+        // Verify metrics for second model
+        let labels_2 = [model_2, &node_small_id_2.to_string()];
+        assert_eq!(
+            collector
+                .image_generation_latency
+                .with_label_values(&labels_2)
+                .get(),
+            0.8
+        );
+        assert_eq!(
+            collector
+                .image_generation_num_running_requests
+                .with_label_values(&labels_2)
+                .get(),
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_best_available_nodes_for_chat_completions() {
+        // Push test metrics to Prometheus
+        let metrics = r#"
+            # TYPE chat_time_to_first_token gauge
+            chat_time_to_first_token{model="gpt-4",node_small_id="42"} 0.15
+            chat_time_to_first_token{model="gpt-4",node_small_id="43"} 0.25
+            # TYPE chat_time_per_output_token gauge
+            chat_time_per_output_token{model="gpt-4",node_small_id="42"} 0.05
+            chat_time_per_output_token{model="gpt-4",node_small_id="43"} 0.08
+            # TYPE chat_num_waiting_requests gauge
+            chat_num_waiting_requests{model="gpt-4",node_small_id="42"} 0
+            chat_num_waiting_requests{model="gpt-4",node_small_id="43"} 0
+            # TYPE chat_num_running_requests gauge
+            chat_num_running_requests{model="gpt-4",node_small_id="42"} 2
+            chat_num_running_requests{model="gpt-4",node_small_id="43"} 3
+        "#;
+
+        // Use the Prometheus API to push metrics
+        let client = reqwest::Client::new();
+        client
+            .post(format!("{PROMETHEUS_URL}/metrics"))
+            .body(metrics.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        // Give Prometheus time to scrape the metrics
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Test retrieving best available nodes
+        let result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+            PROMETHEUS_URL,
+            "gpt-4",
+            Some(2),
+        )
+        .await
+        .expect("Failed to retrieve best available nodes");
+
+        assert_eq!(result, vec![42, 43]);
+    }
 }
