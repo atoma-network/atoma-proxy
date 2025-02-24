@@ -1,21 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use atoma_p2p::metrics::{
     ChatCompletionsMetrics, EmbeddingsMetrics, ImageGenerationMetrics, ModelMetrics, NodeMetrics,
 };
+use flume::Receiver as FlumeReceiver;
 use once_cell::sync::Lazy;
 use prometheus::{GaugeVec, Opts, Registry};
 use serde::Deserialize;
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinHandle,
-};
+use tokio::sync::{oneshot, watch, RwLock};
 use tracing::instrument;
 
-use crate::{
-    errors::MetricsServiceError,
-    timer::{trigger_new_metrics_collection_task, Modalities},
-};
+use crate::{config::MetricsCollectionConfig, errors::MetricsServiceError, types::Modalities};
+
+/// Duration until next top k best available nodes selection
+const DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION: std::time::Duration =
+    std::time::Duration::from_secs(3 * 60); // 3 minutes
 
 /// Metrics timeout, in seconds
 const METRICS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -39,6 +38,268 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to create HTTP client")
 });
 
+/// Spawns a task that periodically collects metrics for different modalities and their models.
+///
+/// This function creates a background task that runs indefinitely until a shutdown signal is received.
+/// At regular intervals (defined by `DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION`), it
+/// collects metrics for each modality-model pair and sends the best available nodes through a channel.
+///
+/// # Arguments
+///
+/// * `metrics_collection` - The metrics collection configuration
+/// * `rx_request_best_available_nodes` - Channel receiver for requesting the collected best available nodes
+/// * `shutdown_signal` - Watch channel receiver for graceful shutdown coordination
+///
+/// # Returns
+///
+/// Returns a [`JoinHandle`] that resolves to a `Result<()>`. The task can be joined to await its completion.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tokio::sync::{mpsc, watch};
+///
+/// let (tx, _rx) = mpsc::unbounded_channel();
+/// let (shutdown_tx, shutdown_rx) = watch::channel(false);
+///
+/// let handle = trigger_new_metrics_collection_task(
+///     "http://metrics.example.com".to_string(),
+///     vec![(Modalities::ChatCompletions, "gpt-4".to_string())],
+///     Some(3),
+///     tx,
+///     shutdown_rx,
+/// );
+/// ```
+#[instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        metrics_url = %metrics_collection.metrics_url,
+        models = ?metrics_collection.models,
+        top_k = ?metrics_collection.top_k
+    )
+)]
+pub async fn trigger_new_metrics_collection_task(
+    node_metrics_collector: NodeMetricsCollector,
+    metrics_collection: MetricsCollectionConfig,
+    rx_collected_metrics: FlumeReceiver<(i64, NodeMetrics)>,
+    request_best_available_models_receiver: FlumeReceiver<(String, oneshot::Sender<Vec<i64>>)>,
+    mut shutdown_signal: watch::Receiver<bool>,
+) -> Result<()> {
+    let best_available_nodes = Arc::new(RwLock::new(HashMap::with_capacity(
+        metrics_collection.models.len(),
+    )));
+    loop {
+        tokio::select! {
+            () = tokio::time::sleep(DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION) => {
+                if let Err(e) = collect_best_available_nodes(
+                    best_available_nodes.clone(),
+                    &metrics_collection,
+                    &metrics_collection.models,
+                )
+                .await
+            {
+                tracing::error!(
+                    target = "atoma-state-manager",
+                    event = "collect_and_send_best_available_nodes_error",
+                    error = %e,
+                    "Error collecting and sending best available nodes"
+                    );
+                }
+            }
+            rx_collected_metrics = rx_collected_metrics.recv_async() => {
+                match rx_collected_metrics {
+                    Ok((node_small_id, node_metrics)) => {
+                        node_metrics_collector.store_metrics(&node_metrics, node_small_id);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target = "atoma-state-manager",
+                            event = "rx_collected_metrics_error",
+                            error = %e,
+                        );
+                    }
+                }
+            }
+            request_best_available_models = request_best_available_models_receiver.recv_async() => {
+                if let Err(e) = send_best_available_nodes(
+                    request_best_available_models.map_err(MetricsServiceError::FlumeRecvError),
+                    best_available_nodes.clone(),
+                )
+                .await
+                {
+                    tracing::error!(
+                        target = "atoma-state-manager",
+                        event = "send_best_available_nodes_error",
+                        error = %e,
+                    );
+                }
+            }
+            shutdown_signal_changed = shutdown_signal.changed() => {
+                match shutdown_signal_changed {
+                    Ok(()) => {
+                        if *shutdown_signal.borrow() {
+                            tracing::trace!(
+                                target = "atoma-state-manager",
+                                event = "shutdown_signal",
+                                "Shutdown signal received, shutting down"
+                            );
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target = "atoma-state-manager",
+                            event = "shutdown_signal_error",
+                            error = %e,
+                            "Shutdown signal channel closed"
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Sends the best available nodes for a requested model through a oneshot channel.
+///
+/// This function retrieves the list of best available nodes for a specific model from the shared state
+/// and sends it through a oneshot channel to the requester. The function is used as part of the metrics
+/// collection system to provide information about the most optimal nodes for handling specific model requests.
+///
+/// # Arguments
+///
+/// * `request_best_available_models` - A Result containing a tuple of:
+///   * A String representing the model identifier
+///   * A oneshot::Sender for sending the list of best available node IDs
+/// * `best_available_nodes` - An Arc<RwLock<HashMap>> containing the cached best available nodes for each model
+///
+/// # Returns
+///
+/// Returns a `Result<()>` which is:
+/// * `Ok(())` if the nodes were successfully retrieved and sent
+/// * `Err(MetricsServiceError)` if:
+///   * The model was not found in the cached best available nodes
+///   * The channel send operation failed
+///   * The input Result was an error
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let (tx, rx) = oneshot::channel();
+/// let best_nodes = Arc::new(RwLock::new(HashMap::new()));
+///
+/// // Send request for best nodes for "gpt-4" model
+/// let request = Ok(("gpt-4".to_string(), tx));
+/// send_best_available_nodes(request, best_nodes).await?;
+///
+/// // Receive the response
+/// let nodes = rx.await?;
+/// ```
+#[instrument(level = "debug", skip_all, fields(send_best_available_nodes = true,))]
+async fn send_best_available_nodes(
+    request_best_available_models: Result<(String, oneshot::Sender<Vec<i64>>)>,
+    best_available_nodes: Arc<RwLock<HashMap<String, Vec<i64>>>>,
+) -> Result<()> {
+    let (model, sender) = request_best_available_models?;
+    let model_best_available_nodes = {
+        let read_lock = best_available_nodes.read().await;
+        read_lock
+            .get(&model)
+            .ok_or(MetricsServiceError::ModelNotFound(model))?
+            .clone()
+    };
+    sender
+        .send(model_best_available_nodes)
+        .map_err(|_| MetricsServiceError::ChannelSendError)?;
+    Ok(())
+}
+
+/// Collects and sends the best available nodes for the given models
+///
+/// # Arguments
+///
+/// * `best_available_nodes` - The best available nodes for the given models
+/// * `config` - The metrics collection configuration
+/// * `models` - The models to collect the best available nodes for
+///
+/// # Returns
+///
+/// Returns a `Result<()>`. The task can be joined to await its completion.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let best_available_nodes = Arc::new(RwLock::new(HashMap::with_capacity(10)));
+/// let config = MetricsCollectionConfig::default();
+/// let models = vec![(Modalities::ChatCompletions, "gpt-4".to_string())];
+/// let handle = collect_and_send_best_available_nodes(
+///     best_available_nodes,
+///     &config,
+///     &models,
+/// );
+/// ```
+#[instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        metrics_url = %config.metrics_url,
+        models = ?models,
+        top_k = ?config.top_k
+    )
+)]
+async fn collect_best_available_nodes(
+    best_available_nodes: Arc<RwLock<HashMap<String, Vec<i64>>>>,
+    config: &MetricsCollectionConfig,
+    models: &[(Modalities, String)],
+) -> Result<()> {
+    let futures = models.iter().map(|(modality, modality_model)| {
+        let metrics_url = config.metrics_url.clone();
+        let best_available_nodes = best_available_nodes.clone();
+        async move {
+            let model_best_available_nodes = match modality {
+                Modalities::ChatCompletions => {
+                    NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+                        &metrics_url,
+                        modality_model,
+                        config.top_k,
+                    )
+                    .await?
+                }
+                Modalities::Embeddings => {
+                    NodeMetricsCollector::retrieve_best_available_nodes_for_embeddings(
+                        &metrics_url,
+                        modality_model,
+                        config.top_k,
+                    )
+                    .await?
+                }
+                Modalities::ImageGeneration => {
+                    NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
+                        &metrics_url,
+                        modality_model,
+                        config.top_k,
+                    )
+                    .await?
+                }
+            };
+
+            best_available_nodes
+                .write()
+                .await
+                .entry(modality_model.to_string())
+                .or_insert(model_best_available_nodes);
+
+            Ok::<_, MetricsServiceError>((modality_model.to_string(), best_available_nodes))
+        }
+    });
+
+    futures::future::try_join_all(futures).await?;
+    Ok(())
+}
+
 /// A service that manages and collects various metrics for different model types in the system.
 ///
 /// This service handles metrics collection for three main categories:
@@ -47,6 +308,7 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 /// - Image Generation: Records latency and concurrent request counts
 pub struct NodeMetricsCollector {
     /// The Prometheus registry for storing all metrics
+    #[allow(dead_code)]
     registry: Registry,
 
     /// GPU KV cache usage percentage for chat completions
@@ -78,27 +340,16 @@ pub struct NodeMetricsCollector {
 
     /// Number of currently running image generation requests
     image_generation_num_running_requests: GaugeVec,
-
-    /// The URL of the Prometheus metrics endpoint.
-    metrics_url: String,
-
-    /// The receiver of the best available nodes.
-    receiver_best_available_nodes: mpsc::UnboundedReceiver<Vec<(Modalities, Vec<i64>)>>,
-
-    /// The join handle of the timer task.
-    timer_join_handle: JoinHandle<Result<()>>,
 }
 
 impl NodeMetricsCollector {
     /// Constructor
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metrics cannot be registered.
     #[allow(clippy::similar_names)]
-    pub fn new(
-        metrics_url: String,
-        models: Vec<(Modalities, String)>,
-        top_k: Option<usize>,
-        shutdown_signal: watch::Receiver<bool>,
-    ) -> Self {
-        let (tx_best_available_nodes, receiver_best_available_nodes) = mpsc::unbounded_channel();
+    pub fn new() -> Result<Self> {
         let registry = Registry::new();
 
         let (
@@ -108,21 +359,13 @@ impl NodeMetricsCollector {
             chat_completions_tpot,
             chat_completions_num_running_requests,
             chat_completions_num_waiting_requests,
-        ) = Self::chat_completions_registry(&registry);
+        ) = Self::chat_completions_registry(&registry)?;
         let (embeddings_latency, embeddings_num_running_requests) =
-            Self::embeddings_registry(&registry);
+            Self::embeddings_registry(&registry)?;
         let (image_generation_latency, image_generation_num_running_requests) =
-            Self::image_generation_registry(&registry);
+            Self::image_generation_registry(&registry)?;
 
-        let timer_join_handle = trigger_new_metrics_collection_task(
-            metrics_url.clone(),
-            models,
-            top_k,
-            tx_best_available_nodes,
-            shutdown_signal,
-        );
-
-        Self {
+        Ok(Self {
             registry,
             chat_completions_gpu_usage,
             chat_completions_cpu_usage,
@@ -134,10 +377,7 @@ impl NodeMetricsCollector {
             embeddings_num_running_requests,
             image_generation_latency,
             image_generation_num_running_requests,
-            metrics_url,
-            receiver_best_available_nodes,
-            timer_join_handle,
-        }
+        })
     }
 
     /// Retrieves the best available nodes for chat completions based on performance metrics.
@@ -212,7 +452,10 @@ impl NodeMetricsCollector {
 
         let mut best_available_node_small_ids: Vec<i64> = Vec::with_capacity(top_k);
         for result in node_metrics.data.result {
-            let node_small_id = result.metric.get(NODE_SMALL_ID_LABEL).unwrap();
+            let node_small_id = result
+                .metric
+                .get(NODE_SMALL_ID_LABEL)
+                .ok_or(MetricsServiceError::NodeSmallIdLabelNotFound)?;
             let node_small_id = node_small_id.parse::<i64>().unwrap();
             best_available_node_small_ids.push(node_small_id);
         }
@@ -381,7 +624,7 @@ impl NodeMetricsCollector {
         )
     )]
     pub fn store_metrics(&self, node_metrics: &NodeMetrics, node_small_id: i64) {
-        for (model, model_metrics) in node_metrics.model_metrics.iter() {
+        for (model, model_metrics) in &node_metrics.model_metrics {
             match model_metrics {
                 ModelMetrics::ChatCompletions(chat_completions) => {
                     self.store_chat_completions_metrics(chat_completions, model, node_small_id);
@@ -443,10 +686,10 @@ impl NodeMetricsCollector {
             .set(chat_completions.time_per_output_token);
         self.chat_completions_num_running_requests
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(chat_completions.num_running_requests as f64);
+            .set(f64::from(chat_completions.num_running_requests));
         self.chat_completions_num_waiting_requests
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(chat_completions.num_waiting_requests as f64);
+            .set(f64::from(chat_completions.num_waiting_requests));
     }
 
     /// Stores embedding metrics for a specific model and node in the Prometheus registry.
@@ -485,7 +728,7 @@ impl NodeMetricsCollector {
             .set(embeddings.embeddings_latency);
         self.embeddings_num_running_requests
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(embeddings.num_running_requests as f64);
+            .set(f64::from(embeddings.num_running_requests));
     }
 
     /// Stores image generation metrics for a specific model and node in the Prometheus registry.
@@ -524,7 +767,7 @@ impl NodeMetricsCollector {
             .set(image_generation.image_generation_latency);
         self.image_generation_num_running_requests
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(image_generation.num_running_requests as f64);
+            .set(f64::from(image_generation.num_running_requests));
     }
 
     /// Creates and registers the chat completions metrics in the Prometheus registry.
@@ -546,9 +789,13 @@ impl NodeMetricsCollector {
     /// - Time per output token
     /// - Number of running requests
     /// - Number of waiting requests
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metrics cannot be registered.
     fn chat_completions_registry(
         registry: &Registry,
-    ) -> (GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec) {
+    ) -> Result<(GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec)> {
         let gpu_usage_opts = Opts::new(
             "chat_gpu_kv_cache_usage_perc",
             "GPU KV cache usage percentage for chat completions",
@@ -592,21 +839,21 @@ impl NodeMetricsCollector {
         )
         .expect("Failed to create gauge");
 
-        registry.register(Box::new(gpu_usage.clone()));
-        registry.register(Box::new(cpu_usage.clone()));
-        registry.register(Box::new(ttft.clone()));
-        registry.register(Box::new(tpot.clone()));
-        registry.register(Box::new(num_running_requests.clone()));
-        registry.register(Box::new(num_waiting_requests.clone()));
+        registry.register(Box::new(gpu_usage.clone()))?;
+        registry.register(Box::new(cpu_usage.clone()))?;
+        registry.register(Box::new(ttft.clone()))?;
+        registry.register(Box::new(tpot.clone()))?;
+        registry.register(Box::new(num_running_requests.clone()))?;
+        registry.register(Box::new(num_waiting_requests.clone()))?;
 
-        (
+        Ok((
             gpu_usage,
             cpu_usage,
             ttft,
             tpot,
             num_running_requests,
             num_waiting_requests,
-        )
+        ))
     }
 
     /// Creates and registers the embeddings metrics in the Prometheus registry.
@@ -620,7 +867,11 @@ impl NodeMetricsCollector {
     /// A tuple containing the following metrics:
     /// - Processing latency for embedding requests
     /// - Number of currently running embedding requests
-    fn embeddings_registry(registry: &Registry) -> (GaugeVec, GaugeVec) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metrics cannot be registered.
+    fn embeddings_registry(registry: &Registry) -> Result<(GaugeVec, GaugeVec)> {
         let embeddings_latency_opts = Opts::new("embeddings_latency", "Latency for embeddings");
         let embeddings_latency =
             GaugeVec::new(embeddings_latency_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
@@ -635,10 +886,10 @@ impl NodeMetricsCollector {
         )
         .expect("Failed to create gauge");
 
-        registry.register(Box::new(embeddings_latency.clone()));
-        registry.register(Box::new(num_running_requests.clone()));
+        registry.register(Box::new(embeddings_latency.clone()))?;
+        registry.register(Box::new(num_running_requests.clone()))?;
 
-        (embeddings_latency, num_running_requests)
+        Ok((embeddings_latency, num_running_requests))
     }
 
     /// Creates and registers the image generation metrics in the Prometheus registry.
@@ -652,7 +903,11 @@ impl NodeMetricsCollector {
     /// A tuple containing the following metrics:
     /// - Processing latency for image generation requests
     /// - Number of currently running image generation requests
-    fn image_generation_registry(registry: &Registry) -> (GaugeVec, GaugeVec) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metrics cannot be registered.
+    fn image_generation_registry(registry: &Registry) -> Result<(GaugeVec, GaugeVec)> {
         let image_generation_latency_opts =
             Opts::new("image_generation_latency", "Latency for image generation");
         let image_generation_latency = GaugeVec::new(
@@ -670,10 +925,10 @@ impl NodeMetricsCollector {
         )
         .expect("Failed to create gauge");
 
-        registry.register(Box::new(image_generation_latency.clone()));
-        registry.register(Box::new(num_running_requests.clone()));
+        registry.register(Box::new(image_generation_latency.clone()))?;
+        registry.register(Box::new(num_running_requests.clone()))?;
 
-        (image_generation_latency, num_running_requests)
+        Ok((image_generation_latency, num_running_requests))
     }
 }
 
@@ -682,6 +937,7 @@ impl NodeMetricsCollector {
 #[derive(Deserialize)]
 struct PromQueryResponse {
     /// The status of the query
+    #[allow(dead_code)]
     status: String,
     /// The data of the query
     data: PromData,
@@ -692,6 +948,7 @@ struct PromQueryResponse {
 struct PromData {
     /// The type of the result
     #[serde(rename = "resultType")]
+    #[allow(dead_code)]
     result_type: String,
     /// The result of the query
     result: Vec<PromResult>,
@@ -703,5 +960,6 @@ struct PromResult {
     /// The metric of the result with the label name as the key and the label value as the value
     metric: HashMap<String, String>,
     /// The value of the result as a tuple of [timestamp, value_as_string]
+    #[allow(dead_code)]
     value: (f64, String),
 }

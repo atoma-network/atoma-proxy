@@ -9,6 +9,15 @@ use utoipa::ToSchema;
 
 use crate::state_manager::Result;
 
+/// The modalities that can be used to collect metrics, for each of the
+/// currently supported modalities.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub enum Modalities {
+    ChatCompletions,
+    Embeddings,
+    ImageGeneration,
+}
+
 /// Request payload for revoking an API token
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RevokeApiTokenRequest {

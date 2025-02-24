@@ -8,12 +8,12 @@ pub mod errors;
 pub mod handlers;
 pub mod metrics;
 pub mod state_manager;
-pub mod timer;
 pub mod types;
 
 use chrono::{DateTime, Utc};
 pub use config::AtomaStateManagerConfig;
 pub use errors::AtomaStateManagerError;
+pub use metrics::{trigger_new_metrics_collection_task, NodeMetricsCollector};
 pub use sqlx::PgPool;
 use sqlx::Postgres;
 pub use state_manager::{AtomaState, AtomaStateManager};
