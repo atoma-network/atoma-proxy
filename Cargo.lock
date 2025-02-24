@@ -704,7 +704,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#b7325d8501e37d6874848e12f8c71ee9452a7f89"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#5bae44386275858c5d68e0c77b9ad2825693bc9f"
 dependencies = [
  "blake3",
  "chrono",
@@ -716,6 +716,8 @@ dependencies = [
  "isocountry",
  "libp2p",
  "nvml-wrapper",
+ "once_cell",
+ "opentelemetry",
  "serde",
  "sui-keys",
  "sui-sdk",
@@ -830,7 +832,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#b7325d8501e37d6874848e12f8c71ee9452a7f89"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#5bae44386275858c5d68e0c77b9ad2825693bc9f"
 dependencies = [
  "anyhow",
  "config",
@@ -849,7 +851,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#b7325d8501e37d6874848e12f8c71ee9452a7f89"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#5bae44386275858c5d68e0c77b9ad2825693bc9f"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6857,7 +6859,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
