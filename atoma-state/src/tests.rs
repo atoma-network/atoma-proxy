@@ -2,9 +2,10 @@ use crate::state_manager::Result;
 
 use super::*;
 use atoma_p2p::broadcast_metrics::{
-    ChatCompletionsMetrics, EmbeddingsMetrics, ImageGenerationMetrics,
+    ChatCompletionsMetrics, EmbeddingsMetrics, ImageGenerationMetrics, ModelMetrics, NodeMetrics,
 };
 use serde_json::json;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
@@ -1791,4 +1792,462 @@ async fn test_retrieve_best_available_nodes_for_chat_completions() {
     .expect("Failed to retrieve best available nodes");
 
     assert_eq!(result, vec![42, 43]);
+}
+
+#[tokio::test]
+#[allow(clippy::significant_drop_tightening)]
+async fn test_retrieve_best_available_nodes_for_embeddings() {
+    // Use mockito's static server URL
+    let mut server = mockito::Server::new_async().await;
+
+    // Create mock response data
+    let mock_response = json!({
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": [
+                {
+                    "metric": { "node_small_id": "44" },
+                    "value": [1_614_858_713.144, "0.15"]
+                },
+                {
+                    "metric": { "node_small_id": "45" },
+                    "value": [1_614_858_713.144, "0.25"]
+                }
+            ]
+        }
+    });
+
+    // Set up mock endpoint
+    let _m = server
+        .mock("GET", "/api/v1/query")
+        .match_query(mockito::Matcher::Any) // Accept any query parameter
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::to_string(&mock_response).unwrap())
+        .create();
+
+    // Test retrieving best available nodes
+    let result = NodeMetricsCollector::retrieve_best_available_nodes_for_embeddings(
+        &server.url(),
+        "text-embedding-ada-002",
+        Some(2),
+    )
+    .await
+    .expect("Failed to retrieve best available nodes");
+
+    assert_eq!(result, vec![44, 45]);
+}
+
+#[tokio::test]
+#[allow(clippy::significant_drop_tightening)]
+async fn test_retrieve_best_available_nodes_for_image_generation() {
+    // Use mockito's static server URL
+    let mut server = mockito::Server::new_async().await;
+
+    // Create mock response data
+    let mock_response = json!({
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": [
+                {
+                    "metric": { "node_small_id": "46" },
+                    "value": [1_614_858_713.144, "1.2"]
+                },
+                {
+                    "metric": { "node_small_id": "47" },
+                    "value": [1_614_858_713.144, "1.5"]
+                }
+            ]
+        }
+    });
+
+    // Set up mock endpoint
+    let _m = server
+        .mock("GET", "/api/v1/query")
+        .match_query(mockito::Matcher::Any) // Accept any query parameter
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::to_string(&mock_response).unwrap())
+        .create();
+
+    // Test retrieving best available nodes
+    let result = NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
+        &server.url(),
+        "dall-e-3",
+        Some(2),
+    )
+    .await
+    .expect("Failed to retrieve best available nodes");
+
+    assert_eq!(result, vec![46, 47]);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::float_cmp)]
+fn test_reset_metrics() {
+    // Create a new NodeMetricsCollector instance
+    let collector = NodeMetricsCollector::new().unwrap();
+
+    // Store some test metrics
+    let chat_completions = ChatCompletionsMetrics {
+        gpu_kv_cache_usage_perc: 75.5,
+        cpu_kv_cache_usage_perc: 45.2,
+        time_to_first_token: 0.15,
+        time_per_output_token: 0.05,
+        num_running_requests: 3,
+        num_waiting_requests: 2,
+    };
+    let embeddings = EmbeddingsMetrics {
+        embeddings_latency: 0.25,
+        num_running_requests: 5,
+    };
+    let image_generation = ImageGenerationMetrics {
+        image_generation_latency: 1.5,
+        num_running_requests: 2,
+    };
+
+    // Store metrics for different models
+    collector.store_chat_completions_metrics(&chat_completions, "gpt-4", 42);
+    collector.store_embeddings_metrics(&embeddings, "text-embedding-ada-002", 43);
+    collector.store_image_generation_metrics(&image_generation, "dall-e-3", 44);
+
+    // Verify metrics were stored
+    let chat_labels = ["gpt-4", "42"];
+    let embeddings_labels = ["text-embedding-ada-002", "43"];
+    let image_labels = ["dall-e-3", "44"];
+
+    assert_eq!(
+        collector
+            .get_chat_completions_gpu_usage()
+            .with_label_values(&chat_labels)
+            .get(),
+        75.5
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_latency()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.25
+    );
+    assert_eq!(
+        collector
+            .get_image_generation_latency()
+            .with_label_values(&image_labels)
+            .get(),
+        1.5
+    );
+
+    // Reset all metrics
+    collector.reset_metrics();
+
+    // Verify all metrics were reset to their default values
+    assert_eq!(
+        collector
+            .get_chat_completions_gpu_usage()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_cpu_usage()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_ttft()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_tpot()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_num_running_requests()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_num_waiting_requests()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_latency()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_num_running_requests()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_image_generation_latency()
+            .with_label_values(&image_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_image_generation_num_running_requests()
+            .with_label_values(&image_labels)
+            .get(),
+        0.0
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::float_cmp)]
+fn test_store_metrics() {
+    // Create a new NodeMetricsCollector instance
+    let collector = NodeMetricsCollector::new().unwrap();
+
+    // Create a NodeMetrics instance with metrics for multiple models
+    let mut model_metrics = HashMap::new();
+
+    // Add chat completions metrics
+    model_metrics.insert(
+        "gpt-4".to_string(),
+        ModelMetrics::ChatCompletions(ChatCompletionsMetrics {
+            gpu_kv_cache_usage_perc: 75.5,
+            cpu_kv_cache_usage_perc: 45.2,
+            time_to_first_token: 0.15,
+            time_per_output_token: 0.05,
+            num_running_requests: 3,
+            num_waiting_requests: 2,
+        }),
+    );
+
+    // Add embeddings metrics
+    model_metrics.insert(
+        "text-embedding-ada-002".to_string(),
+        ModelMetrics::Embeddings(EmbeddingsMetrics {
+            embeddings_latency: 0.25,
+            num_running_requests: 5,
+        }),
+    );
+
+    // Add image generation metrics
+    model_metrics.insert(
+        "dall-e-3".to_string(),
+        ModelMetrics::ImageGeneration(ImageGenerationMetrics {
+            image_generation_latency: 1.5,
+            num_running_requests: 2,
+        }),
+    );
+
+    // Create the NodeMetrics instance
+    let node_metrics = NodeMetrics { model_metrics };
+
+    // Store all metrics at once
+    let node_small_id = 42;
+    collector.store_metrics(&node_metrics, node_small_id);
+
+    // Verify that all metrics were stored correctly
+    let chat_labels = ["gpt-4", "42"];
+    let embeddings_labels = ["text-embedding-ada-002", "42"];
+    let image_labels = ["dall-e-3", "42"];
+
+    // Verify chat completions metrics
+    assert_eq!(
+        collector
+            .get_chat_completions_gpu_usage()
+            .with_label_values(&chat_labels)
+            .get(),
+        75.5
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_cpu_usage()
+            .with_label_values(&chat_labels)
+            .get(),
+        45.2
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_ttft()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.15
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_tpot()
+            .with_label_values(&chat_labels)
+            .get(),
+        0.05
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_num_running_requests()
+            .with_label_values(&chat_labels)
+            .get(),
+        3.0
+    );
+    assert_eq!(
+        collector
+            .get_chat_completions_num_waiting_requests()
+            .with_label_values(&chat_labels)
+            .get(),
+        2.0
+    );
+
+    // Verify embeddings metrics
+    assert_eq!(
+        collector
+            .get_embeddings_latency()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.25
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_num_running_requests()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        5.0
+    );
+
+    // Verify image generation metrics
+    assert_eq!(
+        collector
+            .get_image_generation_latency()
+            .with_label_values(&image_labels)
+            .get(),
+        1.5
+    );
+    assert_eq!(
+        collector
+            .get_image_generation_num_running_requests()
+            .with_label_values(&image_labels)
+            .get(),
+        2.0
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::significant_drop_tightening)]
+async fn test_retrieve_nodes_error_handling() {
+    // Use mockito's static server URL
+    let mut server = mockito::Server::new_async().await;
+
+    // Test case 1: HTTP error (404 Not Found)
+    let _m = server
+        .mock("GET", "/api/v1/query")
+        .match_query(mockito::Matcher::Any)
+        .with_status(404)
+        .with_body("Not Found")
+        .create();
+
+    // Test all three public methods with the error condition
+    let chat_result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+        &server.url(),
+        "gpt-4",
+        Some(5),
+    )
+    .await;
+
+    let embeddings_result = NodeMetricsCollector::retrieve_best_available_nodes_for_embeddings(
+        &server.url(),
+        "text-embedding-ada-002",
+        Some(5),
+    )
+    .await;
+
+    let image_result = NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
+        &server.url(),
+        "dall-e-3",
+        Some(5),
+    )
+    .await;
+
+    assert!(
+        chat_result.is_err(),
+        "Chat completions should return error for HTTP 404"
+    );
+    assert!(
+        embeddings_result.is_err(),
+        "Embeddings should return error for HTTP 404"
+    );
+    assert!(
+        image_result.is_err(),
+        "Image generation should return error for HTTP 404"
+    );
+
+    // Remove the previous mock
+    server.reset();
+
+    // Test case 2: Invalid JSON response
+    let _m = server
+        .mock("GET", "/api/v1/query")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("invalid json")
+        .create();
+
+    let chat_result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+        &server.url(),
+        "gpt-4",
+        Some(5),
+    )
+    .await;
+
+    assert!(chat_result.is_err(), "Should return error for invalid JSON");
+
+    // Remove the previous mock
+    server.reset();
+
+    // Test case 3: Empty result set
+    let empty_response = json!({
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": []
+        }
+    });
+
+    let _m = server
+        .mock("GET", "/api/v1/query")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::to_string(&empty_response).unwrap())
+        .create();
+
+    let chat_result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
+        &server.url(),
+        "gpt-4",
+        Some(5),
+    )
+    .await;
+
+    assert!(chat_result.is_ok(), "Should handle empty result set");
+    assert_eq!(
+        chat_result.unwrap().len(),
+        0,
+        "Should return empty vector for empty result set"
+    );
 }
