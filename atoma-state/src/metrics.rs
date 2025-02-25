@@ -1014,6 +1014,66 @@ impl NodeMetricsCollector {
         self.image_generation_latency.reset();
         self.image_generation_num_running_requests.reset();
     }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_gpu_usage(&self) -> &GaugeVec {
+        &self.chat_completions_gpu_usage
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_cpu_usage(&self) -> &GaugeVec {
+        &self.chat_completions_cpu_usage
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_ttft(&self) -> &GaugeVec {
+        &self.chat_completions_ttft
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_tpot(&self) -> &GaugeVec {
+        &self.chat_completions_tpot
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_num_running_requests(&self) -> &GaugeVec {
+        &self.chat_completions_num_running_requests
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_chat_completions_num_waiting_requests(&self) -> &GaugeVec {
+        &self.chat_completions_num_waiting_requests
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_embeddings_latency(&self) -> &GaugeVec {
+        &self.embeddings_latency
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_embeddings_num_running_requests(&self) -> &GaugeVec {
+        &self.embeddings_num_running_requests
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_image_generation_latency(&self) -> &GaugeVec {
+        &self.image_generation_latency
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_image_generation_num_running_requests(&self) -> &GaugeVec {
+        &self.image_generation_num_running_requests
+    }
 }
 
 /// Prometheus query response format following the API description of
@@ -1046,442 +1106,4 @@ struct PromResult {
     /// The value of the result as a tuple of [timestamp, value_as_string]
     #[allow(dead_code)]
     value: (f64, String),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use atoma_p2p::broadcast_metrics::ChatCompletionsMetrics;
-    use serde_json::json;
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn test_store_chat_completions_metrics() {
-        // Create a new NodeMetricsCollector instance
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Create test data
-        let chat_completions = ChatCompletionsMetrics {
-            gpu_kv_cache_usage_perc: 75.5,
-            cpu_kv_cache_usage_perc: 45.2,
-            time_to_first_token: 0.15,
-            time_per_output_token: 0.05,
-            num_running_requests: 3,
-            num_waiting_requests: 2,
-        };
-        let model = "gpt-4";
-        let node_small_id = 42;
-
-        // Store the metrics
-        collector.store_chat_completions_metrics(&chat_completions, model, node_small_id);
-
-        // Verify each metric was stored correctly
-        let labels = [model, &node_small_id.to_string()];
-
-        assert_eq!(
-            collector
-                .chat_completions_gpu_usage
-                .with_label_values(&labels)
-                .get(),
-            75.5_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_cpu_usage
-                .with_label_values(&labels)
-                .get(),
-            45.2_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_ttft
-                .with_label_values(&labels)
-                .get(),
-            0.15_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_tpot
-                .with_label_values(&labels)
-                .get(),
-            0.05_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_running_requests
-                .with_label_values(&labels)
-                .get(),
-            3.0_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_waiting_requests
-                .with_label_values(&labels)
-                .get(),
-            2.0_f64
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    #[allow(clippy::too_many_lines)]
-    fn test_store_chat_completions_metrics_multiple_models() {
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Test data for first model
-        let chat_completions_1 = ChatCompletionsMetrics {
-            gpu_kv_cache_usage_perc: 75.5,
-            cpu_kv_cache_usage_perc: 45.2,
-            time_to_first_token: 0.15,
-            time_per_output_token: 0.05,
-            num_running_requests: 3,
-            num_waiting_requests: 2,
-        };
-        let model_1 = "gpt-4";
-        let node_small_id_1 = 42;
-
-        // Test data for second model
-        let chat_completions_2 = ChatCompletionsMetrics {
-            gpu_kv_cache_usage_perc: 60.0,
-            cpu_kv_cache_usage_perc: 30.0,
-            time_to_first_token: 0.1,
-            time_per_output_token: 0.03,
-            num_running_requests: 1,
-            num_waiting_requests: 0,
-        };
-        let model_2 = "gpt-3.5-turbo";
-        let node_small_id_2 = 43;
-
-        // Store metrics for both models
-        collector.store_chat_completions_metrics(&chat_completions_1, model_1, node_small_id_1);
-        collector.store_chat_completions_metrics(&chat_completions_2, model_2, node_small_id_2);
-
-        // Verify metrics for first model
-        let labels_1 = [model_1, &node_small_id_1.to_string()];
-        assert_eq!(
-            collector
-                .chat_completions_gpu_usage
-                .with_label_values(&labels_1)
-                .get(),
-            75.5_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_cpu_usage
-                .with_label_values(&labels_1)
-                .get(),
-            45.2_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_ttft
-                .with_label_values(&labels_1)
-                .get(),
-            0.15_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_tpot
-                .with_label_values(&labels_1)
-                .get(),
-            0.05_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_running_requests
-                .with_label_values(&labels_1)
-                .get(),
-            3.0_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_waiting_requests
-                .with_label_values(&labels_1)
-                .get(),
-            2.0_f64
-        );
-
-        // Verify metrics for second model
-        let labels_2 = [model_2, &node_small_id_2.to_string()];
-        assert_eq!(
-            collector
-                .chat_completions_gpu_usage
-                .with_label_values(&labels_2)
-                .get(),
-            60.0_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_cpu_usage
-                .with_label_values(&labels_2)
-                .get(),
-            30.0_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_ttft
-                .with_label_values(&labels_2)
-                .get(),
-            0.1_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_tpot
-                .with_label_values(&labels_2)
-                .get(),
-            0.03_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_running_requests
-                .with_label_values(&labels_2)
-                .get(),
-            1.0_f64
-        );
-        assert_eq!(
-            collector
-                .chat_completions_num_waiting_requests
-                .with_label_values(&labels_2)
-                .get(),
-            0.0_f64
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn test_store_embeddings_metrics() {
-        // Create a new NodeMetricsCollector instance
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Create test data
-        let embeddings = EmbeddingsMetrics {
-            embeddings_latency: 0.25,
-            num_running_requests: 5,
-        };
-        let model = "text-embedding-ada-002";
-        let node_small_id = 42;
-
-        // Store the metrics
-        collector.store_embeddings_metrics(&embeddings, model, node_small_id);
-
-        // Verify each metric was stored correctly
-        let labels = [model, &node_small_id.to_string()];
-
-        assert_eq!(
-            collector
-                .embeddings_latency
-                .with_label_values(&labels)
-                .get(),
-            0.25
-        );
-        assert_eq!(
-            collector
-                .embeddings_num_running_requests
-                .with_label_values(&labels)
-                .get(),
-            5.0
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn test_store_embeddings_metrics_multiple_models() {
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Test data for first model
-        let embeddings_1 = EmbeddingsMetrics {
-            embeddings_latency: 0.25,
-            num_running_requests: 5,
-        };
-        let model_1 = "text-embedding-ada-002";
-        let node_small_id_1 = 42;
-
-        // Test data for second model
-        let embeddings_2 = EmbeddingsMetrics {
-            embeddings_latency: 0.15,
-            num_running_requests: 2,
-        };
-        let model_2 = "text-embedding-3-small";
-        let node_small_id_2 = 43;
-
-        // Store metrics for both models
-        collector.store_embeddings_metrics(&embeddings_1, model_1, node_small_id_1);
-        collector.store_embeddings_metrics(&embeddings_2, model_2, node_small_id_2);
-
-        // Verify metrics for first model
-        let labels_1 = [model_1, &node_small_id_1.to_string()];
-        assert_eq!(
-            collector
-                .embeddings_latency
-                .with_label_values(&labels_1)
-                .get(),
-            0.25
-        );
-        assert_eq!(
-            collector
-                .embeddings_num_running_requests
-                .with_label_values(&labels_1)
-                .get(),
-            5.0
-        );
-
-        // Verify metrics for second model
-        let labels_2 = [model_2, &node_small_id_2.to_string()];
-        assert_eq!(
-            collector
-                .embeddings_latency
-                .with_label_values(&labels_2)
-                .get(),
-            0.15
-        );
-        assert_eq!(
-            collector
-                .embeddings_num_running_requests
-                .with_label_values(&labels_2)
-                .get(),
-            2.0
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn test_store_image_generation_metrics() {
-        // Create a new NodeMetricsCollector instance
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Create test data
-        let image_generation = ImageGenerationMetrics {
-            image_generation_latency: 1.5,
-            num_running_requests: 2,
-        };
-        let model = "dall-e-3";
-        let node_small_id = 42;
-
-        // Store the metrics
-        collector.store_image_generation_metrics(&image_generation, model, node_small_id);
-
-        // Verify each metric was stored correctly
-        let labels = [model, &node_small_id.to_string()];
-
-        assert_eq!(
-            collector
-                .image_generation_latency
-                .with_label_values(&labels)
-                .get(),
-            1.5
-        );
-        assert_eq!(
-            collector
-                .image_generation_num_running_requests
-                .with_label_values(&labels)
-                .get(),
-            2.0
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn test_store_image_generation_metrics_multiple_models() {
-        let collector = NodeMetricsCollector::new().unwrap();
-
-        // Test data for first model
-        let image_generation_1 = ImageGenerationMetrics {
-            image_generation_latency: 1.5,
-            num_running_requests: 2,
-        };
-        let model_1 = "dall-e-3";
-        let node_small_id_1 = 42;
-
-        // Test data for second model
-        let image_generation_2 = ImageGenerationMetrics {
-            image_generation_latency: 0.8,
-            num_running_requests: 1,
-        };
-        let model_2 = "dall-e-2";
-        let node_small_id_2 = 43;
-
-        // Store metrics for both models
-        collector.store_image_generation_metrics(&image_generation_1, model_1, node_small_id_1);
-        collector.store_image_generation_metrics(&image_generation_2, model_2, node_small_id_2);
-
-        // Verify metrics for first model
-        let labels_1 = [model_1, &node_small_id_1.to_string()];
-        assert_eq!(
-            collector
-                .image_generation_latency
-                .with_label_values(&labels_1)
-                .get(),
-            1.5
-        );
-        assert_eq!(
-            collector
-                .image_generation_num_running_requests
-                .with_label_values(&labels_1)
-                .get(),
-            2.0
-        );
-
-        // Verify metrics for second model
-        let labels_2 = [model_2, &node_small_id_2.to_string()];
-        assert_eq!(
-            collector
-                .image_generation_latency
-                .with_label_values(&labels_2)
-                .get(),
-            0.8
-        );
-        assert_eq!(
-            collector
-                .image_generation_num_running_requests
-                .with_label_values(&labels_2)
-                .get(),
-            1.0
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
-    async fn test_retrieve_best_available_nodes_for_chat_completions() {
-        // Use mockito's static server URL
-        let mut server = mockito::Server::new_async().await;
-
-        // Create mock response data
-        let mock_response = json!({
-            "status": "success",
-            "data": {
-                "resultType": "vector",
-                "result": [
-                    {
-                        "metric": { "node_small_id": "42" },
-                        "value": [1_614_858_713.144, "0.2"]
-                    },
-                    {
-                        "metric": { "node_small_id": "43" },
-                        "value": [1_614_858_713.144, "0.33"]
-                    }
-                ]
-            }
-        });
-
-        // Set up mock endpoint
-        let _m = server
-            .mock("GET", "/api/v1/query")
-            .match_query(mockito::Matcher::Any) // Accept any query parameter
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&mock_response).unwrap())
-            .create();
-
-        // Test retrieving best available nodes
-        let result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
-            &server.url(),
-            "gpt-4",
-            Some(2),
-        )
-        .await
-        .expect("Failed to retrieve best available nodes");
-
-        assert_eq!(result, vec![42, 43]);
-    }
 }

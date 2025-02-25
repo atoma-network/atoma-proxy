@@ -8,6 +8,8 @@ pub mod errors;
 pub mod handlers;
 pub mod metrics;
 pub mod state_manager;
+#[cfg(test)]
+pub mod tests;
 pub mod types;
 
 use chrono::{DateTime, Utc};
