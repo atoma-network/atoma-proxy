@@ -4626,8 +4626,7 @@ pub mod tests {
                 stack_attestation_disputes,
                 node_public_keys,
                 users,
-                key_rotations,
-            RESTART IDENTITY CASCADE",
+                key_rotations",
         )
         .execute(db)
         .await
