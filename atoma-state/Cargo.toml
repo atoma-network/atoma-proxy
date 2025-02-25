@@ -14,10 +14,15 @@ fastrand = { workspace = true }
 flume = { workspace = true }
 futures = { workspace = true }
 isocountry = { workspace = true }
+mockito = { workspace = true }
 prometheus = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["chrono", "runtime-tokio-native-tls", "sqlite"] }
+sqlx = { workspace = true, features = [
+	"chrono",
+	"runtime-tokio-native-tls",
+	"sqlite",
+] }
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
 reqwest = { workspace = true }

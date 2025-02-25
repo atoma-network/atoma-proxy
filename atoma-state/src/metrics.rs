@@ -1053,8 +1053,7 @@ mod tests {
     use super::*;
 
     use atoma_p2p::broadcast_metrics::ChatCompletionsMetrics;
-
-    const PROMETHEUS_URL: &str = "http://localhost:9090";
+    use serde_json::json;
 
     #[test]
     #[allow(clippy::float_cmp)]
@@ -1442,36 +1441,41 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::significant_drop_tightening)]
     async fn test_retrieve_best_available_nodes_for_chat_completions() {
-        // Create a new NodeMetricsCollector
-        let collector = NodeMetricsCollector::new().unwrap();
+        // Use mockito's static server URL
+        let mut server = mockito::Server::new_async().await;
 
-        // Create test metrics for two nodes
-        let chat_completions_1 = ChatCompletionsMetrics {
-            gpu_kv_cache_usage_perc: 75.5,
-            cpu_kv_cache_usage_perc: 45.2,
-            time_to_first_token: 0.15,
-            time_per_output_token: 0.05,
-            num_running_requests: 2,
-            num_waiting_requests: 0,
-        };
+        // Create mock response data
+        let mock_response = json!({
+            "status": "success",
+            "data": {
+                "resultType": "vector",
+                "result": [
+                    {
+                        "metric": { "node_small_id": "42" },
+                        "value": [1_614_858_713.144, "0.2"]
+                    },
+                    {
+                        "metric": { "node_small_id": "43" },
+                        "value": [1_614_858_713.144, "0.33"]
+                    }
+                ]
+            }
+        });
 
-        let chat_completions_2 = ChatCompletionsMetrics {
-            gpu_kv_cache_usage_perc: 60.0,
-            cpu_kv_cache_usage_perc: 30.0,
-            time_to_first_token: 0.25,
-            time_per_output_token: 0.08,
-            num_running_requests: 3,
-            num_waiting_requests: 0,
-        };
-
-        // Store metrics using the collector
-        collector.store_chat_completions_metrics(&chat_completions_1, "gpt-4", 42);
-        collector.store_chat_completions_metrics(&chat_completions_2, "gpt-4", 43);
+        // Set up mock endpoint
+        let _m = server
+            .mock("GET", "/api/v1/query")
+            .match_query(mockito::Matcher::Any) // Accept any query parameter
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&mock_response).unwrap())
+            .create();
 
         // Test retrieving best available nodes
         let result = NodeMetricsCollector::retrieve_best_available_nodes_for_chat_completions(
-            &format!("{PROMETHEUS_URL}/api/v1/query"),
+            &server.url(),
             "gpt-4",
             Some(2),
         )
