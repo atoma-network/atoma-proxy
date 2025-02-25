@@ -6,15 +6,20 @@
 pub mod config;
 pub mod errors;
 pub mod handlers;
+pub mod metrics;
 pub mod state_manager;
+#[cfg(test)]
+pub mod tests;
 pub mod types;
 
 use chrono::{DateTime, Utc};
 pub use config::AtomaStateManagerConfig;
 pub use errors::AtomaStateManagerError;
+pub use metrics::{trigger_new_metrics_collection_task, NodeMetricsCollector};
 pub use sqlx::PgPool;
 use sqlx::Postgres;
 pub use state_manager::{AtomaState, AtomaStateManager};
+
 /// Builds a query with an IN clause and optional additional conditions
 ///
 /// # Arguments
