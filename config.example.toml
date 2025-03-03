@@ -19,40 +19,6 @@ metrics_url = "" # The URL endpoint where metrics can be collected from.
 models = [["MODALITY", "MODEL"]] # A vector of tuples containing modality types and their corresponding model identifiers.
 top_k = 10 # Optional parameter to limit the number of best nodes returned.
 
-# Overall component weights for performance calculation
-[atoma_state.component_weights]
-gpu_score_weight = 0.6        # Weight for GPU in overall score (0.0 to 1.0)
-cpu_score_weight = 0.2        # Weight for CPU in overall score (0.0 to 1.0)
-ram_score_weight = 0.075      # Weight for RAM in overall score (0.0 to 1.0)
-swap_ram_score_weight = 0.075 # Weight for swap RAM in overall score (0.0 to 1.0)
-network_score_weight = 0.05   # Weight for network in overall score (0.0 to 1.0)
-
-# GPU-specific configuration
-[atoma_state.gpu]
-# VRAM usage weight
-gpu_vram_weight = 0.3         # in Celsius
-# GPU execution weight
-gpu_execution_weight = 0.3
-# Temperature thresholds
-gpu_temp_threshold = 80.0    # in Celsius
-gpu_temp_max = 100.0         # in Celsius
-# Power thresholds
-gpu_power_threshold = 350.0  # in Watts
-# Maximum power for GPU
-gpu_power_max = 700.0        # in Watts
-
-[atoma_state.ram]
-# RAM usage weight
-ram_usage_weight = 0.5
-# Swap RAM usage weight
-swap_ram_usage_weight = 0.5
-
-[atoma_state.moving_average]
-# Moving average window size
-moving_avg_window_size = 10
-# Moving average smoothing factor
-moving_avg_smooth_factor = 0.9
-
 [atoma_service]
 service_bind_address = "0.0.0.0:8080" # Address to bind the service to, this should match the port in the docker-compose.yml
 password = "password"                 # Password for the service
