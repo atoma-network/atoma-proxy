@@ -15,9 +15,9 @@ cursor_path = "./cursor.toml"
 database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
 
 [atoma_state.metrics_collection]
-metrics_url = ""
-models = [["MODALITY", "MODEL"]] 
-top_k = 10
+metrics_url = "" # The URL endpoint where metrics can be collected from.
+models = [["MODALITY", "MODEL"]] # A vector of tuples containing modality types and their corresponding model identifiers.
+top_k = 10 # Optional parameter to limit the number of best nodes returned.
 
 # Overall component weights for performance calculation
 [atoma_state.component_weights]
