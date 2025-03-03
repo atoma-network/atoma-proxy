@@ -14,6 +14,11 @@ cursor_path = "./cursor.toml"
 # URL of the PostgreSQL database, it SHOULD be the same as the `ATOMA_STATE_DATABASE_URL` variable value in the .env file
 database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
 
+[atoma_state.metrics_collection]
+metrics_url = "" # The URL endpoint where metrics can be collected from.
+models = [["MODALITY", "MODEL"]] # A vector of tuples containing modality types and their corresponding model identifiers.
+top_k = 10 # Optional parameter to limit the number of best nodes returned.
+
 # Overall component weights for performance calculation
 [atoma_state.component_weights]
 gpu_score_weight = 0.6        # Weight for GPU in overall score (0.0 to 1.0)
@@ -86,3 +91,4 @@ bootstrap_nodes = [
     "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
     "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
 ]
+metrics_endpoints = {} # It's not used in proxy, but we are using it to avoid the error
