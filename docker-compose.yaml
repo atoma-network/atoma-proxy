@@ -101,6 +101,7 @@ services:
         PROFILE: cloud
     ports:
       - "${ATOMA_P2P_PORT:-8083}:8083/udp"
+      - "${ATOMA_P2P_PORT:-8083}:8083/tcp"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
