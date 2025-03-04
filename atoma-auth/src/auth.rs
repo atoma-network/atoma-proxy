@@ -1106,6 +1106,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
                 AtomaAtomaStateManagerEvent::StoreNewApiToken {
                     user_id: event_user_id,
                     api_token: _api_token,
+                    name: _name,
                 } => {
                     assert_eq!(event_user_id, user_id);
                     // assert_eq!(event_api_token, api_token);
@@ -1124,7 +1125,10 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         assert_eq!(claims.user_id, user_id);
         assert!(claims.refresh_token_hash.is_some());
         // Generate api token
-        let _api_token = auth.generate_api_token(&access_token).await.unwrap();
+        let _api_token = auth
+            .generate_api_token(&access_token, "test".to_string())
+            .await
+            .unwrap();
         if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
             .await
             .is_err()
