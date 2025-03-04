@@ -10,6 +10,7 @@ x-atoma-proxy-base: &atoma-proxy-base
     - ./logs:/app/logs
     - sui-config-volume:/root/.sui/sui_config
     - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
+    - ${CURSOR_PATH:-~/.cursor}:/app/.cursor
   env_file:
     - .env
   environment:
