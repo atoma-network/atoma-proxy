@@ -714,9 +714,10 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=ja-extract-vllm-gpu-metrics#55c20247ffc70a3febcd12c0ecb0855b4e2df7a6"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a47d6024a683483bb9a5c1367058c2dc45f092c2"
 dependencies = [
  "blake3",
+ "bytes",
  "chrono",
  "ciborium",
  "config",
@@ -1262,16 +1263,15 @@ dependencies = [
 
 [[package]]
 name = "blake3"
-version = "1.6.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1230237285e3e10cde447185e8975408ae24deaa67205ce684805c25bc0c7937"
+checksum = "675f87afced0413c9bb02843499dbbd3882a237645883f71a2b59644a6d2f753"
 dependencies = [
  "arrayref",
  "arrayvec",
  "cc",
  "cfg-if",
  "constant_time_eq",
- "memmap2",
 ]
 
 [[package]]
@@ -4638,12 +4638,14 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "257b5621d159b32282eac446bed6670c39c7dc68a200a992d8f056afa0066f6d"
 dependencies = [
+ "asn1_der",
  "bs58 0.5.1",
  "ed25519-dalek",
  "hkdf",
  "multihash 0.19.3",
  "quick-protobuf",
  "rand 0.8.5",
+ "ring 0.17.10",
  "sha2 0.10.8",
  "thiserror 1.0.69",
  "tracing",
@@ -5035,15 +5037,6 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
-
-[[package]]
-name = "memmap2"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3f7eed9d3848f8b98834af67102b720745c4ec028fcd0aa0239277e7de374f"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "mime"
