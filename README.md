@@ -76,7 +76,7 @@ git clone https://github.com/atoma-network/atoma-proxy.git
 cd atoma-proxy
 ```
 
-2. Configure environment variables by creating `.env` file, with:
+2. Configure environment variables by creating `.env` file. Please ensure you have created the requisite user and database in your postgres instance. Once you've done that, you can use `.env.example` as template for your `.env` file.
 
 ```bash
 cp .env.example .env
