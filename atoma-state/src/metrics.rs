@@ -280,7 +280,7 @@ async fn collect_best_available_nodes(
                         )
                         .await?
                     }
-                    Modalities::ImageGeneration => {
+                    Modalities::ImagesGenerations => {
                         NodeMetricsCollector::retrieve_best_available_nodes_for_image_generation(
                             &metrics_url,
                             modality_model,

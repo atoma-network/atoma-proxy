@@ -13,9 +13,12 @@ use crate::state_manager::Result;
 /// currently supported modalities.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum Modalities {
+    #[serde(rename = "Chat Completions")]
     ChatCompletions,
+    #[serde(rename = "Embeddings")]
     Embeddings,
-    ImageGeneration,
+    #[serde(rename = "Images Generations")]
+    ImagesGenerations,
 }
 
 /// Request payload for revoking an API token
