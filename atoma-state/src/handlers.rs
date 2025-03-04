@@ -1304,16 +1304,23 @@ pub async fn handle_state_manager_event(
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::StoreNewApiToken { user_id, api_token } => {
+        AtomaAtomaStateManagerEvent::StoreNewApiToken {
+            user_id,
+            api_token,
+            name,
+        } => {
             state_manager
                 .state
-                .store_api_token(user_id, &api_token)
+                .store_api_token(user_id, &api_token, &name)
                 .await?;
         }
-        AtomaAtomaStateManagerEvent::RevokeApiToken { user_id, api_token } => {
+        AtomaAtomaStateManagerEvent::RevokeApiToken {
+            user_id,
+            api_token_id,
+        } => {
             state_manager
                 .state
-                .delete_api_token(user_id, &api_token)
+                .delete_api_token(user_id, api_token_id)
                 .await?;
         }
         AtomaAtomaStateManagerEvent::GetApiTokensForUser {
