@@ -714,7 +714,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#008813c00dd27f461eee22833c6722e768402bdc"
 dependencies = [
  "blake3",
  "bytes",
@@ -849,7 +849,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#008813c00dd27f461eee22833c6722e768402bdc"
 dependencies = [
  "anyhow",
  "config",
@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#008813c00dd27f461eee22833c6722e768402bdc"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7108,9 +7108,9 @@ dependencies = [
 
 [[package]]
 name = "raw-cpuid"
-version = "11.4.0"
+version = "11.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "529468c1335c1c03919960dfefdb1b3648858c20d7ec2d0663e728e4a717efbc"
+checksum = "c6df7ab838ed27997ba19a4664507e6f82b41fe6e20be42929332156e5e85146"
 dependencies = [
  "bitflags 2.9.0",
 ]
