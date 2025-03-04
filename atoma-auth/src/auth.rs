@@ -6,7 +6,10 @@ use std::{str::FromStr, sync::Arc};
 use crate::google::{self, fetch_google_public_keys};
 use crate::{AtomaAuthConfig, Sui};
 use anyhow::anyhow;
-use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
+use atoma_state::{
+    types::{AtomaAtomaStateManagerEvent, TokenResponse},
+    AtomaStateManagerError,
+};
 use atoma_utils::hashing::blake2b_hash;
 use blake2::{
     digest::{consts::U32, generic_array::GenericArray},
@@ -401,12 +404,13 @@ impl Auth {
     /// # Arguments
     ///
     /// * `jwt` - The access token to be used to generate the API token
+    /// * `name` - The name of the API token
     ///
     /// # Returns
     ///
     /// * `Result<String>` - The generated API token
     #[instrument(level = "info", skip(self))]
-    pub async fn generate_api_token(&self, jwt: &str) -> Result<String> {
+    pub async fn generate_api_token(&self, jwt: &str, name: String) -> Result<String> {
         let claims = self.get_claims_from_token(jwt).await?;
         let api_token: String = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
@@ -417,6 +421,7 @@ impl Auth {
             .send(AtomaAtomaStateManagerEvent::StoreNewApiToken {
                 user_id: claims.user_id,
                 api_token: api_token.clone(),
+                name,
             })?;
         Ok(api_token)
     }
@@ -434,12 +439,12 @@ impl Auth {
     ///
     /// * `Result<()>` - If the API token was revoked
     #[instrument(level = "info", skip(self))]
-    pub async fn revoke_api_token(&self, jwt: &str, api_token: &str) -> Result<()> {
+    pub async fn revoke_api_token(&self, jwt: &str, api_token_id: i64) -> Result<()> {
         let claims = self.get_claims_from_token(jwt).await?;
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RevokeApiToken {
                 user_id: claims.user_id,
-                api_token: api_token.to_string(),
+                api_token_id,
             })?;
         Ok(())
     }
@@ -456,7 +461,7 @@ impl Auth {
     ///
     /// * `Result<Vec<String>>` - The list of API tokens
     #[instrument(level = "info", skip(self))]
-    pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<String>> {
+    pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<TokenResponse>> {
         let claims = self.get_claims_from_token(jwt).await?;
 
         let (result_sender, result_receiver) = oneshot::channel();

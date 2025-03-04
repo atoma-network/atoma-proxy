@@ -24,8 +24,8 @@ pub enum Modalities {
 /// Request payload for revoking an API token
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RevokeApiTokenRequest {
-    /// The API token to be revoked
-    pub api_token: String,
+    /// The API token id to be revoked
+    pub api_token_id: i64,
 }
 
 /// Request payload for user authentication
@@ -48,6 +48,30 @@ pub struct AuthResponse {
     pub access_token: String,
     /// Long-lived token used to obtain new access tokens
     pub refresh_token: String,
+}
+
+/// Request payload for creating a new API token
+///
+/// Contains the name of the token
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreateTokenRequest {
+    /// The name of the token
+    pub name: String,
+}
+
+/// After requesting api tokens vec of these will be returned
+///
+/// Contains the id of the token, the last 4 digits of the token, the name of the token and the creation date of the token
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct TokenResponse {
+    /// The id of the token
+    pub id: i64,
+    /// The last 4 chars of the token
+    pub token_last_4: String,
+    /// The creation timestamp of the token
+    pub created_at: DateTime<Utc>,
+    /// The name of the token
+    pub name: String,
 }
 
 /// Request payload for updating the sui address for the user.
@@ -797,8 +821,8 @@ pub enum AtomaAtomaStateManagerEvent {
     RevokeApiToken {
         /// The user ID
         user_id: i64,
-        /// The API token
-        api_token: String,
+        /// The API token id
+        api_token_id: i64,
     },
     /// Stores a new API token for a user
     StoreNewApiToken {
@@ -806,6 +830,8 @@ pub enum AtomaAtomaStateManagerEvent {
         user_id: i64,
         /// The API token
         api_token: String,
+        /// Name of the token
+        name: String,
     },
     /// Retrieves all API tokens for a user
     GetApiTokensForUser {
@@ -813,7 +839,7 @@ pub enum AtomaAtomaStateManagerEvent {
         user_id: i64,
         /// Channel to send back the list of API tokens
         /// Returns Ok(Vec<String>) with the list of API tokens or an error if the query fails
-        result_sender: oneshot::Sender<Result<Vec<String>>>,
+        result_sender: oneshot::Sender<Result<Vec<TokenResponse>>>,
     },
     /// Stores the sui_address with proven ownership
     UpdateSuiAddress {

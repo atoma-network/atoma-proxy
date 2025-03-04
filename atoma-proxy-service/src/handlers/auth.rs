@@ -1,6 +1,7 @@
 use atoma_auth::AuthError;
 use atoma_state::types::{
-    AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest, UserProfile,
+    AuthRequest, AuthResponse, CreateTokenRequest, ProofRequest, RevokeApiTokenRequest,
+    TokenResponse, UsdcPaymentRequest, UserProfile,
 };
 use axum::{
     extract::State,
@@ -71,7 +72,7 @@ pub struct GetAllApiTokensOpenApi;
 pub fn auth_router() -> Router<ProxyServiceState> {
     let router = Router::new()
         .route(GET_ALL_API_TOKENS_PATH, get(get_all_api_tokens))
-        .route(GENERATE_API_TOKEN_PATH, get(generate_api_token))
+        .route(GENERATE_API_TOKEN_PATH, post(generate_api_token))
         .route(REVOKE_API_TOKEN_PATH, post(revoke_api_token))
         .route(REGISTER_PATH, post(register))
         .route(LOGIN_PATH, post(login))
@@ -121,7 +122,7 @@ fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
 pub async fn get_all_api_tokens(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<String>>> {
+) -> Result<Json<Vec<TokenResponse>>> {
     let jwt = get_jwt_from_headers(&headers)?;
     Ok(Json(
         proxy_service_state
@@ -155,7 +156,7 @@ pub struct GenerateApiTokenOpenApi;
 ///
 /// * `Result<Json<String>>` - A JSON response containing the generated API token
 #[utoipa::path(
-    get,
+    post,
     path = "",
     security(
         ("bearerAuth" = [])
@@ -170,13 +171,14 @@ pub struct GenerateApiTokenOpenApi;
 pub async fn generate_api_token(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
+    body: Json<CreateTokenRequest>,
 ) -> Result<Json<String>> {
     let jwt = get_jwt_from_headers(&headers)?;
 
     Ok(Json(
         proxy_service_state
             .auth
-            .generate_api_token(jwt)
+            .generate_api_token(jwt, body.name.clone())
             .await
             .map_err(|e| {
                 error!("Failed to generate api token: {:?}", e);
@@ -200,7 +202,7 @@ pub struct RevokeApiTokenOpenApi;
 ///
 /// * `proxy_service_state` - The shared state containing the state manager
 /// * `headers` - The headers of the request
-/// * `body` - The request body containing the API token to revoke
+/// * `body` - The request body containing the API token id to revoke
 ///
 /// # Returns
 ///
@@ -227,7 +229,7 @@ pub async fn revoke_api_token(
 
     proxy_service_state
         .auth
-        .revoke_api_token(jwt, &body.api_token)
+        .revoke_api_token(jwt, body.api_token_id)
         .await
         .map_err(|e| {
             error!("Failed to revoke api token: {:?}", e);

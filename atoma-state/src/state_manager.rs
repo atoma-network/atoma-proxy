@@ -4,7 +4,7 @@ use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
     NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task, UserProfile,
+    StackSettlementTicket, StatsStackResponse, Task, TokenResponse, UserProfile,
 };
 use crate::{build_query_with_in, AtomaStateManagerError};
 
@@ -3766,10 +3766,10 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn delete_api_token(&self, user_id: i64, api_token: &str) -> Result<()> {
-        sqlx::query("DELETE FROM api_tokens WHERE user_id = $1 AND token = $2")
+    pub async fn delete_api_token(&self, user_id: i64, api_token_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM api_tokens WHERE user_id = $1 AND id = $2")
             .bind(user_id)
-            .bind(api_token)
+            .bind(api_token_id)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -3840,10 +3840,11 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn store_api_token(&self, user_id: i64, api_token: &str) -> Result<()> {
-        sqlx::query("INSERT INTO api_tokens (user_id, token) VALUES ($1, $2)")
+    pub async fn store_api_token(&self, user_id: i64, api_token: &str, name: &str) -> Result<()> {
+        sqlx::query("INSERT INTO api_tokens (user_id, token, name) VALUES ($1, $2, $3)")
             .bind(user_id)
             .bind(api_token)
+            .bind(name)
             .execute(&self.db)
             .await?;
         Ok(())
@@ -3859,7 +3860,10 @@ impl AtomaState {
     ///
     /// # Returns
     ///
-    /// - `Result<Vec<String>>`: A result containing either:
+    /// - `Result<Vec<TokenResponse>>`: A result containing either:
+    ///   - `Ok(Vec<TokenResponse>)`: A list of API tokens for the user.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
     ///
     /// # Errors
     ///
@@ -3876,13 +3880,18 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_api_tokens_for_user(&self, user_id: i64) -> Result<Vec<String>> {
-        let tokens = sqlx::query("SELECT token FROM api_tokens WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(&self.db)
-            .await?;
+    pub async fn get_api_tokens_for_user(&self, user_id: i64) -> Result<Vec<TokenResponse>> {
+        let tokens = sqlx::query(
+            "SELECT id, RIGHT(token,4) as token_last_4, creation_timestamp as created_at, name FROM api_tokens WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_all(&self.db)
+        .await?;
 
-        Ok(tokens.into_iter().map(|row| row.get("token")).collect())
+        tokens
+            .into_iter()
+            .map(|token| TokenResponse::from_row(&token).map_err(AtomaStateManagerError::from))
+            .collect()
     }
 
     /// Get compute units processed for the last `last_hours` hours.

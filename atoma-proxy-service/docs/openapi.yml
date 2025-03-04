@@ -25,7 +25,7 @@ paths:
         '500':
           description: Service is unhealthy
   /generate_api_token:
-    get:
+    post:
       tags:
       - Auth
       summary: Generates an API token for the user.
@@ -39,6 +39,12 @@ paths:
 
         * `Result<Json<String>>` - A JSON response containing the generated API token
       operationId: generate_api_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTokenRequest'
+        required: true
       responses:
         '200':
           description: Generates an API token for the user
@@ -648,6 +654,17 @@ components:
         username:
           type: string
           description: The user's unique identifier
+    CreateTokenRequest:
+      type: object
+      description: |-
+        Request payload for creating a new API token
+
+        Contains the name of the token
+      required:
+      - name
+      properties:
+        name:
+          type: string
     ProofRequest:
       type: object
       description: |-
@@ -659,14 +676,16 @@ components:
       properties:
         signature:
           type: string
+          description: The signature of the user to prove ownership of the sui address
     RevokeApiTokenRequest:
       type: object
       description: Request payload for revoking an API token
       required:
-      - api_token
+      - api_token_id
       properties:
-        api_token:
-          type: string
+        api_token_id:
+          type: integer
+          format: int64
           description: The API token to be revoked
     UsdcPaymentRequest:
       type: object
@@ -681,8 +700,10 @@ components:
           type:
           - string
           - 'null'
+          description: The proof signature of the payment
         transaction_digest:
           type: string
+          description: The transaction digest of the payment
   securitySchemes:
     bearerAuth:
       type: http
