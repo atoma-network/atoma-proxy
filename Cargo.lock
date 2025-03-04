@@ -714,7 +714,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#02561abead84c30aeed1e991513507132a5a6f5a"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
 dependencies = [
  "blake3",
  "bytes",
@@ -849,7 +849,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#02561abead84c30aeed1e991513507132a5a6f5a"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
 dependencies = [
  "anyhow",
  "config",
@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#02561abead84c30aeed1e991513507132a5a6f5a"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#a3514ee603ed3d03b738065ae7bd2ad5ae4009d8"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1603,6 +1603,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
  "windows-sys 0.59.0",
 ]
 
@@ -5082,13 +5091,13 @@ dependencies = [
 
 [[package]]
 name = "mockito"
-version = "1.6.1"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "652cd6d169a36eaf9d1e6bce1a221130439a966d7f27858af66a33a66e9c4ee2"
+checksum = "7760e0e418d9b7e5777c0374009ca4c93861b9066f18cb334a20ce50ab63aa48"
 dependencies = [
  "assert-json-diff",
  "bytes",
- "colored",
+ "colored 3.0.0",
  "futures-util",
  "http 1.2.0",
  "http-body 1.0.1",
@@ -5096,7 +5105,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "log",
- "rand 0.8.5",
+ "rand 0.9.0",
  "regex",
  "serde_json",
  "serde_urlencoded",
@@ -5319,7 +5328,7 @@ dependencies = [
  "bcs",
  "clap",
  "codespan",
- "colored",
+ "colored 2.2.0",
  "indexmap 2.7.1",
  "move-abstract-interpreter",
  "move-binary-format",
@@ -8871,7 +8880,7 @@ source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.43.1#2f52a7283e5f
 dependencies = [
  "anyhow",
  "bcs",
- "colored",
+ "colored 2.2.0",
  "enum_dispatch",
  "fastcrypto 0.1.8",
  "itertools 0.13.0",
@@ -9061,7 +9070,7 @@ dependencies = [
  "base64 0.21.7",
  "bcs",
  "clap",
- "colored",
+ "colored 2.2.0",
  "fastcrypto 0.1.8",
  "futures",
  "futures-core",
