@@ -25,20 +25,18 @@ exporters:
     endpoint: tempo:4317
     tls:
       insecure: true
-  debug:
-    verbosity: detailed
 
 service:
   pipelines:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlp/tempo]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [loki, debug]
+      exporters: [loki]
