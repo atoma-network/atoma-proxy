@@ -232,3 +232,9 @@ volumes:
 networks:
   atoma-network:
     driver: bridge
+    name: atoma-network
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 2001:db8::/64
+          gateway: 2001:db8::1

@@ -55,13 +55,4 @@ listen_addrs = [
     "/ip4/0.0.0.0/tcp/8083",         # TCP listener on all interfaces, port 8083
     "/ip4/0.0.0.0/udp/8083/quic-v1", # QUIC v1 listener on all interfaces, port 8083
 ]
-
-# DHT bootstrap nodes for initial P2P network discovery
-bootstrap_nodes = [
-    "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-    "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
-]
 metrics_endpoints = {}                 # Should be empty
