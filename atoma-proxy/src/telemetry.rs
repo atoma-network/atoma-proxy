@@ -28,6 +28,7 @@ const LOG_FILE: &str = "atoma-proxy-service.log";
 // Default Grafana OTLP endpoint if not specified in environment
 
 const DEFAULT_OTLP_ENDPOINT: &str = "http://otel-collector:4317";
+const DEFAULT_LOKI_ENDPOINT: &str = "http://loki:3100";
 
 static RESOURCE: Lazy<Resource> =
     Lazy::new(|| Resource::new(vec![KeyValue::new("service_name", "atoma-proxy")]));
@@ -79,6 +80,8 @@ fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::Tracer> {
 pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+    let loki_endpoint =
+        std::env::var("LOKI_ENDPOINT").unwrap_or_else(|_| DEFAULT_LOKI_ENDPOINT.to_string());
     // Create logs directory if it doesn't exist
     std::fs::create_dir_all(&log_dir).context("Failed to create logs directory")?;
 
@@ -89,7 +92,7 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
     let (layer, task) = tracing_loki::builder()
         .label("service_name", "atoma-proxy")?
         .extra_field("pid", format!("{}", process::id()))?
-        .build_url(Url::parse("http://loki:3100").unwrap())?;
+        .build_url(Url::parse(&loki_endpoint).unwrap())?;
 
     // The background task needs to be spawned so the logs actually get
     // delivered.
