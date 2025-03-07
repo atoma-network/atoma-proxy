@@ -78,7 +78,6 @@ async fn main() -> Result<()> {
 
     info!(event = "startup", "Starting Atoma Proxy Service...");
 
-    dbg!();
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
 
@@ -106,7 +105,6 @@ async fn main() -> Result<()> {
     );
 
     let keystore = FileBasedKeystore::new(&PathBuf::from(&config.sui.sui_keystore_path()))?;
-    dbg!();
     let atoma_p2p_node =
         AtomaP2pNode::start(config.p2p, Arc::new(keystore), atoma_p2p_sender, true)?;
 
@@ -127,7 +125,6 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
-    dbg!();
     // Initialize the `AtomaStateManager` service
     let state_manager = AtomaStateManager::new_from_url(
         &config.state.database_url,
@@ -152,7 +149,6 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    dbg!();
     let models_with_modalities = config
         .service
         .models
@@ -175,7 +171,6 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
-    dbg!();
     let proxy_service_tcp_listener = TcpListener::bind(&config.proxy_service.service_bind_address)
         .await
         .context("Failed to bind proxy service TCP listener")?;
@@ -207,7 +202,6 @@ async fn main() -> Result<()> {
         shutdown_sender.clone(),
     );
 
-    dbg!();
     #[allow(clippy::redundant_pub_crate)]
     let ctrl_c = tokio::task::spawn(async move {
         tokio::select! {
@@ -238,7 +232,6 @@ async fn main() -> Result<()> {
         ctrl_c
     )?;
 
-    dbg!();
     handle_tasks_results(
         metrics_collector_result,
         sui_subscriber_result,
