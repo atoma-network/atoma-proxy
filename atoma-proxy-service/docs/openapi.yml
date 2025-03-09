@@ -64,7 +64,7 @@ paths:
 
         * `proxy_service_state` - The shared state containing the state manager
         * `headers` - The headers of the request
-        * `body` - The request body containing the API token to revoke
+        * `body` - The request body containing the API token id to revoke
 
         # Returns
 
@@ -98,7 +98,7 @@ paths:
         # Arguments
 
         * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the new user
+        * `body` - The request body containing the email and password of the new user
 
         # Returns
 
@@ -108,7 +108,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRequest'
+              $ref: '#/components/schemas/RegisterAuthRequest'
         required: true
       responses:
         '200':
@@ -116,7 +116,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRequest'
+                $ref: '#/components/schemas/RegisterAuthRequest'
         '500':
           description: Failed to register user
   /login:
@@ -128,7 +128,7 @@ paths:
         # Arguments
 
         * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the user
+        * `body` - The request body containing the email and password of the user
 
         # Returns
 
@@ -138,7 +138,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRequest'
+              $ref: '#/components/schemas/LoginAuthRequest'
         required: true
       responses:
         '200':
@@ -146,7 +146,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRequest'
+                $ref: '#/components/schemas/RegisterAuthRequest'
         '500':
           description: Failed to login user
   /api_tokens:
@@ -353,6 +353,41 @@ paths:
           description: Unauthorized request
         '500':
           description: Failed to get user profile
+      security:
+      - bearerAuth: []
+  /set_user_profile:
+    get:
+      tags:
+      - Auth
+      summary: Retrieves the user profile for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the user profile
+
+        # Errors
+
+        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+      operationId: set_user_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfile'
+        required: true
+      responses:
+        '200':
+          description: Sets the user profile for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to set user profile
       security:
       - bearerAuth: []
   /salt:
@@ -641,19 +676,6 @@ paths:
           description: Failed to get graph data
 components:
   schemas:
-    AuthRequest:
-      type: object
-      description: Request payload for user authentication
-      required:
-      - username
-      - password
-      properties:
-        password:
-          type: string
-          description: The user's password
-        username:
-          type: string
-          description: The user's unique identifier
     CreateTokenRequest:
       type: object
       description: |-
@@ -665,6 +687,20 @@ components:
       properties:
         name:
           type: string
+          description: The name of the token
+    LoginAuthRequest:
+      type: object
+      description: Request payload for user authentication
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          description: The user's unique identifier
+        password:
+          type: string
+          description: The user's password
     ProofRequest:
       type: object
       description: |-
@@ -677,6 +713,19 @@ components:
         signature:
           type: string
           description: The signature of the user to prove ownership of the sui address
+    RegisterAuthRequest:
+      type: object
+      description: Request payload for user authentication
+      required:
+      - user_profile
+      - password
+      properties:
+        password:
+          type: string
+          description: The user's password
+        user_profile:
+          $ref: '#/components/schemas/UserProfile'
+          description: The user's unique identifier
     RevokeApiTokenRequest:
       type: object
       description: Request payload for revoking an API token
@@ -686,7 +735,7 @@ components:
         api_token_id:
           type: integer
           format: int64
-          description: The API token to be revoked
+          description: The API token id to be revoked
     UsdcPaymentRequest:
       type: object
       description: |-
@@ -704,6 +753,21 @@ components:
         transaction_digest:
           type: string
           description: The transaction digest of the payment
+    UserProfile:
+      type: object
+      description: |-
+        Represents a user profile
+        This struct is used to represent the response for the get_user_profile endpoint.
+      required:
+      - email
+      - name
+      properties:
+        email:
+          type: string
+          description: The user's email
+        name:
+          type: string
+          description: The user's name
   securitySchemes:
     bearerAuth:
       type: http

@@ -7,7 +7,7 @@ use crate::google::{self, fetch_google_public_keys};
 use crate::{AtomaAuthConfig, Sui};
 use anyhow::anyhow;
 use atoma_state::{
-    types::{AtomaAtomaStateManagerEvent, TokenResponse},
+    types::{AtomaAtomaStateManagerEvent, TokenResponse, UserProfile},
     AtomaStateManagerError,
 };
 use atoma_utils::hashing::blake2b_hash;
@@ -317,16 +317,20 @@ impl Auth {
         hex::encode(hash_result)
     }
 
-    /// Register user with username/password.
-    /// This method will register a new user with a username and password
+    /// Register user with email/password.
+    /// This method will register a new user with a email and password
     /// The password is hashed and stored in the DB
     /// The method will generate a new refresh and access token
     #[instrument(level = "info", skip(self, password))]
-    pub async fn register(&self, username: &str, password: &str) -> Result<(String, String)> {
+    pub async fn register(
+        &self,
+        user_profile: &UserProfile,
+        password: &str,
+    ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
-                username: username.to_string(),
+                user_profile: user_profile.clone(),
                 password: self.hash_string(password),
                 result_sender,
             })?;
@@ -346,17 +350,16 @@ impl Auth {
     #[instrument(level = "info", skip(self, password))]
     pub async fn check_user_password(
         &self,
-        username: &str,
+        email: &str,
         password: &str,
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender.send(
-            AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-                username: username.to_string(),
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+                email: email.to_string(),
                 password: self.hash_string(password),
                 result_sender,
-            },
-        )?;
+            })?;
         let user_id = result_receiver
             .await??
             .map(|user_id| user_id as u64)
@@ -388,7 +391,7 @@ impl Auth {
         };
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::OAuth {
-                username: email,
+                email,
                 result_sender,
             })?;
         let user_id = result_receiver.await??;
@@ -1059,7 +1062,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     #[tokio::test]
     async fn test_token_flow() {
         let user_id = 123;
-        let username = "user";
+        let email = "email";
         let password = "top_secret";
         let (auth, receiver) = setup_test().await;
         let hash_password = auth.hash_string(password);
@@ -1067,12 +1070,12 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             // First event is for the user to log in to get the tokens
             let event = receiver.recv_async().await.unwrap();
             match event {
-                AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-                    username: event_username,
+                AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+                    email: event_email,
                     password: event_password,
                     result_sender,
                 } => {
-                    assert_eq!(username, event_username);
+                    assert_eq!(email, event_email);
                     assert_eq!(hash_password, event_password);
                     result_sender.send(Ok(Some(user_id))).unwrap();
                 }
@@ -1115,7 +1118,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             }
         });
         let (refresh_token, access_token) =
-            auth.check_user_password(username, password).await.unwrap();
+            auth.check_user_password(email, password).await.unwrap();
         // Refresh token should not have refresh token hash
         let claims = auth.validate_token(&refresh_token, true).unwrap();
         assert_eq!(claims.user_id, user_id);
@@ -1149,10 +1152,10 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             let event = receiver.recv_async().await.unwrap();
             match event {
                 AtomaAtomaStateManagerEvent::OAuth {
-                    username: event_username,
+                    email: event_email,
                     result_sender,
                 } => {
-                    assert_eq!(event_username, "email");
+                    assert_eq!(event_email, "email");
                     result_sender.send(Ok(1)).unwrap();
                 }
                 _ => panic!("Unexpected event"),

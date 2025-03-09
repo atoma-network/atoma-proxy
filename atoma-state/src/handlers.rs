@@ -1232,34 +1232,34 @@ pub async fn handle_state_manager_event(
                 .send(public_key)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-            username,
+        AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+            email,
             password,
             result_sender,
         } => {
             let user_id = state_manager
                 .state
-                .get_user_id_by_username_password(&username, &password)
+                .get_user_id_by_email_password(&email, &password)
                 .await;
             result_sender
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::OAuth {
-            username,
+            email,
             result_sender,
         } => {
-            let user_id = state_manager.state.oauth(&username).await;
+            let user_id = state_manager.state.oauth(&email).await;
             result_sender
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
-            username,
+            user_profile,
             password,
             result_sender,
         } => {
-            let user_id = state_manager.state.register(&username, &password).await;
+            let user_id = state_manager.state.register(user_profile, &password).await;
             result_sender
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
