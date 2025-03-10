@@ -1064,7 +1064,7 @@ impl AtomaState {
     ///
     /// # Arguments
     ///
-    /// * `username` - The username of the user.
+    /// * `email` - The email of the user.
     /// * `password_hash` - The password hash of the user.
     ///
     /// # Returns
@@ -1083,14 +1083,19 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn register_user(state_manager: &AtomaStateManager, username: &str, password_hash: &str) -> Result<Option<i64>, AtomaStateManagerError> {
-    ///    state_manager.register(username, password_hash).await
+    /// async fn register_user(state_manager: &AtomaStateManager, email: &str, password_hash: &str) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.register(email, password_hash).await
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn register(&self, username: &str, password_hash: &str) -> Result<Option<i64>> {
-        let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING RETURNING id")
-        .bind(username)
+    pub async fn register(
+        &self,
+        user_profile: UserProfile,
+        password_hash: &str,
+    ) -> Result<Option<i64>> {
+        let result = sqlx::query("INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id")
+        .bind(user_profile.email)
+        .bind(user_profile.name)
         .bind(password_hash)
         .fetch_optional(&self.db)
         .await?;
@@ -3539,13 +3544,13 @@ impl AtomaState {
         Ok(())
     }
 
-    /// Get the user_id by username and password.
+    /// Get the user_id by email and password.
     ///
-    /// This method queries the `users` table to get the user_id by username and password.
+    /// This method queries the `users` table to get the user_id by email and password.
     ///
     /// # Arguments
     ///
-    /// * `username` - The username of the user.
+    /// * `email` - The email of the user.
     /// * `hashed_password` - The hashed password of the user.
     ///
     /// # Returns
@@ -3565,18 +3570,18 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn get_user_id(state_manager: &AtomaStateManager, username: &str, hashed_password: &str) -> Result<Option<i64>, AtomaStateManagerError> {
-    ///    state_manager.get_user_id_by_username_password(username, hashed_password).await
+    /// async fn get_user_id(state_manager: &AtomaStateManager, email: &str, hashed_password: &str) -> Result<Option<i64>, AtomaStateManagerError> {
+    ///    state_manager.get_user_id_by_email_password(email, hashed_password).await
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_user_id_by_username_password(
+    pub async fn get_user_id_by_email_password(
         &self,
-        username: &str,
+        email: &str,
         hashed_password: &str,
     ) -> Result<Option<i64>> {
-        let user = sqlx::query("SELECT id FROM users WHERE username = $1 AND password_hash = $2")
-            .bind(username)
+        let user = sqlx::query("SELECT id FROM users WHERE email = $1 AND password_hash = $2")
+            .bind(email)
             .bind(hashed_password)
             .fetch_optional(&self.db)
             .await?;
@@ -3584,13 +3589,13 @@ impl AtomaState {
         Ok(user.map(|user| user.get("id")))
     }
 
-    /// Get the id of the user by username (register if not in the table yet).
+    /// Get the id of the user by email (register if not in the table yet).
     ///
-    /// This method queries the `users` table to get the user_id by username. If the user is not found, it will insert the user into the table.
+    /// This method queries the `users` table to get the user_id by email. If the user is not found, it will insert the user into the table.
     ///
     /// # Arguments
     ///
-    /// * `username` - The username of the user.
+    /// * `email` - The email of the user.
     ///
     /// # Returns
     ///
@@ -3608,13 +3613,13 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn oauth(state_manager: &AtomaStateManager, username: &str) -> Result<i64> {
-    ///    state_manager.oauth(username).await
+    /// async fn oauth(state_manager: &AtomaStateManager, email: &str) -> Result<i64> {
+    ///    state_manager.oauth(email).await
     /// }
     /// ```
-    pub async fn oauth(&self, username: &str) -> Result<i64> {
-        let user = sqlx::query("INSERT INTO users (username) VALUES ($1) ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username RETURNING id")
-                .bind(username)
+    pub async fn oauth(&self, email: &str) -> Result<i64> {
+        let user = sqlx::query("INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id")
+                .bind(email)
                 .fetch_one(&self.db).await?;
 
         Ok(user.get("id"))
@@ -4013,12 +4018,53 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip_all)]
     pub async fn get_user_profile(&self, user_id: i64) -> Result<UserProfile> {
-        let user = sqlx::query("SELECT username FROM users WHERE id = $1")
+        let user = sqlx::query("SELECT email, name FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(&self.db)
             .await?;
 
         UserProfile::from_row(&user).map_err(AtomaStateManagerError::from)
+    }
+
+    /// Set the user profile by user_id.
+    ///
+    /// This method sets the user profile by user_id from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `user_profile` - The profile of the user.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result containing either:
+    ///   - `Ok(())`: The user profile for the user_id was set
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_profile(state_manager: &AtomaStateManager, user_id: i64, user_profile:UserProfile) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.set_user_profile(user_id, user_profile).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn set_user_profile(&self, user_id: i64, user_profile: UserProfile) -> Result<()> {
+        sqlx::query("UPDATE users SET email = $2, name = $3 WHERE id = $1")
+            .bind(user_id)
+            .bind(user_profile.email)
+            .bind(user_profile.name)
+            .execute(&self.db)
+            .await?;
+        Ok(())
     }
 
     /// Get latency performance for the last `last_hours` hours.

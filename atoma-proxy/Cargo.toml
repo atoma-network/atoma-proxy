@@ -59,8 +59,10 @@ tracing-subscriber = { workspace = true, features = [
     "time",
 ] }
 tracing.workspace = true
+tracing-loki = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras", "preserve_path_order"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+url = { workspace = true }
 
 [features]
 google-oauth = ["atoma-auth/google-oauth", "atoma-proxy-service/google-oauth"]

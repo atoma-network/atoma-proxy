@@ -7,8 +7,9 @@ use opentelemetry_sdk::{
     trace::{self as sdktrace, RandomIdGenerator, Sampler},
     Resource,
 };
+use url::Url;
 
-use std::path::Path;
+use std::{path::Path, process};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{
     non_blocking,
@@ -27,9 +28,10 @@ const LOG_FILE: &str = "atoma-proxy-service.log";
 // Default Grafana OTLP endpoint if not specified in environment
 
 const DEFAULT_OTLP_ENDPOINT: &str = "http://otel-collector:4317";
+const DEFAULT_LOKI_ENDPOINT: &str = "http://loki:3100";
 
 static RESOURCE: Lazy<Resource> =
-    Lazy::new(|| Resource::new(vec![KeyValue::new("service.name", "atoma-proxy")]));
+    Lazy::new(|| Resource::new(vec![KeyValue::new("service_name", "atoma-proxy")]));
 
 /// Initialize metrics with OpenTelemetry SDK
 fn init_metrics(otlp_endpoint: &str) -> sdkmetrics::SdkMeterProvider {
@@ -78,12 +80,23 @@ fn init_traces(otlp_endpoint: &str) -> Result<sdktrace::Tracer> {
 pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerGuard)> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+    let loki_endpoint =
+        std::env::var("LOKI_ENDPOINT").unwrap_or_else(|_| DEFAULT_LOKI_ENDPOINT.to_string());
     // Create logs directory if it doesn't exist
     std::fs::create_dir_all(&log_dir).context("Failed to create logs directory")?;
 
     // Set up metrics
     let metrics_provider = init_metrics(&otlp_endpoint);
     global::set_meter_provider(metrics_provider);
+
+    let (layer, task) = tracing_loki::builder()
+        .label("service_name", "atoma-proxy")?
+        .extra_field("pid", format!("{}", process::id()))?
+        .build_url(Url::parse(&loki_endpoint).unwrap())?;
+
+    // The background task needs to be spawned so the logs actually get
+    // delivered.
+    tokio::spawn(task);
 
     // Set up file appender with rotation
     let file_appender = RollingFileAppender::new(Rotation::DAILY, log_dir, LOG_FILE);
@@ -101,7 +114,7 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
         .with_endpoint(otlp_endpoint)
         .build()?;
 
-    let _ = opentelemetry_sdk::logs::LoggerProvider::builder()
+    let _logger = opentelemetry_sdk::logs::LoggerProvider::builder()
         .with_batch_exporter(logs_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_resource(RESOURCE.clone())
         .build();
@@ -139,6 +152,7 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
         .with(console_layer)
         .with(file_layer)
         .with(opentelemetry_layer)
+        .with(layer)
         .try_init()
         .context("Failed to set global default subscriber")?;
 

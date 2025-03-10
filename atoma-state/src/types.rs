@@ -30,9 +30,18 @@ pub struct RevokeApiTokenRequest {
 
 /// Request payload for user authentication
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
-pub struct AuthRequest {
+pub struct RegisterAuthRequest {
     /// The user's unique identifier
-    pub username: String,
+    pub user_profile: UserProfile,
+    /// The user's password
+    pub password: String,
+}
+
+/// Request payload for user authentication
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct LoginAuthRequest {
+    /// The user's unique identifier
+    pub email: String,
     /// The user's password
     pub password: String,
 }
@@ -132,10 +141,12 @@ pub struct ComputedUnitsProcessedResponse {
 
 /// Represents a user profile
 /// This struct is used to represent the response for the get_user_profile endpoint.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct UserProfile {
-    /// Username of the user
-    pub username: String,
+    /// The user's email
+    pub email: String,
+    /// The user's name
+    pub name: String,
 }
 
 /// Represents a latency response.
@@ -760,28 +771,28 @@ pub enum AtomaAtomaStateManagerEvent {
     },
     /// Registers a new user with a password
     RegisterUserWithPassword {
-        /// The username of the user
-        username: String,
+        /// The email of the user
+        user_profile: UserProfile,
         /// The password of the user
         password: String,
         /// Channel to send back the user ID
         /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
     },
-    /// Retrieves the user ID by username and password
-    GetUserIdByUsernamePassword {
-        /// The username of the user
-        username: String,
+    /// Retrieves the user ID by email and password
+    GetUserIdByEmailPassword {
+        /// The email of the user
+        email: String,
         /// The password of the user
         password: String,
         /// Channel to send back the user ID
         /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
     },
-    /// Retrieves the user ID by oauth username
+    /// Retrieves the user ID by oauth email
     OAuth {
-        /// The username of the user
-        username: String,
+        /// The email of the user
+        email: String,
         /// The result sender to send back the user ID
         result_sender: oneshot::Sender<Result<i64>>,
     },

@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
     let (_file_guard, _stdout_guard) =
         telemetry::setup_logging("./logs").context("Failed to setup logging")?;
 
-    info!(event = "startup", "Starting Atoma Proxy Service...");
+    info!("Starting Atoma Proxy Service...");
 
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
