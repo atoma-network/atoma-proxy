@@ -334,22 +334,22 @@ pub struct NodeMetricsCollector {
     /// Number of chat completion requests in waiting state
     chat_completions_num_waiting_requests: GaugeVec,
 
-    /// Processing latency for embedding operations
+    /// Queue duration for embeddings
     embeddings_queue_duration: GaugeVec,
 
-    /// Number of currently running embedding requests
+    /// Inference duration for embeddings
     embeddings_inference_duration: GaugeVec,
 
-    /// Number of embedding requests in waiting state
+    /// Input length for embeddings
     embeddings_input_length: GaugeVec,
 
-    /// The batch size of the embedding requests
+    /// Batch size for embeddings
     embeddings_batch_size: GaugeVec,
 
-    /// The number of tokens in the current batch of embedding requests
+    /// Batch tokens for embeddings
     embeddings_batch_tokens: GaugeVec,
 
-    /// Processing latency for image generation
+    /// Latency for image generation
     image_generation_latency: GaugeVec,
 
     /// Number of currently running image generation requests
@@ -900,14 +900,16 @@ impl NodeMetricsCollector {
         registry: &Registry,
     ) -> Result<(GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec)> {
         let embeddings_queue_duration_opts =
-            Opts::new("embeddings_queue_duration", "Latency for embeddings");
+            Opts::new("embeddings_queue_duration", "Queue duration for embeddings");
         let embeddings_queue_duration = GaugeVec::new(
             embeddings_queue_duration_opts,
             &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
         )
         .expect("Failed to create gauge");
-        let embeddings_inference_duration_opts =
-            Opts::new("embeddings_inference_duration", "Latency for embeddings");
+        let embeddings_inference_duration_opts = Opts::new(
+            "embeddings_inference_duration",
+            "Inference duration for embeddings",
+        );
         let embeddings_inference_duration = GaugeVec::new(
             embeddings_inference_duration_opts,
             &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
@@ -1021,7 +1023,15 @@ impl NodeMetricsCollector {
     /// Creates a Prometheus query string for embeddings metrics.
     ///
     /// This function generates a Prometheus query string that retrieves the top `top_k` nodes
-    /// with the lowest embeddings latency for a given model.
+    /// with the lowest embeddings processing time for a given model. The query uses a scoring formula
+    /// that considers:
+    ///
+    /// - Queue duration: Time spent waiting in queue
+    /// - Inference duration: Time spent on actual embedding computation
+    /// - Batch efficiency: Penalizes nodes processing fewer tokens per batch
+    ///
+    /// The formula multiplies the total processing time (queue + inference) by a batch efficiency factor
+    /// that increases the score for nodes with lower tokens-per-batch efficiency.
     ///
     /// # Arguments
     ///
