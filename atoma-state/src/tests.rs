@@ -1390,14 +1390,14 @@ fn test_store_chat_completions_metrics() {
 
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&labels)
             .get(),
         75.5_f64
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_usage()
+            .get_chat_completions_cpu_kv_cache_usage()
             .with_label_values(&labels)
             .get(),
         45.2_f64
@@ -1470,14 +1470,14 @@ fn test_store_chat_completions_metrics_multiple_models() {
     let labels_1 = [model_1, &node_small_id_1.to_string()];
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&labels_1)
             .get(),
         75.5_f64
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_usage()
+            .get_chat_completions_cpu_kv_cache_usage()
             .with_label_values(&labels_1)
             .get(),
         45.2_f64
@@ -1515,14 +1515,14 @@ fn test_store_chat_completions_metrics_multiple_models() {
     let labels_2 = [model_2, &node_small_id_2.to_string()];
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&labels_2)
             .get(),
         60.0_f64
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_usage()
+            .get_chat_completions_cpu_kv_cache_usage()
             .with_label_values(&labels_2)
             .get(),
         30.0_f64
@@ -1565,8 +1565,11 @@ fn test_store_embeddings_metrics() {
 
     // Create test data
     let embeddings = EmbeddingsMetrics {
-        embeddings_latency: 0.25,
-        num_running_requests: 5,
+        embeddings_queue_duration: 0.25,
+        embeddings_inference_duration: 0.15,
+        embeddings_input_length: 1000,
+        embeddings_batch_size: 10,
+        embeddings_batch_tokens: 1000,
     };
     let model = "text-embedding-ada-002";
     let node_small_id = 42;
@@ -1579,17 +1582,38 @@ fn test_store_embeddings_metrics() {
 
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&labels)
             .get(),
         0.25
     );
     assert_eq!(
         collector
-            .get_embeddings_num_running_requests()
+            .get_embeddings_inference_duration()
             .with_label_values(&labels)
             .get(),
-        5.0
+        0.15
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&labels)
+            .get(),
+        1000.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&labels)
+            .get(),
+        10.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_tokens()
+            .with_label_values(&labels)
+            .get(),
+        1000.0
     );
 }
 
@@ -1600,16 +1624,22 @@ fn test_store_embeddings_metrics_multiple_models() {
 
     // Test data for first model
     let embeddings_1 = EmbeddingsMetrics {
-        embeddings_latency: 0.25,
-        num_running_requests: 5,
+        embeddings_queue_duration: 0.25,
+        embeddings_inference_duration: 0.15,
+        embeddings_input_length: 1000,
+        embeddings_batch_size: 10,
+        embeddings_batch_tokens: 1000,
     };
     let model_1 = "text-embedding-ada-002";
     let node_small_id_1 = 42;
 
     // Test data for second model
     let embeddings_2 = EmbeddingsMetrics {
-        embeddings_latency: 0.15,
-        num_running_requests: 2,
+        embeddings_queue_duration: 0.15,
+        embeddings_inference_duration: 0.05,
+        embeddings_input_length: 500,
+        embeddings_batch_size: 5,
+        embeddings_batch_tokens: 500,
     };
     let model_2 = "text-embedding-3-small";
     let node_small_id_2 = 43;
@@ -1622,34 +1652,68 @@ fn test_store_embeddings_metrics_multiple_models() {
     let labels_1 = [model_1, &node_small_id_1.to_string()];
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&labels_1)
             .get(),
         0.25
     );
     assert_eq!(
         collector
-            .get_embeddings_num_running_requests()
+            .get_embeddings_inference_duration()
             .with_label_values(&labels_1)
             .get(),
-        5.0
+        0.15
     );
-
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&labels_1)
+            .get(),
+        1000.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&labels_1)
+            .get(),
+        10.0
+    );
     // Verify metrics for second model
     let labels_2 = [model_2, &node_small_id_2.to_string()];
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&labels_2)
             .get(),
         0.15
     );
     assert_eq!(
         collector
-            .get_embeddings_num_running_requests()
+            .get_embeddings_inference_duration()
             .with_label_values(&labels_2)
             .get(),
-        2.0
+        0.05
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&labels_2)
+            .get(),
+        500.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&labels_2)
+            .get(),
+        5.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_tokens()
+            .with_label_values(&labels_2)
+            .get(),
+        500.0
     );
 }
 
@@ -1901,8 +1965,11 @@ fn test_reset_metrics() {
         num_waiting_requests: 2,
     };
     let embeddings = EmbeddingsMetrics {
-        embeddings_latency: 0.25,
-        num_running_requests: 5,
+        embeddings_queue_duration: 0.25,
+        embeddings_inference_duration: 0.15,
+        embeddings_input_length: 1000,
+        embeddings_batch_size: 10,
+        embeddings_batch_tokens: 1000,
     };
     let image_generation = ImageGenerationMetrics {
         image_generation_latency: 1.5,
@@ -1921,17 +1988,24 @@ fn test_reset_metrics() {
 
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&chat_labels)
             .get(),
         75.5
     );
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&embeddings_labels)
             .get(),
         0.25
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_inference_duration()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.15
     );
     assert_eq!(
         collector
@@ -1940,21 +2014,34 @@ fn test_reset_metrics() {
             .get(),
         1.5
     );
-
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        1000.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        10.0
+    );
     // Reset all metrics
     collector.reset_metrics();
 
     // Verify all metrics were reset to their default values
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&chat_labels)
             .get(),
         0.0
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_usage()
+            .get_chat_completions_cpu_kv_cache_usage()
             .with_label_values(&chat_labels)
             .get(),
         0.0
@@ -1989,14 +2076,35 @@ fn test_reset_metrics() {
     );
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&embeddings_labels)
             .get(),
         0.0
     );
     assert_eq!(
         collector
-            .get_embeddings_num_running_requests()
+            .get_embeddings_inference_duration()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        0.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_tokens()
             .with_label_values(&embeddings_labels)
             .get(),
         0.0
@@ -2044,7 +2152,11 @@ fn test_store_metrics() {
     model_metrics.insert(
         "text-embedding-ada-002".to_string(),
         ModelMetrics::Embeddings(EmbeddingsMetrics {
-            embeddings_latency: 0.25,
+            embeddings_queue_duration: 0.25,
+            embeddings_inference_duration: 0.15,
+            embeddings_input_length: 1000,
+            embeddings_batch_size: 10,
+            embeddings_batch_tokens: 1000,
             num_running_requests: 5,
         }),
     );
@@ -2073,14 +2185,14 @@ fn test_store_metrics() {
     // Verify chat completions metrics
     assert_eq!(
         collector
-            .get_chat_completions_gpu_usage()
+            .get_chat_completions_gpu_kv_cache_usage()
             .with_label_values(&chat_labels)
             .get(),
         75.5
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_usage()
+            .get_chat_completions_cpu_kv_cache_usage()
             .with_label_values(&chat_labels)
             .get(),
         45.2
@@ -2117,19 +2229,39 @@ fn test_store_metrics() {
     // Verify embeddings metrics
     assert_eq!(
         collector
-            .get_embeddings_latency()
+            .get_embeddings_queue_duration()
             .with_label_values(&embeddings_labels)
             .get(),
         0.25
     );
     assert_eq!(
         collector
-            .get_embeddings_num_running_requests()
+            .get_embeddings_inference_duration()
             .with_label_values(&embeddings_labels)
             .get(),
-        5.0
+        0.15
     );
-
+    assert_eq!(
+        collector
+            .get_embeddings_input_length()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        1000.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_size()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        10.0
+    );
+    assert_eq!(
+        collector
+            .get_embeddings_batch_tokens()
+            .with_label_values(&embeddings_labels)
+            .get(),
+        1000.0
+    );
     // Verify image generation metrics
     assert_eq!(
         collector

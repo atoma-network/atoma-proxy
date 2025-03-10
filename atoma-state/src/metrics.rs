@@ -317,10 +317,10 @@ pub struct NodeMetricsCollector {
     registry: Registry,
 
     /// GPU KV cache usage percentage for chat completions
-    chat_completions_gpu_usage: GaugeVec,
+    chat_completions_gpu_kv_cache_usage: GaugeVec,
 
     /// CPU KV cache usage percentage for chat completions
-    chat_completions_cpu_usage: GaugeVec,
+    chat_completions_cpu_kv_cache_usage: GaugeVec,
 
     /// Time to first token for chat completions
     chat_completions_ttft: GaugeVec,
@@ -335,10 +335,19 @@ pub struct NodeMetricsCollector {
     chat_completions_num_waiting_requests: GaugeVec,
 
     /// Processing latency for embedding operations
-    embeddings_latency: GaugeVec,
+    embeddings_queue_duration: GaugeVec,
 
     /// Number of currently running embedding requests
-    embeddings_num_running_requests: GaugeVec,
+    embeddings_inference_duration: GaugeVec,
+
+    /// Number of embedding requests in waiting state
+    embeddings_input_length: GaugeVec,
+
+    /// The batch size of the embedding requests
+    embeddings_batch_size: GaugeVec,
+
+    /// The number of tokens in the current batch of embedding requests
+    embeddings_batch_tokens: GaugeVec,
 
     /// Processing latency for image generation
     image_generation_latency: GaugeVec,
@@ -358,28 +367,36 @@ impl NodeMetricsCollector {
         let registry = Registry::new();
 
         let (
-            chat_completions_gpu_usage,
-            chat_completions_cpu_usage,
+            chat_completions_gpu_kv_cache_usage,
+            chat_completions_cpu_kv_cache_usage,
             chat_completions_ttft,
             chat_completions_tpot,
             chat_completions_num_running_requests,
             chat_completions_num_waiting_requests,
         ) = Self::chat_completions_registry(&registry)?;
-        let (embeddings_latency, embeddings_num_running_requests) =
-            Self::embeddings_registry(&registry)?;
+        let (
+            embeddings_queue_duration,
+            embeddings_inference_duration,
+            embeddings_input_length,
+            embeddings_batch_size,
+            embeddings_batch_tokens,
+        ) = Self::embeddings_registry(&registry)?;
         let (image_generation_latency, image_generation_num_running_requests) =
             Self::image_generation_registry(&registry)?;
 
         Ok(Self {
             registry,
-            chat_completions_gpu_usage,
-            chat_completions_cpu_usage,
+            chat_completions_gpu_kv_cache_usage,
+            chat_completions_cpu_kv_cache_usage,
             chat_completions_ttft,
             chat_completions_tpot,
             chat_completions_num_running_requests,
             chat_completions_num_waiting_requests,
-            embeddings_latency,
-            embeddings_num_running_requests,
+            embeddings_queue_duration,
+            embeddings_inference_duration,
+            embeddings_input_length,
+            embeddings_batch_size,
+            embeddings_batch_tokens,
             image_generation_latency,
             image_generation_num_running_requests,
         })
@@ -669,10 +686,10 @@ impl NodeMetricsCollector {
         model: &str,
         node_small_id: i64,
     ) {
-        self.chat_completions_gpu_usage
+        self.chat_completions_gpu_kv_cache_usage
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.gpu_kv_cache_usage_perc);
-        self.chat_completions_cpu_usage
+        self.chat_completions_cpu_kv_cache_usage
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.cpu_kv_cache_usage_perc);
         self.chat_completions_ttft
@@ -720,12 +737,21 @@ impl NodeMetricsCollector {
         model: &str,
         node_small_id: i64,
     ) {
-        self.embeddings_latency
+        self.embeddings_queue_duration
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(embeddings.embeddings_latency);
-        self.embeddings_num_running_requests
+            .set(embeddings.embeddings_queue_duration);
+        self.embeddings_inference_duration
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(f64::from(embeddings.num_running_requests));
+            .set(embeddings.embeddings_inference_duration);
+        self.embeddings_input_length
+            .with_label_values(&[model, node_small_id.to_string().as_str()])
+            .set(f64::from(embeddings.embeddings_input_length));
+        self.embeddings_batch_size
+            .with_label_values(&[model, node_small_id.to_string().as_str()])
+            .set(embeddings.embeddings_batch_size);
+        self.embeddings_batch_tokens
+            .with_label_values(&[model, node_small_id.to_string().as_str()])
+            .set(embeddings.embeddings_batch_tokens);
     }
 
     /// Stores image generation metrics for a specific model and node in the Prometheus registry.
@@ -793,18 +819,20 @@ impl NodeMetricsCollector {
     fn chat_completions_registry(
         registry: &Registry,
     ) -> Result<(GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec)> {
-        let gpu_usage_opts = Opts::new(
+        let gpu_kv_cache_usage_opts = Opts::new(
             "chat_gpu_kv_cache_usage_perc",
             "GPU KV cache usage percentage for chat completions",
         );
-        let gpu_usage = GaugeVec::new(gpu_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
-            .expect("Failed to create gauge");
-        let cpu_usage_opts = Opts::new(
+        let gpu_kv_cache_usage =
+            GaugeVec::new(gpu_kv_cache_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
+                .expect("Failed to create gauge");
+        let cpu_kv_cache_usage_opts = Opts::new(
             "chat_cpu_kv_cache_usage_perc",
             "CPU KV cache usage percentage for chat completions",
         );
-        let cpu_usage = GaugeVec::new(cpu_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
-            .expect("Failed to create gauge");
+        let cpu_kv_cache_usage =
+            GaugeVec::new(cpu_kv_cache_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
+                .expect("Failed to create gauge");
         let ttft_opts = Opts::new(
             "chat_time_to_first_token",
             "Time to first token for chat completions",
@@ -836,16 +864,16 @@ impl NodeMetricsCollector {
         )
         .expect("Failed to create gauge");
 
-        registry.register(Box::new(gpu_usage.clone()))?;
-        registry.register(Box::new(cpu_usage.clone()))?;
+        registry.register(Box::new(gpu_kv_cache_usage.clone()))?;
+        registry.register(Box::new(cpu_kv_cache_usage.clone()))?;
         registry.register(Box::new(ttft.clone()))?;
         registry.register(Box::new(tpot.clone()))?;
         registry.register(Box::new(num_running_requests.clone()))?;
         registry.register(Box::new(num_waiting_requests.clone()))?;
 
         Ok((
-            gpu_usage,
-            cpu_usage,
+            gpu_kv_cache_usage,
+            cpu_kv_cache_usage,
             ttft,
             tpot,
             num_running_requests,
@@ -868,25 +896,58 @@ impl NodeMetricsCollector {
     /// # Errors
     ///
     /// Returns an error if the metrics cannot be registered.
-    fn embeddings_registry(registry: &Registry) -> Result<(GaugeVec, GaugeVec)> {
-        let embeddings_latency_opts = Opts::new("embeddings_latency", "Latency for embeddings");
-        let embeddings_latency =
-            GaugeVec::new(embeddings_latency_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
-                .expect("Failed to create gauge");
-        let num_running_requests_opts = Opts::new(
-            "embeddings_num_running_requests",
-            "Number of running requests for embeddings",
-        );
-        let num_running_requests = GaugeVec::new(
-            num_running_requests_opts,
+    fn embeddings_registry(
+        registry: &Registry,
+    ) -> Result<(GaugeVec, GaugeVec, GaugeVec, GaugeVec, GaugeVec)> {
+        let embeddings_queue_duration_opts =
+            Opts::new("embeddings_queue_duration", "Latency for embeddings");
+        let embeddings_queue_duration = GaugeVec::new(
+            embeddings_queue_duration_opts,
+            &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
+        )
+        .expect("Failed to create gauge");
+        let embeddings_inference_duration_opts =
+            Opts::new("embeddings_inference_duration", "Latency for embeddings");
+        let embeddings_inference_duration = GaugeVec::new(
+            embeddings_inference_duration_opts,
+            &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
+        )
+        .expect("Failed to create gauge");
+        let embeddings_input_length_opts =
+            Opts::new("embeddings_input_length", "Input length for embeddings");
+        let embeddings_input_length = GaugeVec::new(
+            embeddings_input_length_opts,
+            &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
+        )
+        .expect("Failed to create gauge");
+        let embeddings_batch_size_opts =
+            Opts::new("embeddings_batch_size", "Batch size for embeddings");
+        let embeddings_batch_size = GaugeVec::new(
+            embeddings_batch_size_opts,
+            &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
+        )
+        .expect("Failed to create gauge");
+        let embeddings_batch_tokens_opts =
+            Opts::new("embeddings_batch_tokens", "Batch tokens for embeddings");
+        let embeddings_batch_tokens = GaugeVec::new(
+            embeddings_batch_tokens_opts,
             &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
         )
         .expect("Failed to create gauge");
 
-        registry.register(Box::new(embeddings_latency.clone()))?;
-        registry.register(Box::new(num_running_requests.clone()))?;
+        registry.register(Box::new(embeddings_queue_duration.clone()))?;
+        registry.register(Box::new(embeddings_inference_duration.clone()))?;
+        registry.register(Box::new(embeddings_input_length.clone()))?;
+        registry.register(Box::new(embeddings_batch_size.clone()))?;
+        registry.register(Box::new(embeddings_batch_tokens.clone()))?;
 
-        Ok((embeddings_latency, num_running_requests))
+        Ok((
+            embeddings_queue_duration,
+            embeddings_inference_duration,
+            embeddings_input_length,
+            embeddings_batch_size,
+            embeddings_batch_tokens,
+        ))
     }
 
     /// Creates and registers the image generation metrics in the Prometheus registry.
@@ -973,7 +1034,12 @@ impl NodeMetricsCollector {
     fn embeddings_query(model: &str, top_k: usize) -> String {
         format!(
             r#"topk({top_k},
-                -1 * (embeddings_latency{{model="{model}"}})
+                -1 * (
+                    (embeddings_queue_duration{{model="{model}"}} + 
+                    embeddings_inference_duration{{model="{model}"}}) * 
+                    (1 + (embeddings_batch_tokens{{model="{model}"}} / 
+                          max(embeddings_batch_size{{model="{model}"}}, 1) / 1000000))
+                )
             )"#,
         )
     }
@@ -1003,28 +1069,31 @@ impl NodeMetricsCollector {
 
     /// Resets all the metrics in the Prometheus registry.
     pub fn reset_metrics(&self) {
-        self.chat_completions_gpu_usage.reset();
-        self.chat_completions_cpu_usage.reset();
+        self.chat_completions_gpu_kv_cache_usage.reset();
+        self.chat_completions_cpu_kv_cache_usage.reset();
         self.chat_completions_ttft.reset();
         self.chat_completions_tpot.reset();
         self.chat_completions_num_running_requests.reset();
         self.chat_completions_num_waiting_requests.reset();
-        self.embeddings_latency.reset();
-        self.embeddings_num_running_requests.reset();
+        self.embeddings_queue_duration.reset();
+        self.embeddings_inference_duration.reset();
+        self.embeddings_input_length.reset();
+        self.embeddings_batch_size.reset();
+        self.embeddings_batch_tokens.reset();
         self.image_generation_latency.reset();
         self.image_generation_num_running_requests.reset();
     }
 
     #[cfg(test)]
     #[must_use]
-    pub const fn get_chat_completions_gpu_usage(&self) -> &GaugeVec {
-        &self.chat_completions_gpu_usage
+    pub const fn get_chat_completions_gpu_kv_cache_usage(&self) -> &GaugeVec {
+        &self.chat_completions_gpu_kv_cache_usage
     }
 
     #[cfg(test)]
     #[must_use]
-    pub const fn get_chat_completions_cpu_usage(&self) -> &GaugeVec {
-        &self.chat_completions_cpu_usage
+    pub const fn get_chat_completions_cpu_kv_cache_usage(&self) -> &GaugeVec {
+        &self.chat_completions_cpu_kv_cache_usage
     }
 
     #[cfg(test)]
@@ -1053,14 +1122,32 @@ impl NodeMetricsCollector {
 
     #[cfg(test)]
     #[must_use]
-    pub const fn get_embeddings_latency(&self) -> &GaugeVec {
-        &self.embeddings_latency
+    pub const fn get_embeddings_queue_duration(&self) -> &GaugeVec {
+        &self.embeddings_queue_duration
     }
 
     #[cfg(test)]
     #[must_use]
-    pub const fn get_embeddings_num_running_requests(&self) -> &GaugeVec {
-        &self.embeddings_num_running_requests
+    pub const fn get_embeddings_inference_duration(&self) -> &GaugeVec {
+        &self.embeddings_inference_duration
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_embeddings_input_length(&self) -> &GaugeVec {
+        &self.embeddings_input_length
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_embeddings_batch_size(&self) -> &GaugeVec {
+        &self.embeddings_batch_size
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn get_embeddings_batch_tokens(&self) -> &GaugeVec {
+        &self.embeddings_batch_tokens
     }
 
     #[cfg(test)]
