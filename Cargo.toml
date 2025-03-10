@@ -61,7 +61,7 @@ sui-sdk = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag 
 sui-sdk-types = "0.0.2"
 thiserror = "2.0.12"
 tokenizers = "0.21.0"
-tokio = "1.41.0"
+tokio = "1.44.0"
 toml = "0.8.19"
 tonic = "0.12"
 tower = "0.5.1"
