@@ -1568,9 +1568,9 @@ fn test_store_embeddings_metrics() {
     let embeddings = EmbeddingsMetrics {
         embeddings_queue_duration: 0.25,
         embeddings_inference_duration: 0.15,
-        embeddings_input_length: 1000,
-        embeddings_batch_size: 10,
-        embeddings_batch_tokens: 1000,
+        embeddings_input_length: 1000.0,
+        embeddings_batch_size: 10.0,
+        embeddings_batch_tokens: 1000.0,
     };
     let model = "text-embedding-ada-002";
     let node_small_id = 42;
@@ -1627,9 +1627,9 @@ fn test_store_embeddings_metrics_multiple_models() {
     let embeddings_1 = EmbeddingsMetrics {
         embeddings_queue_duration: 0.25,
         embeddings_inference_duration: 0.15,
-        embeddings_input_length: 1000,
-        embeddings_batch_size: 10,
-        embeddings_batch_tokens: 1000,
+        embeddings_input_length: 1000.0,
+        embeddings_batch_size: 10.0,
+        embeddings_batch_tokens: 1000.0,
     };
     let model_1 = "text-embedding-ada-002";
     let node_small_id_1 = 42;
@@ -1638,9 +1638,9 @@ fn test_store_embeddings_metrics_multiple_models() {
     let embeddings_2 = EmbeddingsMetrics {
         embeddings_queue_duration: 0.15,
         embeddings_inference_duration: 0.05,
-        embeddings_input_length: 500,
-        embeddings_batch_size: 5,
-        embeddings_batch_tokens: 500,
+        embeddings_input_length: 500.0,
+        embeddings_batch_size: 5.0,
+        embeddings_batch_tokens: 500.0,
     };
     let model_2 = "text-embedding-3-small";
     let node_small_id_2 = 43;
@@ -1968,9 +1968,9 @@ fn test_reset_metrics() {
     let embeddings = EmbeddingsMetrics {
         embeddings_queue_duration: 0.25,
         embeddings_inference_duration: 0.15,
-        embeddings_input_length: 1000,
-        embeddings_batch_size: 10,
-        embeddings_batch_tokens: 1000,
+        embeddings_input_length: 1000.0,
+        embeddings_batch_size: 10.0,
+        embeddings_batch_tokens: 1000.0,
     };
     let image_generation = ImageGenerationMetrics {
         image_generation_latency: 1.5,
@@ -2155,10 +2155,9 @@ fn test_store_metrics() {
         ModelMetrics::Embeddings(EmbeddingsMetrics {
             embeddings_queue_duration: 0.25,
             embeddings_inference_duration: 0.15,
-            embeddings_input_length: 1000,
-            embeddings_batch_size: 10,
-            embeddings_batch_tokens: 1000,
-            num_running_requests: 5,
+            embeddings_input_length: 1000.0,
+            embeddings_batch_size: 10.0,
+            embeddings_batch_tokens: 1000.0,
         }),
     );
 

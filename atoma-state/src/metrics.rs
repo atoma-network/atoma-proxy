@@ -745,7 +745,7 @@ impl NodeMetricsCollector {
             .set(embeddings.embeddings_inference_duration);
         self.embeddings_input_length
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(f64::from(embeddings.embeddings_input_length));
+            .set(embeddings.embeddings_input_length);
         self.embeddings_batch_size
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(embeddings.embeddings_batch_size);
