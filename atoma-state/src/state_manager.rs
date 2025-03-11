@@ -3982,10 +3982,11 @@ impl AtomaState {
     pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
         let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
             .bind(user_id)
-            .fetch_one(&self.db)
-            .await?;
+            .fetch_optional(&self.db)
+            .await?
+            .map_or(0, |row| row.get::<i64, _>("usdc_balance"));
 
-        Ok(balance.get::<i64, _>("usdc_balance"))
+        Ok(balance)
     }
 
     /// Get the user profile by user_id.
