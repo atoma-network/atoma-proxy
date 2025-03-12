@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 atoma-p2p = { workspace = true }
 atoma-sui = { workspace = true }
+atoma-utils = { workspace = true }
+blake3 = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
 dcap-qvl = { workspace = true }

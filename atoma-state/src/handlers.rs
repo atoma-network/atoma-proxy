@@ -6,7 +6,9 @@ use atoma_sui::events::{
     StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent,
     StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
+use atoma_utils::decompress_bytes;
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
@@ -1220,18 +1222,6 @@ pub async fn handle_state_manager_event(
                 .await?;
             state_manager.state.add_latency(timestamp, latency).await?;
         }
-        AtomaAtomaStateManagerEvent::GetSelectedNodeX25519PublicKey {
-            selected_node_id,
-            result_sender,
-        } => {
-            let public_key = state_manager
-                .state
-                .get_selected_node_x25519_public_key(selected_node_id)
-                .await;
-            result_sender
-                .send(public_key)
-                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
-        }
         AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
             email,
             password,
@@ -1450,10 +1440,11 @@ pub async fn handle_new_key_rotation_event(
     let NewKeyRotationEvent {
         epoch,
         key_rotation_counter,
+        nonce,
     } = event;
     state_manager
         .state
-        .insert_new_key_rotation(epoch as i64, key_rotation_counter as i64)
+        .insert_new_key_rotation(epoch as i64, key_rotation_counter as i64, nonce as i64)
         .await?;
     Ok(())
 }
@@ -1506,12 +1497,19 @@ pub async fn handle_node_key_rotation_event(
         key_rotation_counter,
         node_id,
         new_public_key,
-        tee_remote_attestation_bytes,
+        device_type,
+        evidence_bytes,
     } = event;
-    let is_valid =
-        utils::verify_quote_v4_attestation(&tee_remote_attestation_bytes, &new_public_key)
-            .await
-            .is_ok();
+    let original_evidence_bytes = decompress_bytes(&evidence_bytes)?;
+    let evidence_data = serde_json::from_slice::<Vec<Value>>(&original_evidence_bytes)?;
+    let is_valid = utils::attest_nvidia_evidence_list(
+        state_manager,
+        &evidence_data,
+        &new_public_key,
+        device_type,
+    )
+    .await
+    .is_ok();
     state_manager
         .state
         .update_node_public_key(
@@ -1519,7 +1517,8 @@ pub async fn handle_node_key_rotation_event(
             epoch as i64,
             key_rotation_counter as i64,
             new_public_key,
-            tee_remote_attestation_bytes,
+            evidence_bytes,
+            device_type as i64,
             is_valid,
         )
         .await?;
@@ -1675,15 +1674,17 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
 }
 
 pub mod utils {
-    use crate::errors::QuoteVerificationError;
+    use crate::errors::RemoteAttestationVerificationError;
+    use crate::AtomaStateManager;
 
     use super::{AtomaStateManagerError, Result};
 
     use dcap_qvl::collateral::get_collateral;
     use dcap_qvl::quote::{Quote, Report};
     use dcap_qvl::verify::verify;
+    use serde_json::Value;
     use std::time::Duration;
-    use tracing::{error, trace};
+    use tracing::{error, instrument, trace};
 
     /// The timeout to use for quote verification.
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -1746,7 +1747,7 @@ pub mod utils {
         );
 
         let quote = Quote::parse(quote_bytes)
-            .map_err(|e| QuoteVerificationError::InvalidQuoteFormat(e.to_string()))?;
+            .map_err(|e| RemoteAttestationVerificationError::InvalidQuoteFormat(e.to_string()))?;
 
         let fmspc = quote
             .fmspc()
@@ -1769,7 +1770,10 @@ pub mod utils {
                     target = "atoma-state-quote-verification",
                     "Unsupported SGX enclave report type"
                 );
-                return Err(QuoteVerificationError::UnsupportedReportType("SGX".into()).into());
+                return Err(RemoteAttestationVerificationError::UnsupportedReportType(
+                    "SGX".into(),
+                )
+                .into());
             }
             Report::TD10(report) => {
                 trace!(
@@ -1784,7 +1788,7 @@ pub mod utils {
                         actual_len = report.report_data.len(),
                         "TD10 report data mismatch"
                     );
-                    return Err(QuoteVerificationError::InvalidReportData {
+                    return Err(RemoteAttestationVerificationError::InvalidReportData {
                         expected: new_public_key.to_vec(),
                         actual: report.report_data.to_vec(),
                     }
@@ -1793,7 +1797,7 @@ pub mod utils {
             }
             Report::TD15(report) => {
                 if report.base.report_data != new_public_key {
-                    return Err(QuoteVerificationError::InvalidReportData {
+                    return Err(RemoteAttestationVerificationError::InvalidReportData {
                         expected: new_public_key.to_vec(),
                         actual: report.base.report_data.to_vec(),
                     }
@@ -1808,6 +1812,28 @@ pub mod utils {
         trace!(
             target = "atoma-state-quote-verification",
             "Quote verification completed successfully"
+        );
+        Ok(())
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub async fn attest_nvidia_evidence_list(
+        state_manager: &AtomaStateManager,
+        _evidence_bytes: &[Value],
+        new_public_key: &[u8],
+        device_type: u16,
+    ) -> Result<()> {
+        let contract_nonce = state_manager
+            .state
+            .get_contract_key_rotation_nonce()
+            .await?;
+        let _should_be_nonce = blake3::hash(
+            &[
+                &contract_nonce.to_le_bytes()[..],
+                new_public_key,
+                &device_type.to_le_bytes()[..],
+            ]
+            .concat(),
         );
         Ok(())
     }

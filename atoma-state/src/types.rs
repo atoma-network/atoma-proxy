@@ -761,14 +761,6 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Latency in seconds
         latency: f64,
     },
-    /// Retrieves the X25519 public key for a selected node
-    GetSelectedNodeX25519PublicKey {
-        /// Unique small integer identifier for the node
-        selected_node_id: i64,
-        /// Channel to send back the X25519 public key
-        /// Returns Ok(Option<Vec<u8>>) with the public key or an error if the query fails
-        result_sender: oneshot::Sender<Result<Option<Vec<u8>>>>,
-    },
     /// Registers a new user with a password
     RegisterUserWithPassword {
         /// The email of the user

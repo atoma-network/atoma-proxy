@@ -22,7 +22,7 @@ pub enum MetricsServiceError {
 }
 
 #[derive(Error, Debug)]
-pub enum QuoteVerificationError {
+pub enum RemoteAttestationVerificationError {
     #[error("Invalid quote format: {0}")]
     InvalidQuoteFormat(String),
 
@@ -37,6 +37,9 @@ pub enum QuoteVerificationError {
 
     #[error("Verification failed: {0}")]
     VerificationFailed(String),
+
+    #[error("Invalid nonce: {0}")]
+    InvalidNonce(String),
 }
 
 #[derive(Error, Debug)]
@@ -84,5 +87,7 @@ pub enum AtomaStateManagerError {
     #[error("URL is not valid: {0}")]
     InvalidUrl(String),
     #[error("{0}")]
-    QuoteVerificationError(#[from] QuoteVerificationError),
+    RemoteAttestationVerificationError(#[from] RemoteAttestationVerificationError),
+    #[error("Decompression error: {0}")]
+    DecompressionError(#[from] flate2::DecompressError),
 }

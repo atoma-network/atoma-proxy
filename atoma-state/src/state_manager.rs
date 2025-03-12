@@ -324,9 +324,18 @@ impl AtomaState {
         user_id: i64,
         is_confidential: bool,
     ) -> Result<Option<Stack>> {
-        // TODO: filter also by security level and other constraints
         let mut query = String::from(
             r"
+            WITH latest_key_rotation AS (
+                SELECT max(key_rotation_counter) as max_krc FROM key_rotations
+            ),
+            valid_nodes AS (
+                SELECT DISTINCT node_small_id
+                FROM node_public_keys npk, latest_key_rotation
+                WHERE npk.key_rotation_counter >= latest_key_rotation.max_krc
+                GROUP BY node_small_id
+                HAVING bool_and(npk.is_valid) = true
+            ),
             WITH selected_stack AS (
                 SELECT stacks.stack_small_id
                 FROM stacks
@@ -334,8 +343,10 @@ impl AtomaState {
         );
 
         if is_confidential {
-            query.push_str(r"
-                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.node_small_id");
+            query.push_str(
+                r"
+                INNER JOIN valid_nodes ON valid_nodes.node_small_id = stacks.node_small_id",
+            );
         }
 
         query.push_str(
@@ -348,8 +359,7 @@ impl AtomaState {
         if is_confidential {
             query.push_str(
                 r"
-                AND tasks.security_level = 1
-                AND node_public_keys.is_valid = true",
+                AND tasks.security_level = 1",
             );
         }
 
@@ -466,6 +476,13 @@ impl AtomaState {
                 ORDER BY key_rotation_counter DESC
                 LIMIT 1
             )
+            valid_nodes AS (
+                SELECT DISTINCT npk.node_small_id
+                FROM node_public_keys npk
+                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
+                GROUP BY npk.node_small_id
+                HAVING bool_and(npk.is_valid) = true
+            )
             SELECT tasks.task_small_id, node_subscriptions.price_per_one_million_compute_units,
                 node_subscriptions.max_num_compute_units, node_subscriptions.node_small_id
             FROM tasks
@@ -473,9 +490,10 @@ impl AtomaState {
         );
 
         if is_confidential {
-            query.push_str(r"
-            INNER JOIN node_public_keys ON node_public_keys.node_small_id = node_subscriptions.node_small_id
-            INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter");
+            query.push_str(
+                r"
+            INNER JOIN valid_nodes ON valid_nodes.node_small_id = node_subscriptions.node_small_id",
+            );
         }
 
         query.push_str(
@@ -488,8 +506,7 @@ impl AtomaState {
         if is_confidential {
             query.push_str(
                 r"
-            AND tasks.security_level = 1
-            AND node_public_keys.is_valid = true",
+            AND tasks.security_level = 1",
             );
         }
 
@@ -569,17 +586,29 @@ impl AtomaState {
     ) -> Result<Option<NodePublicKey>> {
         let node = sqlx::query(
             r"
-            SELECT node_public_keys.public_key as public_key, node_public_keys.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
-                FROM node_public_keys
-                INNER JOIN stacks ON stacks.selected_node_id = node_public_keys.node_small_id
-                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
-                WHERE tasks.model_name = $1
-                AND tasks.security_level = 1
-                AND tasks.is_deprecated = false
-                AND stacks.num_compute_units - stacks.already_computed_units >= $2
-                AND node_public_keys.is_valid = true
-                ORDER BY stacks.price_per_one_million_compute_units ASC
+            WITH latest_rotation AS (
+                SELECT key_rotation_counter
+                FROM key_rotations
+                ORDER BY key_rotation_counter DESC
                 LIMIT 1
+            ),
+            valid_nodes AS (
+                SELECT DISTINCT npk.node_small_id, npk.public_key
+                FROM node_public_keys npk
+                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
+                GROUP BY npk.node_small_id, npk.public_key
+                HAVING bool_and(npk.is_valid) = true
+            )
+            SELECT vn.public_key as public_key, vn.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
+            FROM valid_nodes vn
+            INNER JOIN stacks ON stacks.selected_node_id = vn.node_small_id
+            INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+            WHERE tasks.model_name = $1
+            AND tasks.security_level = 1
+            AND tasks.is_deprecated = false
+            AND stacks.num_compute_units - stacks.already_computed_units >= $2
+            ORDER BY stacks.price_per_one_million_compute_units ASC
+            LIMIT 1
             ",
         )
         .bind(model)
@@ -620,18 +649,23 @@ impl AtomaState {
                 FROM key_rotations
                 ORDER BY key_rotation_counter DESC
                 LIMIT 1
+            ),
+            valid_nodes AS (
+                SELECT npk.node_small_id
+                FROM node_public_keys npk
+                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
+                GROUP BY npk.node_small_id
+                HAVING bool_and(npk.is_valid) = true
             )
             SELECT EXISTS (
                 SELECT 1
                 FROM stacks
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
-                INNER JOIN node_public_keys ON node_public_keys.node_small_id = stacks.selected_node_id
-                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = node_public_keys.key_rotation_counter
+                INNER JOIN valid_nodes ON valid_nodes.node_small_id = stacks.selected_node_id
                 WHERE stacks.stack_small_id = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
                 AND tasks.security_level = 1
                 AND tasks.is_deprecated = false
-                AND node_public_keys.is_valid = true
                 AND stacks.in_settle_period = false
             )",
         )
@@ -684,7 +718,26 @@ impl AtomaState {
         node_small_id: i64,
     ) -> Result<Option<NodePublicKey>> {
         let node_public_key =
-            sqlx::query(r"SELECT node_small_id, public_key FROM node_public_keys WHERE node_small_id = $1 and is_valid = true")
+            sqlx::query(
+                r"
+                WITH latest_rotation AS (
+                    SELECT key_rotation_counter
+                    FROM key_rotations
+                    ORDER BY key_rotation_counter DESC
+                    LIMIT 1
+                ),
+                valid_node AS (
+                    SELECT npk.node_small_id, npk.public_key
+                    FROM node_public_keys npk
+                    INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
+                    WHERE npk.node_small_id = $1
+                    GROUP BY npk.node_small_id, npk.public_key
+                    HAVING bool_and(npk.is_valid) = true
+                )
+                SELECT node_small_id, public_key 
+                FROM valid_node
+                "
+            )
                 .bind(node_small_id)
                 .fetch_optional(&self.db)
                 .await?;
@@ -3261,17 +3314,53 @@ impl AtomaState {
         &self,
         epoch: i64,
         key_rotation_counter: i64,
+        nonce: i64,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO key_rotations (epoch, key_rotation_counter) VALUES ($1, $2)
+            "INSERT INTO key_rotations (epoch, key_rotation_counter, nonce) VALUES ($1, $2, $3)
             ON CONFLICT (epoch)
-            DO UPDATE SET key_rotation_counter = EXCLUDED.key_rotation_counter",
+            DO UPDATE SET key_rotation_counter = EXCLUDED.key_rotation_counter,
+                          nonce = EXCLUDED.nonce",
         )
         .bind(epoch)
         .bind(key_rotation_counter)
+        .bind(nonce)
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+
+    /// Retrieves the nonce for the latest key rotation from the `key_rotations` table.
+    ///
+    /// This method queries the `key_rotations` table to get the nonce value for the most recent key rotation.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<i64>`: A result containing the nonce value for the most recent key rotation.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute
+    /// - There's a connection issue with the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_nonce(state_manager: &AtomaStateManager) -> Result<i64> {
+    ///     let nonce = state_manager.get_contract_key_rotation_nonce().await?;
+    ///     Ok(nonce)
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all)]
+    pub async fn get_contract_key_rotation_nonce(&self) -> Result<i64> {
+        let nonce =
+            sqlx::query_scalar("SELECT nonce FROM key_rotations ORDER BY epoch DESC LIMIT 1")
+                .fetch_one(&self.db)
+                .await?;
+        Ok(nonce)
     }
 
     /// Updates or inserts a node's public key and associated information in the database.
@@ -3285,7 +3374,7 @@ impl AtomaState {
     /// * `epoch` - The current epoch number when the update occurs.
     /// * `node_badge_id` - The badge identifier associated with the node.
     /// * `new_public_key` - The new public key to be stored for the node.
-    /// * `tee_remote_attestation_bytes` - The TEE (Trusted Execution Environment) remote attestation data as bytes.
+    /// * `evidence_bytes` - The TEE evidence bytes (containing both Nvidia GPU and NvSwitch remote attestations and certificate chains).
     ///
     /// # Returns
     ///
@@ -3325,51 +3414,38 @@ impl AtomaState {
         epoch: i64,
         key_rotation_counter: i64,
         new_public_key: Vec<u8>,
-        tee_remote_attestation_bytes: Vec<u8>,
+        evidence_bytes: Vec<u8>,
+        device_type: i64,
         is_valid: bool,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid) VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (node_small_id)
-                DO UPDATE SET epoch = $2,
-                              key_rotation_counter = $3,
-                              public_key = $4,
-                              tee_remote_attestation_bytes = $5,
-                              is_valid = $6",
+            "INSERT INTO node_public_keys (
+                node_small_id, 
+                epoch, 
+                key_rotation_counter, 
+                public_key, 
+                evidence_bytes, 
+                device_type, 
+                is_valid
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (node_small_id, device_type)
+            DO UPDATE SET 
+                epoch = EXCLUDED.epoch,
+                key_rotation_counter = EXCLUDED.key_rotation_counter,
+                public_key = EXCLUDED.public_key,
+                evidence_bytes = EXCLUDED.evidence_bytes,
+                is_valid = EXCLUDED.is_valid",
         )
         .bind(node_id)
         .bind(epoch)
         .bind(key_rotation_counter)
         .bind(new_public_key)
-        .bind(tee_remote_attestation_bytes)
+        .bind(evidence_bytes)
+        .bind(device_type)
         .bind(is_valid)
         .execute(&self.db)
         .await?;
         Ok(())
-    }
-
-    /// Retrieves the X25519 public key for a selected node.
-    ///
-    /// This method retrieves the X25519 public key for a specific node from the `node_public_keys` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `selected_node_id` - The unique small identifier of the node.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Option<String>>`: A result containing the X25519 public key if found, or None if not found.
-    #[instrument(level = "trace", skip_all, fields(%selected_node_id))]
-    pub async fn get_selected_node_x25519_public_key(
-        &self,
-        selected_node_id: i64,
-    ) -> Result<Option<Vec<u8>>> {
-        let public_key =
-            sqlx::query("SELECT public_key FROM node_public_keys WHERE node_small_id = $1")
-                .bind(selected_node_id)
-                .fetch_optional(&self.db)
-                .await?;
-        Ok(public_key.map(|row| row.get::<Vec<u8>, _>("public_key")))
     }
 
     /// Insert new node into the database.
