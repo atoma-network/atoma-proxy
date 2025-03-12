@@ -88,6 +88,4 @@ pub enum AtomaStateManagerError {
     InvalidUrl(String),
     #[error("{0}")]
     RemoteAttestationVerificationError(#[from] RemoteAttestationVerificationError),
-    #[error("Decompression error: {0}")]
-    DecompressionError(#[from] flate2::DecompressError),
 }
