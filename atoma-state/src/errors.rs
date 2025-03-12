@@ -1,3 +1,4 @@
+use atoma_utils::compression::CompressionError;
 use thiserror::Error;
 use tracing::error;
 
@@ -88,4 +89,6 @@ pub enum AtomaStateManagerError {
     InvalidUrl(String),
     #[error("{0}")]
     RemoteAttestationVerificationError(#[from] RemoteAttestationVerificationError),
+    #[error("Compression error: {0}")]
+    CompressionError(#[from] CompressionError),
 }
