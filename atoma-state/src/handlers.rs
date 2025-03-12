@@ -6,7 +6,7 @@ use atoma_sui::events::{
     StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent,
     StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
-use atoma_utils::decompress_bytes;
+use atoma_utils::compression::decompress_bytes;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::sync::oneshot;
