@@ -108,8 +108,6 @@ async fn main() -> Result<()> {
     let atoma_p2p_node =
         AtomaP2pNode::start(config.p2p, Arc::new(keystore), atoma_p2p_sender, true)?;
 
-    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
-
     let (metrics_collector_sender, metrics_collector_receiver) = flume::unbounded();
     let (_request_best_available_models_sender, request_best_available_models_receiver) =
         flume::unbounded();
