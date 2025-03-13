@@ -336,7 +336,7 @@ impl AtomaState {
                 GROUP BY node_small_id
                 HAVING bool_and(npk.is_valid) = true
             ),
-            WITH selected_stack AS (
+            selected_stack AS (
                 SELECT stacks.stack_small_id
                 FROM stacks
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id",
