@@ -221,12 +221,16 @@ async fn create_key_rotation(
     pool: &sqlx::PgPool,
     epoch: i64,
     key_rotation_counter: i64,
+    nonce: i64,
 ) -> sqlx::Result<()> {
-    sqlx::query("INSERT INTO key_rotations (epoch, key_rotation_counter) VALUES ($1, $2)")
-        .bind(epoch)
-        .bind(key_rotation_counter)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO key_rotations (epoch, key_rotation_counter, nonce) VALUES ($1, $2, $3)",
+    )
+    .bind(epoch)
+    .bind(key_rotation_counter)
+    .bind(nonce)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -270,18 +274,20 @@ async fn create_test_node(pool: &sqlx::PgPool, node_small_id: i64) -> sqlx::Resu
 async fn create_test_node_public_key(
     pool: &sqlx::PgPool,
     node_small_id: i64,
+    key_rotation_counter: i64,
     is_valid: bool,
 ) -> sqlx::Result<()> {
     sqlx::query(
-            "INSERT INTO node_public_keys (node_small_id, public_key, is_valid, epoch, key_rotation_counter, tee_remote_attestation_bytes)
-             VALUES ($1, $2, $3, $4, $5, $6)"
+            "INSERT INTO node_public_keys (node_small_id, public_key, is_valid, epoch, key_rotation_counter, evidence_bytes, device_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)"
         )
         .bind(node_small_id)
         .bind(vec![0u8; 32]) // dummy public key
         .bind(is_valid)
         .bind(1i64)
-        .bind(1i64)
+        .bind(key_rotation_counter)
         .bind(vec![0u8; 32]) // dummy attestation bytes
+        .bind(1i64)
         .execute(pool)
         .await?;
     Ok(())
@@ -579,12 +585,15 @@ async fn test_get_cheapest_node_confidential() {
 
     // Create test data for confidential computing
     create_test_task(&state.db, 1, "gpt-4", 1).await.unwrap();
-    create_key_rotation(&state.db, 1, 1).await.unwrap();
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
     create_test_node(&state.db, 1).await.unwrap();
     create_test_node_subscription(&state.db, 1, 1, 100, 1000)
         .await
         .unwrap();
-    create_test_node_public_key(&state.db, 1, true)
+    create_key_rotation(&state.db, 2, 2, 1)
+        .await
+        .expect("Failed to create key rotation");
+    create_test_node_public_key(&state.db, 1, 2, true)
         .await
         .unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
@@ -613,7 +622,8 @@ async fn test_get_cheapest_node_invalid_public_key() {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000)
         .await
         .unwrap();
-    create_test_node_public_key(&state.db, 1, false)
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
+    create_test_node_public_key(&state.db, 1, 1, false)
         .await
         .unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
@@ -725,7 +735,7 @@ async fn test_get_cheapest_node_mixed_security_levels() {
     // Create tasks with different security levels
     create_test_task(&state.db, 1, "gpt-4", 0).await.unwrap();
     create_test_task(&state.db, 2, "gpt-4", 1).await.unwrap();
-    create_key_rotation(&state.db, 1, 1).await.unwrap();
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
 
     create_test_node(&state.db, 1).await.unwrap();
     create_test_node(&state.db, 2).await.unwrap();
@@ -736,7 +746,8 @@ async fn test_get_cheapest_node_mixed_security_levels() {
     create_test_node_subscription(&state.db, 2, 2, 50, 1000)
         .await
         .unwrap();
-    create_test_node_public_key(&state.db, 2, true)
+    create_key_rotation(&state.db, 2, 1, 1).await.unwrap();
+    create_test_node_public_key(&state.db, 2, 1, true)
         .await
         .unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
@@ -783,7 +794,8 @@ async fn test_basic_selection() -> Result<()> {
     // Setup single valid node
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 1, true).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -803,13 +815,22 @@ async fn test_price_based_selection() -> Result<()> {
     let state = setup_test_environment().await?;
 
     // Setup nodes with different prices
-    for (node_id, price) in [(1, 200), (2, 100), (3, 300)] {
-        create_test_node(&state.db, node_id).await?;
-        create_test_node_subscription(&state.db, node_id, 1, price, 1000).await?;
-        create_test_node_public_key(&state.db, node_id, true).await?;
-        create_test_stack(&state.db, 1, node_id, node_id, price, 1000, node_id)
-            .await
-            .unwrap();
+    for (node_id, (i, price)) in [(1, 200), (2, 100), (3, 300)].iter().enumerate() {
+        create_test_node(&state.db, node_id as i64).await?;
+        create_test_node_subscription(&state.db, node_id as i64, 1, *price, 1000).await?;
+        create_key_rotation(&state.db, i64::from(*i), i64::from(*i), 1).await?;
+        create_test_node_public_key(&state.db, node_id as i64, i64::from(*i), true).await?;
+        create_test_stack(
+            &state.db,
+            1,
+            node_id as i64,
+            node_id as i64,
+            *price,
+            1000,
+            node_id as i64,
+        )
+        .await
+        .unwrap();
     }
 
     let result = state
@@ -862,7 +883,8 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     // Setup nodes with different compute capacities
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 1, 100, 500).await?; // Insufficient capacity
-    create_test_node_public_key(&state.db, 1, true).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_stack(&state.db, 1, 1, 1, 100, 500, 1)
         .await
         .unwrap();
@@ -878,7 +900,8 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     // Add node with sufficient capacity
     create_test_node(&state.db, 2).await?;
     create_test_node_subscription(&state.db, 2, 1, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 2, true).await?;
+    create_key_rotation(&state.db, 2, 2, 1).await?;
+    create_test_node_public_key(&state.db, 2, 2, true).await?;
     create_test_stack(&state.db, 1, 2, 2, 100, 1000, 2)
         .await
         .unwrap();
@@ -903,7 +926,8 @@ async fn test_invalid_configurations() -> Result<()> {
     // Setup node with invalid public key
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 1, false).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, false).await?;
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -939,7 +963,8 @@ async fn test_security_level_requirement() -> Result<()> {
     // Setup valid node subscribed to non-confidential task
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 2, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 1, true).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_stack(&state.db, 2, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -961,7 +986,8 @@ async fn test_edge_cases() -> Result<()> {
 
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 1, true).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -995,7 +1021,8 @@ async fn test_concurrent_access() -> Result<()> {
 
     create_test_node(&state.db, 1).await?;
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
-    create_test_node_public_key(&state.db, 1, true).await?;
+    create_key_rotation(&state.db, 1, 1, 1).await?;
+    create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -1021,19 +1048,20 @@ async fn test_select_node_public_key_for_encryption_for_node() -> Result<()> {
     truncate_tables(&state.db).await;
 
     // Create test node
-    create_key_rotation(&state.db, 1, 1).await.unwrap();
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
     create_test_node(&state.db, 1).await?;
 
     // Insert test node public key
     sqlx::query(
-            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-               VALUES ($1, $2, $3, $4, $5, $6)",
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(1i64)
         .bind(1i64)
         .bind(1i64)
         .bind(vec![1u8, 2, 3, 4]) // Example public key bytes
         .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(1i64)
         .bind(true)
         .execute(&state.db)
         .await?;
@@ -1062,20 +1090,21 @@ async fn test_select_node_public_key_for_encryption_for_node_multiple_keys() -> 
     let state = setup_test_db().await;
     truncate_tables(&state.db).await;
 
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
     // Insert multiple test node public keys
     for i in 1..=3 {
         // Create test node
         create_test_node(&state.db, i).await?;
-        create_key_rotation(&state.db, i, i).await.unwrap();
         sqlx::query(
-                r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-                   VALUES ($1, $2, $3, $4, $5, $6)",
+                r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)",
             )
             .bind(i)
             .bind(i)
-            .bind(i)
+            .bind(1)
             .bind(vec![i as u8; 4]) // Different key for each node
             .bind(vec![i as u8; 4]) // Example tee remote attestation bytes
+            .bind(i)
             .bind(true)
             .execute(&state.db)
             .await?;
@@ -1103,7 +1132,7 @@ async fn test_select_node_public_key_for_encryption_for_node_invalid_data() -> R
 
     // Create test node
     create_test_node(&state.db, 1).await?;
-    create_key_rotation(&state.db, 1, 1).await.unwrap();
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
 
     // Test with negative node_small_id
     let result = state
@@ -1113,14 +1142,15 @@ async fn test_select_node_public_key_for_encryption_for_node_invalid_data() -> R
 
     // Insert invalid public key (empty)
     sqlx::query(
-            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-               VALUES ($1, $2, $3, $4, $5, $6)",
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(1i64)
         .bind(1i64)
         .bind(1i64)
         .bind(Vec::<u8>::new()) // Empty public key
         .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(1i64)
         .bind(true)
         .execute(&state.db)
         .await?;
@@ -1145,18 +1175,19 @@ async fn test_select_node_public_key_for_encryption_for_node_concurrent_access()
 
     // Create test node
     create_test_node(&state.db, 1).await?;
-    create_key_rotation(&state.db, 1, 1).await.unwrap();
+    create_key_rotation(&state.db, 1, 1, 1).await.unwrap();
 
     // Insert test data
     sqlx::query(
-            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-               VALUES ($1, $2, $3, $4, $5, $6)",
+            r"INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(1i64)
         .bind(1i64)
         .bind(1i64)
         .bind(vec![1u8, 2, 3, 4]) // Example public key bytes
         .bind(vec![1u8, 2, 3, 4]) // Example tee remote attestation bytes
+        .bind(1i64)
         .bind(true)
         .execute(&state.db)
         .await?;
@@ -1205,8 +1236,8 @@ async fn test_verify_stack_for_confidential_compute_request() -> Result<()> {
 
     sqlx::query(
         r"
-            INSERT INTO key_rotations (epoch, key_rotation_counter)
-            VALUES (1, 1)
+            INSERT INTO key_rotations (epoch, key_rotation_counter, nonce)
+            VALUES (1, 1, 1)
             ",
     )
     .execute(&state.db)
@@ -1214,11 +1245,11 @@ async fn test_verify_stack_for_confidential_compute_request() -> Result<()> {
 
     sqlx::query(
             r"
-            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
             VALUES
-                (1, 1, 1, 'key1', 'attestation1', true),   -- Valid key
-                (2, 1, 1, 'key2', 'attestation2', false),  -- Invalid key
-                (3, 1, 1, 'key3', 'attestation3', true)    -- Valid key
+                (1, 1, 1, 'key1', 'attestation1', 1, true),   -- Valid key
+                (2, 1, 1, 'key2', 'attestation2', 1, false),  -- Invalid key
+                (3, 1, 1, 'key3', 'attestation3', 1, true)    -- Valid key
             ",
         )
         .execute(&state.db)
@@ -1291,8 +1322,8 @@ async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() 
 
     sqlx::query(
         r"
-            INSERT INTO key_rotations (epoch, key_rotation_counter)
-            VALUES (1, 1)
+            INSERT INTO key_rotations (epoch, key_rotation_counter, nonce)
+            VALUES (1, 1, 1)
             ",
     )
     .execute(&state.db)
@@ -1300,8 +1331,8 @@ async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() 
 
     sqlx::query(
             r"
-            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, tee_remote_attestation_bytes, is_valid)
-            VALUES (1, 1, 1, 'key1', 'attestation1', true)
+            INSERT INTO node_public_keys (node_small_id, epoch, key_rotation_counter, public_key, evidence_bytes, device_type, is_valid)
+            VALUES (1, 1, 1, 'key1', 'attestation1', 1, true)
             ",
         )
         .execute(&state.db)
@@ -1328,8 +1359,8 @@ async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() 
     // Simulate key rotation
     sqlx::query(
         r"
-            INSERT INTO key_rotations (epoch, key_rotation_counter)
-            VALUES (2, 2)
+            INSERT INTO key_rotations (epoch, key_rotation_counter, nonce)
+            VALUES (2, 2, 2)
             ",
     )
     .execute(&state.db)
@@ -1346,9 +1377,10 @@ async fn test_verify_stack_for_confidential_compute_request_with_key_rotation() 
         r"
             UPDATE node_public_keys
             SET public_key = 'key1_new',
-                tee_remote_attestation_bytes = 'attestation1_new',
+                evidence_bytes = 'attestation1_new',
                 key_rotation_counter = 2,
-                epoch = 2
+                epoch = 2,
+                device_type = 1
             WHERE node_small_id = 1
             AND key_rotation_counter = 1
             ",

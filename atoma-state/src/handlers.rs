@@ -6,7 +6,9 @@ use atoma_sui::events::{
     StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent,
     StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
+use atoma_utils::compression::decompress_bytes;
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
@@ -1220,18 +1222,6 @@ pub async fn handle_state_manager_event(
                 .await?;
             state_manager.state.add_latency(timestamp, latency).await?;
         }
-        AtomaAtomaStateManagerEvent::GetSelectedNodeX25519PublicKey {
-            selected_node_id,
-            result_sender,
-        } => {
-            let public_key = state_manager
-                .state
-                .get_selected_node_x25519_public_key(selected_node_id)
-                .await;
-            result_sender
-                .send(public_key)
-                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
-        }
         AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
             email,
             password,
@@ -1450,10 +1440,11 @@ pub async fn handle_new_key_rotation_event(
     let NewKeyRotationEvent {
         epoch,
         key_rotation_counter,
+        nonce,
     } = event;
     state_manager
         .state
-        .insert_new_key_rotation(epoch as i64, key_rotation_counter as i64)
+        .insert_new_key_rotation(epoch as i64, key_rotation_counter as i64, nonce as i64)
         .await?;
     Ok(())
 }
@@ -1506,12 +1497,19 @@ pub async fn handle_node_key_rotation_event(
         key_rotation_counter,
         node_id,
         new_public_key,
-        tee_remote_attestation_bytes,
+        device_type,
+        evidence_bytes,
     } = event;
-    let is_valid =
-        utils::verify_quote_v4_attestation(&tee_remote_attestation_bytes, &new_public_key)
-            .await
-            .is_ok();
+    let original_evidence_bytes = decompress_bytes(&evidence_bytes)?;
+    let evidence_data = serde_json::from_slice::<Vec<Value>>(&original_evidence_bytes)?;
+    let is_valid = utils::attest_nvidia_evidence_list(
+        state_manager,
+        &evidence_data,
+        &new_public_key,
+        device_type,
+    )
+    .await
+    .is_ok();
     state_manager
         .state
         .update_node_public_key(
@@ -1519,7 +1517,8 @@ pub async fn handle_node_key_rotation_event(
             epoch as i64,
             key_rotation_counter as i64,
             new_public_key,
-            tee_remote_attestation_bytes,
+            evidence_bytes,
+            i64::from(device_type),
             is_valid,
         )
         .await?;
@@ -1675,139 +1674,31 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
 }
 
 pub mod utils {
-    use crate::errors::QuoteVerificationError;
+    use crate::AtomaStateManager;
 
-    use super::{AtomaStateManagerError, Result};
+    use super::Result;
 
-    use dcap_qvl::collateral::get_collateral;
-    use dcap_qvl::quote::{Quote, Report};
-    use dcap_qvl::verify::verify;
-    use std::time::Duration;
-    use tracing::{error, trace};
+    use serde_json::Value;
+    use tracing::instrument;
 
-    /// The timeout to use for quote verification.
-    const TIMEOUT: Duration = Duration::from_secs(10);
-
-    /// The TCB update mode to use for quote verification.
-    const TCB_UPDATE_MODE: &str = "early";
-
-    /// Verifies a TEE (Trusted Execution Environment) remote attestation quote using Intel's DCAP Quote Verification Library.
-    ///
-    /// This function performs verification of a Quote V4 attestation by:
-    /// 1. Retrieving collateral data from Intel's Provisioning Certificate Caching Service (PCCS)
-    /// 2. Verifying the quote against the collateral using the current timestamp
-    ///
-    /// # Arguments
-    ///
-    /// * `tee_remote_attestation_bytes` - A byte slice containing the TEE remote attestation quote data
-    /// * `new_public_key` - A byte slice containing the public key to be verified (currently unused in verification)
-    ///
-    /// # Returns
-    ///
-    /// * `Result<()>` - Ok(()) if verification succeeds, or an error if verification fails
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error in the following cases:
-    /// * If collateral retrieval from PCCS fails
-    /// * If the system time cannot be determined
-    /// * If quote verification fails
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use your_crate::verify_quote_v4_attestation;
-    ///
-    /// async fn verify_attestation() {
-    ///     let quote_data = vec![/* quote data */];
-    ///     let public_key = vec![/* public key data */];
-    ///
-    ///     match verify_quote_v4_attestation(&quote_data, &public_key).await {
-    ///         Ok(()) => println!("Attestation verified successfully"),
-    ///         Err(e) => eprintln!("Attestation verification failed: {:?}", e),
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// * Uses Intel's PCCS service at a hardcoded URL with a 10-second timeout
-    /// * The `new_public_key` parameter is currently passed through but not used in the verification process
-    /// * This function is specifically for Quote V4 format attestations
-    pub async fn verify_quote_v4_attestation(
-        quote_bytes: &[u8],
+    #[instrument(level = "trace", skip_all)]
+    pub async fn attest_nvidia_evidence_list(
+        state_manager: &AtomaStateManager,
+        _evidence_bytes: &[Value],
         new_public_key: &[u8],
+        device_type: u16,
     ) -> Result<()> {
-        trace!(
-            target = "atoma-state-quote-verification",
-            quote_len = quote_bytes.len(),
-            pubkey_len = new_public_key.len(),
-            "Starting quote verification"
-        );
-
-        let quote = Quote::parse(quote_bytes)
-            .map_err(|e| QuoteVerificationError::InvalidQuoteFormat(e.to_string()))?;
-
-        let fmspc = quote
-            .fmspc()
-            .map_err(|e| AtomaStateManagerError::FailedToRetrieveFmspc(format!("{e:?}")))?;
-        #[allow(clippy::uninlined_format_args)]
-        let certification_tcb_url = format!(
-            "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc={:?}&update={TCB_UPDATE_MODE}",
-            fmspc
-        );
-        let collateral = get_collateral(&certification_tcb_url, quote_bytes, TIMEOUT)
-            .await
-            .map_err(|e| AtomaStateManagerError::FailedToRetrieveCollateral(format!("{e:?}")))?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| AtomaStateManagerError::UnixTimeWentBackwards(e.to_string()))?
-            .as_secs();
-        match quote.report {
-            Report::SgxEnclave(_) => {
-                error!(
-                    target = "atoma-state-quote-verification",
-                    "Unsupported SGX enclave report type"
-                );
-                return Err(QuoteVerificationError::UnsupportedReportType("SGX".into()).into());
-            }
-            Report::TD10(report) => {
-                trace!(
-                    target = "atoma-state-quote-verification",
-                    report_data_len = report.report_data.len(),
-                    "Verifying TD10 report data"
-                );
-                if report.report_data != new_public_key {
-                    error!(
-                        target = "atoma-state-quote-verification",
-                        expected_len = new_public_key.len(),
-                        actual_len = report.report_data.len(),
-                        "TD10 report data mismatch"
-                    );
-                    return Err(QuoteVerificationError::InvalidReportData {
-                        expected: new_public_key.to_vec(),
-                        actual: report.report_data.to_vec(),
-                    }
-                    .into());
-                }
-            }
-            Report::TD15(report) => {
-                if report.base.report_data != new_public_key {
-                    return Err(QuoteVerificationError::InvalidReportData {
-                        expected: new_public_key.to_vec(),
-                        actual: report.base.report_data.to_vec(),
-                    }
-                    .into());
-                }
-            }
-        }
-
-        verify(quote_bytes, &collateral, now)
-            .map_err(|e| AtomaStateManagerError::FailedToVerifyQuote(format!("{e:?}")))?;
-
-        trace!(
-            target = "atoma-state-quote-verification",
-            "Quote verification completed successfully"
+        let contract_nonce = state_manager
+            .state
+            .get_contract_key_rotation_nonce()
+            .await?;
+        let _should_be_nonce = blake3::hash(
+            &[
+                &contract_nonce.to_le_bytes()[..],
+                new_public_key,
+                &device_type.to_le_bytes()[..],
+            ]
+            .concat(),
         );
         Ok(())
     }
