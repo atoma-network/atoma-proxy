@@ -475,7 +475,7 @@ impl AtomaState {
                 FROM key_rotations
                 ORDER BY key_rotation_counter DESC
                 LIMIT 1
-            )
+            ),
             valid_nodes AS (
                 SELECT DISTINCT npk.node_small_id
                 FROM node_public_keys npk
@@ -587,10 +587,8 @@ impl AtomaState {
         let node = sqlx::query(
             r"
             WITH latest_rotation AS (
-                SELECT key_rotation_counter
+                SELECT MAX(key_rotation_counter) as key_rotation_counter
                 FROM key_rotations
-                ORDER BY key_rotation_counter DESC
-                LIMIT 1
             ),
             valid_nodes AS (
                 SELECT DISTINCT npk.node_small_id, npk.public_key
@@ -645,10 +643,8 @@ impl AtomaState {
         let result = sqlx::query_scalar::<_, bool>(
             r"
             WITH latest_rotation AS (
-                SELECT key_rotation_counter
+                SELECT MAX(key_rotation_counter) as key_rotation_counter
                 FROM key_rotations
-                ORDER BY key_rotation_counter DESC
-                LIMIT 1
             ),
             valid_nodes AS (
                 SELECT npk.node_small_id
@@ -3408,6 +3404,7 @@ impl AtomaState {
     /// }
     /// ```
     #[instrument(level = "trace", skip_all, fields(%node_id, %epoch))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_node_public_key(
         &self,
         node_id: i64,
