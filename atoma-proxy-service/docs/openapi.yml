@@ -1,33 +1,33 @@
 openapi: 3.1.0
 info:
   title: atoma-proxy-service
-  description: ""
+  description: ''
   license:
     name: Apache-2.0
     identifier: Apache-2.0
   version: 0.1.0
 servers:
-  - url: http://localhost:8081
-    description: Local server
+- url: http://localhost:8081
+  description: Local server
 paths:
   /health:
     get:
       tags:
-        - Health
+      - Health
       summary: Health check endpoint for the proxy service.
       description: |-
         # Returns
         * `StatusCode::OK` - Always returns OK
       operationId: health
       responses:
-        "200":
+        '200':
           description: Service is healthy
-        "500":
+        '500':
           description: Service is unhealthy
   /generate_api_token:
     post:
       tags:
-        - Auth
+      - Auth
       summary: Generates an API token for the user.
       description: |-
         # Arguments
@@ -43,21 +43,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateTokenRequest"
+              $ref: '#/components/schemas/CreateTokenRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Generates an API token for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to generate api token
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /revoke_api_token:
     post:
       tags:
-        - Auth
+      - Auth
       summary: Revokes an API token for the user.
       description: |-
         # Arguments
@@ -74,25 +74,25 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RevokeApiTokenRequest"
+              $ref: '#/components/schemas/RevokeApiTokenRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Revokes an API token for the user
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RevokeApiTokenRequest"
-        "401":
+                $ref: '#/components/schemas/RevokeApiTokenRequest'
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to revoke api token
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /register:
     post:
       tags:
-        - Auth
+      - Auth
       summary: Registers a new user with the proxy service.
       description: |-
         # Arguments
@@ -108,21 +108,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RegisterAuthRequest"
+              $ref: '#/components/schemas/RegisterAuthRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Registers a new user
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RegisterAuthRequest"
-        "500":
+                $ref: '#/components/schemas/RegisterAuthRequest'
+        '500':
           description: Failed to register user
   /login:
     post:
       tags:
-        - Auth
+      - Auth
       summary: Logs in a user with the proxy service.
       description: |-
         # Arguments
@@ -138,21 +138,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LoginAuthRequest"
+              $ref: '#/components/schemas/LoginAuthRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Logs in a user
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RegisterAuthRequest"
-        "500":
+                $ref: '#/components/schemas/RegisterAuthRequest'
+        '500':
           description: Failed to login user
   /api_tokens:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Retrieves all API tokens for the user.
       description: |-
         # Arguments
@@ -164,18 +164,18 @@ paths:
         * `Result<Json<Vec<String>>>` - A JSON response containing a list of API tokens
       operationId: get_all_api_tokens
       responses:
-        "200":
+        '200':
           description: Retrieves all API tokens for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to get all api tokens
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /update_sui_address:
     post:
       tags:
-        - Auth
+      - Auth
       summary: Updates the sui address for the user.
       description: |-
         # Arguments
@@ -192,21 +192,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProofRequest"
+              $ref: '#/components/schemas/ProofRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Proof of address request
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to proof of address request
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /usdc_payment:
     post:
       tags:
-        - Auth
+      - Auth
       summary: OpenAPI documentation for the usdc_payment endpoint.
       description: |-
         # Arguments
@@ -223,21 +223,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UsdcPaymentRequest"
+              $ref: '#/components/schemas/UsdcPaymentRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: USDC payment request
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to usdc payment request
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /get_sui_address:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Retrieves the sui address for the user.
       description: |-
         # Arguments
@@ -250,18 +250,18 @@ paths:
         * `Result<Json<Option<String>>>` - A JSON response containing the sui address
       operationId: get_sui_address
       responses:
-        "200":
+        '200':
           description: Retrieves the sui address for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to get sui address
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /current_stacks:
     get:
       tags:
-        - Stacks
+      - Stacks
       summary: Retrieves all stacks that are not settled.
       description: |-
         # Arguments
@@ -273,14 +273,14 @@ paths:
           - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve stacks from state manager
       operationId: get_current_stacks
       responses:
-        "200":
+        '200':
           description: Retrieves all stacks that are not settled
-        "500":
+        '500':
           description: Failed to get all stacks
   /all_stacks:
     get:
       tags:
-        - Stacks
+      - Stacks
       summary: Retrieves all stacks for the user based on the access token.
       description: |-
         # Arguments
@@ -296,16 +296,16 @@ paths:
         Returns a JSON array of Stack objects for the specified user
       operationId: get_all_stacks_for_user
       responses:
-        "200":
+        '200':
           description: Retrieves all stacks for the user
-        "500":
+        '500':
           description: Failed to get user stack
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /balance:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Retrieves the balance for the user.
       description: |-
         # Arguments
@@ -318,18 +318,18 @@ paths:
         * `Result<Json<i64>>` - A JSON response containing the balance
       operationId: get_balance
       responses:
-        "200":
+        '200':
           description: Retrieves the balance for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to get balance
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /user_profile:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Retrieves the user profile for the user.
       description: |-
         # Arguments
@@ -347,18 +347,18 @@ paths:
         * If the user profile cannot be retrieved, returns a 500 Internal Server Error
       operationId: get_user_profile
       responses:
-        "200":
+        '200':
           description: Retrieves the user profile for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to get user profile
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /set_user_profile:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Retrieves the user profile for the user.
       description: |-
         # Arguments
@@ -379,21 +379,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserProfile"
+              $ref: '#/components/schemas/UserProfile'
         required: true
       responses:
-        "200":
+        '200':
           description: Sets the user profile for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to set user profile
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /salt:
     get:
       tags:
-        - Auth
+      - Auth
       summary: Gets the salt for the user. It creates a new salt if the user does not have one.
       description: |-
         # Arguments
@@ -406,18 +406,18 @@ paths:
         * `Result<Json<()>>` - A JSON response indicating the success of the operation
       operationId: get_salt
       responses:
-        "200":
+        '200':
           description: Sets the salt for the user
-        "401":
+        '401':
           description: Unauthorized request
-        "500":
+        '500':
           description: Failed to set salt
       security:
-        - bearerAuth: []
+      - bearerAuth: []
   /tasks:
     get:
       tags:
-        - Tasks
+      - Tasks
       summary: Retrieves all tasks from the state manager.
       description: |-
         # Arguments
@@ -432,15 +432,15 @@ paths:
         Returns a JSON array of Task objects representing all tasks in the system
       operationId: get_all_tasks
       responses:
-        "200":
+        '200':
           description: Retrieves all tasks
-        "500":
+        '500':
           description: Failed to get all tasks
   /compute_units_processed:
     get:
       tags:
-        - Stats
-      summary: " Get compute unit processed in the last `hours` hours per model."
+      - Stats
+      summary: ' Get compute unit processed in the last `hours` hours per model.'
       description: |2-
          # Arguments
 
@@ -469,17 +469,17 @@ paths:
         ```
       operationId: get_compute_units_processed
       responses:
-        "200":
+        '200':
           description: Retrieves all computed units processed
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get performance
   /latency:
     get:
       tags:
-        - Stats
+      - Stats
       summary: |-
         Get latency performance of the network for last 'query.hours' hours. E.g. get latency performance for last 2 hours.
         The response is vector of LatencyResponse objects.
@@ -511,17 +511,17 @@ paths:
         ```
       operationId: get_latency
       responses:
-        "200":
+        '200':
           description: Retrieves all latency performance
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get performance
   /get_stats_stacks:
     get:
       tags:
-        - Stats
+      - Stats
       summary: Get all stacks.
       description: |-
         # Arguments
@@ -549,17 +549,17 @@ paths:
         ```
       operationId: get_stats_stacks
       responses:
-        "200":
+        '200':
           description: Retrieves all latency performance
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get performance
   /subscriptions:
     get:
       tags:
-        - Subscriptions
+      - Subscriptions
       summary: Retrieves all subscriptions.
       description: |-
         # Arguments
@@ -584,14 +584,14 @@ paths:
         ```
       operationId: get_all_subscriptions
       responses:
-        "200":
+        '200':
           description: Retrieves all subscriptions for all nodes
-        "500":
+        '500':
           description: Failed to get nodes subscriptions
   /get_nodes_distribution:
     get:
       tags:
-        - Stats
+      - Stats
       summary: Get nodes distribution.
       description: |-
         # Arguments
@@ -617,17 +617,17 @@ paths:
         ```
       operationId: get_nodes_distribution
       responses:
-        "200":
+        '200':
           description: Retrieves nodes distribution
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get node distribution
   /get_graphs:
     get:
       tags:
-        - Stats
+      - Stats
       summary: Get graphs.
       description: |-
         # Arguments
@@ -641,17 +641,17 @@ paths:
           - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
       operationId: get_graphs
       responses:
-        "200":
+        '200':
           description: Retrieves all graphs
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get graphs
   /get_graph_data:
     post:
       tags:
-        - Stats
+      - Stats
       summary: Get graph data.
       description: |+
         # Arguments
@@ -667,12 +667,12 @@ paths:
 
       operationId: get_graph_data
       responses:
-        "200":
+        '200':
           description: Retrieves graph data
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to get graph data
 components:
   schemas:
@@ -683,7 +683,7 @@ components:
 
         Contains the name of the token
       required:
-        - name
+      - name
       properties:
         name:
           type: string
@@ -692,8 +692,8 @@ components:
       type: object
       description: Request payload for user authentication
       required:
-        - email
-        - password
+      - email
+      - password
       properties:
         email:
           type: string
@@ -708,7 +708,7 @@ components:
 
         Contains the signature of the user to prove ownership of the sui address.
       required:
-        - signature
+      - signature
       properties:
         signature:
           type: string
@@ -717,20 +717,20 @@ components:
       type: object
       description: Request payload for user authentication
       required:
-        - user_profile
-        - password
+      - user_profile
+      - password
       properties:
         password:
           type: string
           description: The user's password
         user_profile:
-          $ref: "#/components/schemas/UserProfile"
+          $ref: '#/components/schemas/UserProfile'
           description: The user's unique identifier
     RevokeApiTokenRequest:
       type: object
       description: Request payload for revoking an API token
       required:
-        - api_token_id
+      - api_token_id
       properties:
         api_token_id:
           type: integer
@@ -743,12 +743,12 @@ components:
 
         Contains the transaction digest of the payment.
       required:
-        - transaction_digest
+      - transaction_digest
       properties:
         proof_signature:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The proof signature of the payment
         transaction_digest:
           type: string
@@ -759,8 +759,8 @@ components:
         Represents a user profile
         This struct is used to represent the response for the get_user_profile endpoint.
       required:
-        - email
-        - name
+      - email
+      - name
       properties:
         email:
           type: string
@@ -773,15 +773,15 @@ components:
       type: http
       scheme: bearer
 tags:
-  - name: Health
-    description: Health check endpoints
-  - name: Auth
-    description: Authentication and API token management
-  - name: Tasks
-    description: Atoma's Tasks management
-  - name: Subscriptions
-    description: Node task subscriptions management
-  - name: Stacks
-    description: Stacks management
-  - name: Stats
-    description: Stats and metrics
+- name: Health
+  description: Health check endpoints
+- name: Auth
+  description: Authentication and API token management
+- name: Tasks
+  description: Atoma's Tasks management
+- name: Subscriptions
+  description: Node task subscriptions management
+- name: Stacks
+  description: Stacks management
+- name: Stats
+  description: Stats and metrics
