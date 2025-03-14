@@ -1,4 +1,5 @@
 use axum::Router;
+use serde_json::json;
 use utoipa::{
     openapi::security::{Http, HttpAuthScheme, SecurityScheme},
     Modify, OpenApi,
@@ -32,10 +33,11 @@ use crate::{
     HealthOpenApi, HEALTH_PATH,
 };
 
+#[allow(clippy::too_many_lines)]
 pub fn openapi_router() -> Router {
     #[derive(OpenApi)]
     #[openapi(
-        modifiers(&SecurityAddon),
+        modifiers(&SecurityAddon, &SpeakeasyExtension),
         nest(
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
             (path = GENERATE_API_TOKEN_PATH, api = GenerateApiTokenOpenApi, tags = ["Auth"]),
@@ -93,6 +95,9 @@ pub fn openapi_router() -> Router {
 
     struct SecurityAddon;
 
+    #[derive(Default)]
+    struct SpeakeasyExtension;
+
     impl Modify for SecurityAddon {
         fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
             if let Some(components) = openapi.components.as_mut() {
@@ -101,6 +106,27 @@ pub fn openapi_router() -> Router {
                     SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
                 );
             }
+        }
+    }
+
+    impl Modify for SpeakeasyExtension {
+        fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+            let extensions = openapi.extensions.get_or_insert_with(Default::default);
+
+            extensions.insert(
+                "x-speakeasy-retries".to_string(),
+                json!({
+                    "strategy": "backoff",
+                    "backoff": {
+                        "initialInterval": 500,
+                        "maxInterval": 60000,
+                        "maxElapsedTime": 3_600_000,
+                        "exponent": 1.5
+                    },
+                    "statusCodes": ["5XX"],
+                    "retryConnectionErrors": true
+                }),
+            );
         }
     }
 
