@@ -16,8 +16,6 @@ ignore = [
 	# These are all related to the sui SDK, which is outside of our control
 	# derivative is not maintained
 	"RUSTSEC-2024-0388",
-	# difference 2.0.0 is unmaintained
-	"RUSTSEC-2020-0095",
 	# we don't do RSA signing on Sui (only verifying for zklogin)
 	"RUSTSEC-2023-0071",
 	# allow yaml-rust being unmaintained
