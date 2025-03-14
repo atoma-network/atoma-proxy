@@ -48,12 +48,18 @@ idle_connection_timeout = { secs = 60, nanos = 0 }   # Time after which inactive
 
 # Network listening addresses for P2P communication
 # Supports both TCP and QUIC protocols for better reliability and performance
-# Format: 
+# Format:
 # - TCP: "/ip4/<ip_address>/tcp/<port>"
 # - QUIC: "/ip4/<ip_address>/udp/<port>/quic-v1"
 listen_addrs = [
     "/ip4/0.0.0.0/tcp/8083",         # TCP listener on all interfaces, port 8083
     "/ip4/0.0.0.0/udp/8083/quic-v1", # QUIC v1 listener on all interfaces, port 8083
+]
+
+# The list of bootstrap nodes to dial
+bootstrap_node_addrs = [
+    "/ip4/213.130.147.75/tcp/8083",
+    "/ip4/213.130.147.75/udp/8083/quic-v1",
 ]
 
 # DHT bootstrap nodes for initial P2P network discovery
