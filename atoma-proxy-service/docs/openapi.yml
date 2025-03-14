@@ -8,17 +8,7 @@ info:
   version: 0.1.0
 servers:
   - url: http://localhost:8081
-x-speakeasy-retries:
-  strategy: backoff
-  backoff:
-    initialInterval: 500 # 500 milliseconds
-    maxInterval: 60000 # 60 seconds
-    maxElapsedTime: 3600000 # 1 hour
-    exponent: 1.5
-  statusCodes:
-    - 5XX
-  retryConnectionErrors: true
-  description: Local server
+    description: Local server
 paths:
   /health:
     get:
