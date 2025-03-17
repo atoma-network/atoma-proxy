@@ -6,6 +6,7 @@ use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
 use flume::Sender;
 use futures::Stream;
+use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -19,6 +20,9 @@ use tracing::{error, info, instrument, warn};
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
+use super::handlers::metrics::{
+    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
+};
 use super::handlers::verify_response_hash_and_signature;
 
 /// The chunk that indicates the end of a streaming response
@@ -65,6 +69,12 @@ pub struct Streamer {
     chunk_buffer: String,
     /// The position in the keep-alive chunk buffer
     keep_alive_pos: usize,
+    /// Timer for measuring time between token generations
+    inter_stream_token_latency_timer: Option<Instant>,
+    /// The first token generation (prefill phase) timer for the request.
+    /// We need store it as an option because we need to consume its value
+    /// once the first token is generated
+    first_token_generation_timer: Option<Instant>,
 }
 
 /// Represents the various states of a streaming process
@@ -106,6 +116,8 @@ impl Streamer {
             endpoint,
             chunk_buffer: String::new(),
             keep_alive_pos: 0,
+            first_token_generation_timer: Some(start),
+            inter_stream_token_latency_timer: None,
         }
     }
 
@@ -332,6 +344,14 @@ impl Stream for Streamer {
 
                 let chunk_str = chunk_str.strip_prefix(DATA_PREFIX).unwrap_or(chunk_str);
 
+                // Observe the first token generation timer
+                if let Some(timer) = self.first_token_generation_timer.take() {
+                    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN.record(
+                        timer.elapsed().as_secs_f64(),
+                        &[KeyValue::new("model", self.model_name.clone())],
+                    );
+                }
+
                 if chunk_str.starts_with(DONE_CHUNK) {
                     // This is the last chunk, meaning the inference streaming is complete
                     self.status = StreamStatus::Completed;
@@ -340,6 +360,13 @@ impl Stream for Streamer {
 
                 let chunk = match serde_json::from_str::<Value>(chunk_str) {
                     Ok(chunk) => {
+                        if let Some(timer) = self.inter_stream_token_latency_timer.take() {
+                            let elapsed = timer.elapsed();
+                            CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME.record(
+                                elapsed.as_secs_f64(),
+                                &[KeyValue::new("model", self.model_name.clone())],
+                            );
+                        }
                         if !self.chunk_buffer.is_empty() {
                             error!(
                                 target = "atoma-service-streamer",
