@@ -367,6 +367,10 @@ impl Stream for Streamer {
                                 &[KeyValue::new("model", self.model_name.clone())],
                             );
                         }
+
+                        // Start the timer after we've processed this chunk
+                        self.inter_stream_token_latency_timer = Some(Instant::now());
+
                         if !self.chunk_buffer.is_empty() {
                             error!(
                                 target = "atoma-service-streamer",
