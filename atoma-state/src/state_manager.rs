@@ -4132,9 +4132,8 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip_all)]
     pub async fn set_user_profile(&self, user_id: i64, user_profile: UserProfile) -> Result<()> {
-        sqlx::query("UPDATE users SET email = $2, name = $3 WHERE id = $1")
+        sqlx::query("UPDATE users SET name = $2 WHERE id = $1")
             .bind(user_id)
-            .bind(user_profile.email)
             .bind(user_profile.name)
             .execute(&self.db)
             .await?;

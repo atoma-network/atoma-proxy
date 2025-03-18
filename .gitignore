@@ -8,3 +8,4 @@ config.test.toml
 .env
 /config.toml
 local_key
+.rest/
