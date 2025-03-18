@@ -77,6 +77,8 @@ pub struct TokenResponse {
     pub id: i64,
     /// The last 4 chars of the token
     pub token_last_4: String,
+    /// The last used timestamp of the token
+    pub last_used_timestamp: Option<DateTime<Utc>>,
     /// The creation timestamp of the token
     pub created_at: DateTime<Utc>,
     /// The name of the token
