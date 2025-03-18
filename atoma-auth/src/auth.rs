@@ -1081,11 +1081,23 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     async fn test_token_flow() {
         let user_id = 123;
         let email = "email";
+        let salt = "salt";
         let password = "top_secret";
         let (auth, receiver) = setup_test().await;
-        let hash_password = auth.hash_string(password);
+        let hash_password = auth.hash_string(&format!("{salt}:{password}"));
         let mock_handle = tokio::task::spawn(async move {
             // First event is for the user to log in to get the tokens
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                    email: event_email,
+                    result_sender,
+                } => {
+                    assert_eq!(email, event_email);
+                    result_sender.send(Ok(Some(salt.to_string()))).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
             let event = receiver.recv_async().await.unwrap();
             match event {
                 AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
