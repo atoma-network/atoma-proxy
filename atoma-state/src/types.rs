@@ -769,9 +769,18 @@ pub enum AtomaAtomaStateManagerEvent {
         user_profile: UserProfile,
         /// The password of the user
         password: String,
+        /// Password salt
+        password_salt: String,
         /// Channel to send back the user ID
         /// Returns Ok(Option<i64>) with the user ID or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<i64>>>,
+    },
+    GetPasswordSalt {
+        /// The email of the user
+        email: String,
+        /// Channel to send back the password salt
+        /// Returns Ok(Option<String>) with the password salt or an error if the query fails
+        result_sender: oneshot::Sender<Result<Option<String>>>,
     },
     /// Retrieves the user ID by email and password
     GetUserIdByEmailPassword {
@@ -892,8 +901,8 @@ pub enum AtomaAtomaStateManagerEvent {
         /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
     },
-    /// Retrieves the salt of a user
-    GetSalt {
+    /// Retrieves the zk_salt of a user
+    GetZkSalt {
         /// The user ID
         user_id: i64,
         /// The result sender to send back the salt

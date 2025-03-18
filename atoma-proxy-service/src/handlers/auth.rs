@@ -51,7 +51,7 @@ pub const GET_USER_PROFILE_PATH: &str = "/user_profile";
 pub const SET_USER_PROFILE_PATH: &str = "/set_user_profile";
 
 /// Set user's salt endpoint.
-pub const GET_SALT_PATH: &str = "/salt";
+pub const GET_ZK_SALT_PATH: &str = "/zk_salt";
 
 #[cfg(feature = "google-oauth")]
 /// The path for the google_oauth endpoint.
@@ -85,7 +85,7 @@ pub fn auth_router() -> Router<ProxyServiceState> {
         .route(GET_BALANCE_PATH, get(get_balance))
         .route(GET_USER_PROFILE_PATH, get(get_user_profile))
         .route(SET_USER_PROFILE_PATH, post(set_user_profile))
-        .route(GET_SALT_PATH, get(get_salt));
+        .route(GET_ZK_SALT_PATH, get(get_zk_salt));
     #[cfg(feature = "google-oauth")]
     let router = router.route(GOOGLE_OAUTH_PATH, post(google_oauth));
     router
@@ -727,16 +727,16 @@ pub async fn set_user_profile(
     Ok(Json(()))
 }
 
-/// OpenAPI documentation for the get_salt endpoint.
+/// OpenAPI documentation for the get_zk_salt endpoint.
 ///
-/// This struct is used to generate OpenAPI documentation for the get_salt
+/// This struct is used to generate OpenAPI documentation for the get_zk_salt
 /// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
-#[openapi(paths(get_salt))]
-pub struct GetSalt;
+#[openapi(paths(get_zk_salt))]
+pub struct GetZkSalt;
 
-/// Gets the salt for the user. It creates a new salt if the user does not have one.
+/// Gets the zk_salt for the user. It creates a new zk_salt if the user does not have one.
 ///
 /// # Arguments
 ///
@@ -753,14 +753,14 @@ pub struct GetSalt;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Sets the salt for the user"),
+        (status = OK, description = "Sets the zk_salt for the user"),
         (status = UNAUTHORIZED, description = "Unauthorized request"),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to set salt")
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to set zk_salt")
     )
 )]
 #[instrument(level = "info", skip_all)]
 #[axum::debug_handler]
-pub async fn get_salt(
+pub async fn get_zk_salt(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<String>> {
@@ -775,30 +775,30 @@ pub async fn get_salt(
             StatusCode::UNAUTHORIZED
         })?;
 
-    let salt = proxy_service_state
+    let zk_salt = proxy_service_state
         .atoma_state
-        .get_salt(user_id)
+        .get_zk_salt(user_id)
         .await
         .map_err(|e| {
             error!("Failed to get user profile: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let salt = if let Some(salt) = salt {
-        salt
+    let zk_salt = if let Some(zk_salt) = zk_salt {
+        zk_salt
     } else {
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let salt: [u8; 16] = rng.gen();
-        let salt = BASE64_STANDARD.encode(salt);
+        let zk_salt: [u8; 16] = rng.gen();
+        let zk_salt = BASE64_STANDARD.encode(zk_salt);
         proxy_service_state
             .atoma_state
-            .set_salt(user_id, &salt)
+            .set_zk_salt(user_id, &zk_salt)
             .await
             .map_err(|e| {
-                error!("Failed to set salt: {:?}", e);
+                error!("Failed to set zk_salt: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        salt
+        zk_salt
     };
-    Ok(Json(salt))
+    Ok(Json(zk_salt))
 }

@@ -328,10 +328,17 @@ impl Auth {
         password: &str,
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
+        let password_salt = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(30)
+            .map(char::from)
+            .collect::<String>();
+
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
                 user_profile: user_profile.clone(),
-                password: self.hash_string(password),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
+                password_salt,
                 result_sender,
             })?;
         let user_id = result_receiver
@@ -355,9 +362,20 @@ impl Auth {
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
         self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                email: email.to_string(),
+                result_sender,
+            })?;
+        let password_salt = result_receiver.await??;
+
+        let password_salt =
+            password_salt.ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
                 email: email.to_string(),
-                password: self.hash_string(password),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
                 result_sender,
             })?;
         let user_id = result_receiver

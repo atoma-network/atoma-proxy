@@ -1247,11 +1247,24 @@ pub async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
             user_profile,
             password,
+            password_salt,
             result_sender,
         } => {
-            let user_id = state_manager.state.register(user_profile, &password).await;
+            let user_id = state_manager
+                .state
+                .register(user_profile, &password, &password_salt)
+                .await;
             result_sender
                 .send(user_id)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetPasswordSalt {
+            email,
+            result_sender,
+        } => {
+            let salt = state_manager.state.get_password_salt(&email).await;
+            result_sender
+                .send(salt)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
@@ -1375,11 +1388,11 @@ pub async fn handle_state_manager_event(
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::GetSalt {
+        AtomaAtomaStateManagerEvent::GetZkSalt {
             user_id,
             result_sender,
         } => {
-            let salt = state_manager.state.get_salt(user_id).await;
+            let salt = state_manager.state.get_zk_salt(user_id).await;
             result_sender
                 .send(salt)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
@@ -1389,7 +1402,7 @@ pub async fn handle_state_manager_event(
             salt,
             result_sender,
         } => {
-            let success = state_manager.state.set_salt(user_id, &salt).await;
+            let success = state_manager.state.set_zk_salt(user_id, &salt).await;
             result_sender
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;

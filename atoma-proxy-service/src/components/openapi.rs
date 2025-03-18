@@ -11,12 +11,12 @@ use crate::handlers::auth::{GoogleOAuth, GOOGLE_OAUTH_PATH};
 use crate::{
     handlers::{
         auth::{
-            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSalt, GetSuiAddress,
-            GetUserProfile, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, SetUserProfile,
-            UpdateSuiAddress, UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH,
-            GET_BALANCE_PATH, GET_SALT_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH,
-            LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH, SET_USER_PROFILE_PATH,
-            UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
+            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSuiAddress,
+            GetUserProfile, GetZkSalt, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi,
+            SetUserProfile, UpdateSuiAddress, UsdcPayment, GENERATE_API_TOKEN_PATH,
+            GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH,
+            GET_ZK_SALT_PATH, LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH,
+            SET_USER_PROFILE_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
@@ -53,7 +53,7 @@ pub fn openapi_router() -> Router {
             (path = GET_BALANCE_PATH, api = GetBalance, tags = ["Auth"]),
             (path = GET_USER_PROFILE_PATH, api = GetUserProfile, tags = ["Auth"]),
             (path = SET_USER_PROFILE_PATH, api = SetUserProfile, tags = ["Auth"]),
-            (path = GET_SALT_PATH, api = GetSalt, tags = ["Auth"]),
+            (path = GET_ZK_SALT_PATH, api = GetZkSalt, tags = ["Auth"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),
             (path = LATENCY_PATH, api = GetLatency, tags = ["Stats"]),

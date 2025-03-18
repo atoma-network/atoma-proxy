@@ -1,0 +1,2 @@
+ALTER TABLE users RENAME COLUMN salt TO zk_salt;
+ALTER TABLE users ADD COLUMN password_salt TEXT NOT NULL;
