@@ -3882,10 +3882,12 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip(self))]
     pub async fn is_api_token_valid(&self, api_token: &str) -> Result<i64> {
-        let is_valid = sqlx::query("SELECT user_id FROM api_tokens WHERE token = $1")
-            .bind(api_token)
-            .fetch_one(&self.db)
-            .await?;
+        let is_valid = sqlx::query(
+            "UPDATE api_tokens SET last_used_timestamp = now() WHERE token = $1 RETURNING user_id",
+        )
+        .bind(api_token)
+        .fetch_one(&self.db)
+        .await?;
 
         Ok(is_valid.get::<i64, _>(0))
     }
@@ -3960,7 +3962,7 @@ impl AtomaState {
     #[instrument(level = "trace", skip(self))]
     pub async fn get_api_tokens_for_user(&self, user_id: i64) -> Result<Vec<TokenResponse>> {
         let tokens = sqlx::query(
-            "SELECT id, RIGHT(token,4) as token_last_4, creation_timestamp as created_at, name FROM api_tokens WHERE user_id = $1",
+            "SELECT id, RIGHT(token,4) as token_last_4, last_used_timestamp, creation_timestamp as created_at, name FROM api_tokens WHERE user_id = $1",
         )
         .bind(user_id)
         .fetch_all(&self.db)
