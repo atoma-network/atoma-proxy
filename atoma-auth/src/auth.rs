@@ -328,10 +328,17 @@ impl Auth {
         password: &str,
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
+        let password_salt = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(30)
+            .map(char::from)
+            .collect::<String>();
+
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
                 user_profile: user_profile.clone(),
-                password: self.hash_string(password),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
+                password_salt,
                 result_sender,
             })?;
         let user_id = result_receiver
@@ -355,9 +362,20 @@ impl Auth {
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
         self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                email: email.to_string(),
+                result_sender,
+            })?;
+        let password_salt = result_receiver.await??;
+
+        let password_salt =
+            password_salt.ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
                 email: email.to_string(),
-                password: self.hash_string(password),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
                 result_sender,
             })?;
         let user_id = result_receiver
@@ -1063,11 +1081,23 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     async fn test_token_flow() {
         let user_id = 123;
         let email = "email";
+        let salt = "salt";
         let password = "top_secret";
         let (auth, receiver) = setup_test().await;
-        let hash_password = auth.hash_string(password);
+        let hash_password = auth.hash_string(&format!("{salt}:{password}"));
         let mock_handle = tokio::task::spawn(async move {
             // First event is for the user to log in to get the tokens
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                    email: event_email,
+                    result_sender,
+                } => {
+                    assert_eq!(email, event_email);
+                    result_sender.send(Ok(Some(salt.to_string()))).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
             let event = receiver.recv_async().await.unwrap();
             match event {
                 AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {

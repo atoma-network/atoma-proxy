@@ -1141,14 +1141,53 @@ impl AtomaState {
         &self,
         user_profile: UserProfile,
         password_hash: &str,
+        password_salt: &str,
     ) -> Result<Option<i64>> {
-        let result = sqlx::query("INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id")
+        let result = sqlx::query("INSERT INTO users (email, name, password_hash, password_salt) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING RETURNING id")
         .bind(user_profile.email)
         .bind(user_profile.name)
         .bind(password_hash)
+        .bind(password_salt)
         .fetch_optional(&self.db)
         .await?;
         Ok(result.map(|record| record.get("id")))
+    }
+
+    /// Get the password salt of a user.
+    ///
+    /// This method fetches the password salt of a user from the `users` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `email` - The email of the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<String>>`: A result containing either:
+    ///   - `Ok(Some(String))`: The password salt of the user.
+    ///   - `Ok(None)`: If the user does not exist.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn get_password_salt(state_manager: &AtomaStateManager, email: &str) -> Result<Option<String>, AtomaStateManagerError> {
+    ///   state_manager.get_password_salt(email).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_password_salt(&self, email: &str) -> Result<Option<String>> {
+        let result = sqlx::query("SELECT password_salt FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(&self.db)
+            .await?;
+        Ok(result.map(|record| record.get("password_salt")))
     }
 
     /// Checks if a node is subscribed to a specific task.
@@ -4573,9 +4612,9 @@ impl AtomaState {
         Ok(())
     }
 
-    /// Gets the salt for the user.
+    /// Gets the zk_salt for the user.
     ///
-    /// This method fetches the salt for the user from the `users` table.
+    /// This method fetches the zk_salt for the user from the `users` table.
     ///
     /// # Arguments
     ///
@@ -4584,7 +4623,7 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<Option<String>>`: A result containing either:
-    ///   - `Ok(Some(String))`: The salt for the user.
+    ///   - `Ok(Some(String))`: The zk_salt for the user.
     ///   - `Ok(None)`: If the user is not found.
     ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
     ///
@@ -4594,23 +4633,24 @@ impl AtomaState {
     ///
     /// - The database query fails to execute.
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_salt(&self, user_id: i64) -> Result<Option<String>> {
-        let salt = sqlx::query_scalar::<_, Option<String>>("SELECT salt FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(&self.db)
-            .await?;
+    pub async fn get_zk_salt(&self, user_id: i64) -> Result<Option<String>> {
+        let zk_salt =
+            sqlx::query_scalar::<_, Option<String>>("SELECT zk_salt FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.db)
+                .await?;
 
-        Ok(salt.flatten())
+        Ok(zk_salt.flatten())
     }
 
-    /// Sets the salt for the user.
+    /// Sets the zk_salt for the user.
     ///
-    /// This method updates the `salt` field for the user in the `users` table.
+    /// This method updates the `zk_salt` field for the user in the `users` table.
     ///
     /// # Arguments
     ///
     /// * `user_id` - The unique identifier of the user.
-    /// * `salt` - The new salt to store for the user.
+    /// * `zk_salt` - The new zk_salt to store for the user.
     ///
     /// # Returns
     ///
@@ -4621,9 +4661,9 @@ impl AtomaState {
     /// This function will return an error if:
     ///
     /// - The database query fails to execute.
-    pub async fn set_salt(&self, user_id: i64, salt: &str) -> Result<()> {
-        sqlx::query("UPDATE users SET salt = $1 WHERE id = $2")
-            .bind(salt)
+    pub async fn set_zk_salt(&self, user_id: i64, zk_salt: &str) -> Result<()> {
+        sqlx::query("UPDATE users SET zk_salt = $1 WHERE id = $2")
+            .bind(zk_salt)
             .bind(user_id)
             .execute(&self.db)
             .await?;

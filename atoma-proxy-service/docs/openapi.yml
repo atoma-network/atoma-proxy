@@ -390,11 +390,11 @@ paths:
           description: Failed to set user profile
       security:
       - bearerAuth: []
-  /salt:
+  /zk_salt:
     get:
       tags:
       - Auth
-      summary: Gets the salt for the user. It creates a new salt if the user does not have one.
+      summary: Gets the zk_salt for the user. It creates a new zk_salt if the user does not have one.
       description: |-
         # Arguments
 
@@ -404,14 +404,14 @@ paths:
         # Returns
 
         * `Result<Json<()>>` - A JSON response indicating the success of the operation
-      operationId: get_salt
+      operationId: get_zk_salt
       responses:
         '200':
-          description: Sets the salt for the user
+          description: Sets the zk_salt for the user
         '401':
           description: Unauthorized request
         '500':
-          description: Failed to set salt
+          description: Failed to set zk_salt
       security:
       - bearerAuth: []
   /tasks:
