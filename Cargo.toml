@@ -36,6 +36,7 @@ itertools = "0.14.0"
 jsonwebtoken = "9.3.0"
 tracing-loki = "0.2.6"
 mockito = "1.6.1"
+remote-attestation = { git = "https://github.com/atoma-network/nvrust", branch = "main" }
 once_cell = "1.21.0"
 opentelemetry = "0.27.1"
 opentelemetry-otlp = "0.27.0"

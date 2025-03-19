@@ -8,7 +8,7 @@ use atoma_sui::events::{
 };
 use atoma_utils::compression::decompress_bytes;
 use chrono::{DateTime, Utc};
-use serde_json::Value;
+use remote_attestation::DeviceEvidence;
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
@@ -1501,8 +1501,8 @@ pub async fn handle_node_key_rotation_event(
         evidence_bytes,
     } = event;
     let original_evidence_bytes = decompress_bytes(&evidence_bytes)?;
-    let evidence_data = serde_json::from_slice::<Vec<Value>>(&original_evidence_bytes)?;
-    let is_valid = utils::attest_nvidia_evidence_list(
+    let evidence_data = serde_json::from_slice::<Vec<DeviceEvidence>>(&original_evidence_bytes)?;
+    let is_valid = remote_attestation_verification::attest_nvidia_evidence_list(
         state_manager,
         &evidence_data,
         &new_public_key,
@@ -1673,26 +1673,27 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
     Ok(())
 }
 
-pub mod utils {
-    use crate::AtomaStateManager;
+pub mod remote_attestation_verification {
+    use crate::{errors::AtomaStateRemoteAttestationError, AtomaStateManager};
 
-    use super::Result;
-
-    use serde_json::Value;
+    use remote_attestation::{attest_remote, AttestError, DeviceEvidence};
     use tracing::instrument;
+
+    type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
     #[instrument(level = "trace", skip_all)]
     pub async fn attest_nvidia_evidence_list(
         state_manager: &AtomaStateManager,
-        _evidence_bytes: &[Value],
+        evidence_data: &[DeviceEvidence],
         new_public_key: &[u8],
         device_type: u16,
     ) -> Result<()> {
         let contract_nonce = state_manager
             .state
             .get_contract_key_rotation_nonce()
-            .await?;
-        let _should_be_nonce = blake3::hash(
+            .await
+            .map_err(|_| AtomaStateRemoteAttestationError::FailedToRetrieveContractNonce)?;
+        let should_be_nonce = blake3::hash(
             &[
                 &contract_nonce.to_le_bytes()[..],
                 new_public_key,
@@ -1700,6 +1701,14 @@ pub mod utils {
             ]
             .concat(),
         );
-        Ok(())
+        let should_be_nonce_hex = hex::encode(should_be_nonce.as_bytes());
+        let result = attest_remote(evidence_data, &should_be_nonce_hex, None, None, None).await?;
+        if result.0 {
+            Ok(())
+        } else {
+            Err(AtomaStateRemoteAttestationError::FailedToAttestRemote(
+                AttestError::RemoteAttestationFailed,
+            ))
+        }
     }
 }
