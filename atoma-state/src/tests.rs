@@ -303,10 +303,11 @@ async fn create_test_stack(
     num_compute_units: i64,
     user_id: i64,
 ) -> sqlx::Result<()> {
-    sqlx::query("INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)")
+    sqlx::query("INSERT INTO users (id, name, email, password_salt, password_hash) VALUES ($1, $2, $3, $4, $5)")
         .bind(user_id)
         .bind(format!("user_{user_id}")) // Create unique email
         .bind(format!("test_user_{user_id}")) // Create unique email
+        .bind("test_password_salt") // Default password salt
         .bind("test_password_hash") // Default password hash
         .execute(pool)
         .await?;
