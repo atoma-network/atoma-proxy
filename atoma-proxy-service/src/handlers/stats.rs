@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use serde::Serialize;
 use serde_json::Value;
 use tracing::{error, instrument};
 use utoipa::OpenApi;
@@ -18,12 +19,34 @@ use crate::{
 
 type Result<T> = std::result::Result<T, StatusCode>;
 
+/// Panel response is part of the DashboardResponse.
+#[derive(Serialize)]
+pub struct PanelResponse {
+    /// The title of the panel.
+    pub title: String,
+    /// Description of the panel.
+    pub description: Option<String>,
+    /// The unit of the panel.
+    pub unit: Option<String>,
+    /// The query for the panel.
+    pub query: grafana::Query,
+}
+
+/// Dashboard response is part of the GraphsResponse.
+#[derive(Serialize)]
+pub struct DashboardResponse {
+    /// The title of the dashboard.
+    pub title: String,
+    /// The panels of the dashboard.
+    pub panels: Vec<PanelResponse>,
+}
+
 /// Response for getting grafana graphs.
 ///
 /// This struct represents the response for the get_grafana_graphs endpoint.
 /// It's vector of tuples where the first element is the name of the dashboard and the second element tuple of panels.
 /// Each panel has a title and a graph data.
-pub type GraphsResponse = Vec<(String, Vec<(String, String, grafana::Query)>)>;
+pub type GraphsResponse = Vec<DashboardResponse>;
 
 /// The path for the compute_units_processed endpoint.
 pub const COMPUTE_UNITS_PROCESSED_PATH: &str = "/compute_units_processed";
@@ -337,8 +360,11 @@ async fn get_graphs(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         let dashboard_title = dashboard.title();
-        let queries: Vec<(String, String, grafana::Query)> = dashboard.into();
-        results.push((dashboard_title, queries));
+        let queries: Vec<PanelResponse> = dashboard.into();
+        results.push(DashboardResponse {
+            title: dashboard_title,
+            panels: queries,
+        });
     }
 
     Ok(Json(results))
