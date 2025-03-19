@@ -91,4 +91,14 @@ pub enum AtomaStateManagerError {
     RemoteAttestationVerificationError(#[from] RemoteAttestationVerificationError),
     #[error("Compression error: {0}")]
     CompressionError(#[from] CompressionError),
+    #[error("Remote attestation error: {0}")]
+    RemoteAttestationError(#[from] AtomaStateRemoteAttestationError),
+}
+
+#[derive(Error, Debug)]
+pub enum AtomaStateRemoteAttestationError {
+    #[error("Failed to attest remote: {0}")]
+    FailedToAttestRemote(#[from] remote_attestation::AttestError),
+    #[error("Failed to retrieve contract nonce")]
+    FailedToRetrieveContractNonce,
 }
