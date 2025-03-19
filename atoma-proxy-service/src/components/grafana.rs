@@ -4,6 +4,8 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::instrument;
 
+use crate::handlers::stats::PanelResponse;
+
 /// The list of dashboards uids returned from grafana
 #[derive(Deserialize)]
 struct DashboardList {
@@ -20,6 +22,20 @@ struct Time {
     to: String,
 }
 
+/// The defaults struct from grafana
+#[derive(Deserialize, Serialize)]
+struct Defaults {
+    /// The unit of the data
+    unit: Option<String>,
+}
+
+/// The fields config struct from grafana
+#[derive(Deserialize, Serialize)]
+struct FieldsConfig {
+    /// The defaults config
+    defaults: Defaults,
+}
+
 /// The panel struct from grafana, but incomplete, because we don't care about everything.
 #[derive(Deserialize, Serialize)]
 struct Panel {
@@ -28,7 +44,10 @@ struct Panel {
     /// The title of the panel
     title: String,
     /// The panel description
-    description: String,
+    description: Option<String>,
+    /// The fields config
+    #[serde(rename = "fieldConfig")]
+    field_config: FieldsConfig,
 }
 
 /// The inner dashboard struct from grafana, but incomplete, because we don't care about everything.
@@ -68,23 +87,22 @@ pub struct Query {
 }
 
 /// Convert a `Dashboard` into a vector of queries
-impl From<Dashboard> for Vec<(String, String, Query)> {
+impl From<Dashboard> for Vec<PanelResponse> {
     fn from(dashboard: Dashboard) -> Self {
         let Time { from, to } = dashboard.dashboard.time;
         dashboard
             .dashboard
             .panels
             .into_iter()
-            .map(|panel| {
-                (
-                    panel.title,
-                    panel.description,
-                    Query {
-                        queries: panel.targets,
-                        from: from.clone(),
-                        to: to.clone(),
-                    },
-                )
+            .map(|panel| PanelResponse {
+                title: panel.title,
+                description: panel.description,
+                unit: panel.field_config.defaults.unit,
+                query: Query {
+                    queries: panel.targets,
+                    from: from.clone(),
+                    to: to.clone(),
+                },
             })
             .collect()
     }
