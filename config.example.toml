@@ -8,7 +8,7 @@ max_concurrent_requests = 10                                                    
 limit = 100                                                                             # Maximum number of items per page for paginated responses
 sui_config_path = "~/.sui/sui_config/client.yaml"                                       # Path to Sui client configuration file (default for Unix systems)
 sui_keystore_path = "~/.sui/sui_config/sui.keystore"                                    # Path to Sui keystore containing account keys (default for Unix systems)
-cursor_path = "./cursor.toml"                                                           # Path to store the event cursor state
+cursor_path = "/app/data/cursor.toml"                                                           # Path to store the event cursor state
 
 [atoma_state]
 # PostgreSQL connection string. Must match ATOMA_STATE_DATABASE_URL in .env
@@ -71,3 +71,5 @@ bootstrap_nodes = [
     "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
 ]
 metrics_endpoints = {}                 # Should be empty
+# The path to the local key
+local_key = "/app/data/local_key"
