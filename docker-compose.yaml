@@ -7,7 +7,7 @@ x-atoma-proxy-base: &atoma-proxy-base
       TRACE_LEVEL: ${TRACE_LEVEL:-info}
   volumes:
     - ${CONFIG_PATH:-./config.toml}:/app/config.toml
-    - atoma-local-key:/app/local_key
+    - ./local-key:/app/local_key
     - ./logs:/app/logs
     - sui-config-volume:/root/.sui/sui_config
     - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
