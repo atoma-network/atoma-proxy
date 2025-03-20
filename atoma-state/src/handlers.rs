@@ -1694,7 +1694,7 @@ pub mod remote_attestation_verification {
 
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
-    #[instrument(level = "trace", skip_all)]
+    #[instrument(level = "info", skip_all)]
     pub async fn attest_nvidia_evidence_list(
         state_manager: &AtomaStateManager,
         evidence_data: &[DeviceEvidence],
@@ -1715,10 +1715,35 @@ pub mod remote_attestation_verification {
             .concat(),
         );
         let should_be_nonce_hex = hex::encode(should_be_nonce.as_bytes());
-        let result = attest_remote(evidence_data, &should_be_nonce_hex, None, None, None).await?;
+        let result = match attest_remote(evidence_data, &should_be_nonce_hex, None, None, None).await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::error!(
+                    target = "atoma-state-handlers",
+                    event = "attest-nvidia-evidence-list",
+                    "Attestation failed for device type: {device_type} and public key: {}, with error: {e}",
+                    hex::encode(new_public_key),
+                );
+                return Err(AtomaStateRemoteAttestationError::FailedToAttestRemote(
+                    AttestError::RemoteAttestationFailed,
+                ));
+            }
+        };
         if result.0 {
+            tracing::info!(
+                target = "atoma-state-handlers",
+                event = "attest-nvidia-evidence-list",
+                "Attestation successful for device type: {device_type} and public key: {}",
+                hex::encode(new_public_key),
+            );
             Ok(())
         } else {
+            tracing::error!(
+                target = "atoma-state-handlers",
+                event = "attest-nvidia-evidence-list",
+                "Attestation failed for device type: {device_type} and public key: {}",
+                hex::encode(new_public_key),
+            );
             Err(AtomaStateRemoteAttestationError::FailedToAttestRemote(
                 AttestError::RemoteAttestationFailed,
             ))
