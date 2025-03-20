@@ -1715,7 +1715,9 @@ pub mod remote_attestation_verification {
             .concat(),
         );
         let should_be_nonce_hex = hex::encode(should_be_nonce.as_bytes());
-        let result = match attest_remote(evidence_data, &should_be_nonce_hex, None, None, None).await {
+        let result = match attest_remote(evidence_data, &should_be_nonce_hex, None, None, None)
+            .await
+        {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!(
