@@ -1694,7 +1694,14 @@ pub mod remote_attestation_verification {
 
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
-    #[instrument(level = "info", skip_all)]
+    #[instrument(
+        level = "info", 
+        skip_all,
+        fields(
+            device_type = device_type,
+            new_public_key = hex::encode(new_public_key),
+        )
+    )]
     pub async fn attest_nvidia_evidence_list(
         state_manager: &AtomaStateManager,
         evidence_data: &[DeviceEvidence],

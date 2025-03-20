@@ -98,6 +98,7 @@ async fn main() -> Result<()> {
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = Subscriber::new(
         config.sui.clone(),
+        true,
         event_subscriber_sender,
         stack_retrieve_receiver,
         confidential_compute_service_sender,
