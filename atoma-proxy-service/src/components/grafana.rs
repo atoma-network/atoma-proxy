@@ -48,6 +48,8 @@ struct Panel {
     /// The fields config
     #[serde(rename = "fieldConfig")]
     field_config: FieldsConfig,
+    /// Interval set in grafana
+    interval: Option<String>,
 }
 
 /// The inner dashboard struct from grafana, but incomplete, because we don't care about everything.
@@ -98,6 +100,7 @@ impl From<Dashboard> for Vec<PanelResponse> {
                 title: panel.title,
                 description: panel.description,
                 unit: panel.field_config.defaults.unit,
+                interval: panel.interval,
                 query: Query {
                     queries: panel.targets,
                     from: from.clone(),

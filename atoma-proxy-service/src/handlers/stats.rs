@@ -30,6 +30,8 @@ pub struct PanelResponse {
     pub unit: Option<String>,
     /// The query for the panel.
     pub query: grafana::Query,
+    /// The interval of the panel.
+    pub interval: Option<String>,
 }
 
 /// Dashboard response is part of the GraphsResponse.
