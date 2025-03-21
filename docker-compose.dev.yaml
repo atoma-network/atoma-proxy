@@ -3,8 +3,6 @@ x-atoma-proxy-base: &atoma-proxy-base
   build: &atoma-proxy-base-build
     context: .
     dockerfile: Dockerfile
-    args: &atoma-proxy-base-build-args
-      TRACE_LEVEL: ${TRACE_LEVEL:-info}
   env_file:
     - .env
   volumes:
@@ -76,7 +74,6 @@ services:
     build:
       <<: *atoma-proxy-base-build
       args:
-        <<: *atoma-proxy-base-build-args
         PROFILE: local
     ports:
       - "${ATOMA_SERVICE_PORT:-8080}:8080"
@@ -90,7 +87,6 @@ services:
     build:
       <<: *atoma-proxy-base-build
       args:
-        <<: *atoma-proxy-base-build-args
         PROFILE: cloud
     labels:
       - "traefik.enable=true"
