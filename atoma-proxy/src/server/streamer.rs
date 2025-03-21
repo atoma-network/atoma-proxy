@@ -22,6 +22,7 @@ use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_st
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
     CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
+    CHAT_COMPLETIONS_TOTAL_TOKENS,
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -196,6 +197,10 @@ impl Streamer {
                 );
                 Error::new("Error getting total tokens from usage")
             })?;
+
+        // Record the total tokens in the chat completions total tokens metric
+        CHAT_COMPLETIONS_TOTAL_TOKENS
+            .add(total_tokens, &[KeyValue::new("model", model_name.clone())]);
 
         // Update the nodes throughput performance
         if let Err(e) = self.state_manager_sender.send(

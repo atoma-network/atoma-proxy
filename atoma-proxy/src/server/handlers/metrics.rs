@@ -163,9 +163,9 @@ pub static TEXT_EMBEDDINGS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| 
 /// - Labels:
 ///   - `model`: The model used for completion
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
-        .u64_counter("atoma_chat_completions_estimated_total_tokens")
+        .u64_counter("atoma_chat_completions_total_tokens")
         .with_description("The estimated total number of tokens processed")
         .with_unit("tokens")
         .build()

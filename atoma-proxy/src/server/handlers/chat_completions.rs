@@ -38,8 +38,8 @@ use tracing::instrument;
 use utoipa::OpenApi;
 
 use super::metrics::{
-    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS, CHAT_COMPLETIONS_LATENCY_METRICS,
-    CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
+    CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS,
+    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
 use super::request_model::RequestModel;
@@ -250,11 +250,6 @@ async fn handle_chat_completions_request(
     payload: Value,
     is_streaming: bool,
 ) -> Result<Response<Body>> {
-    // Record the estimated total tokens in the chat completions estimated total tokens metric
-    CHAT_COMPLETIONS_ESTIMATED_TOTAL_TOKENS.add(
-        metadata.num_compute_units,
-        &[KeyValue::new("model", metadata.model_name.clone())],
-    );
     // Record the request in the chat completions num requests metric
     CHAT_COMPLETIONS_NUM_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
 
@@ -594,6 +589,9 @@ async fn handle_non_streaming_response(
         .and_then(|usage| usage.get("prompt_tokens"))
         .and_then(serde_json::Value::as_u64)
         .map_or(0, |n| n as i64);
+
+    // Record the total tokens in the chat completions total tokens metric
+    CHAT_COMPLETIONS_TOTAL_TOKENS.add(total_tokens, &[KeyValue::new("model", model_name.clone())]);
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
