@@ -591,7 +591,10 @@ async fn handle_non_streaming_response(
         .map_or(0, |n| n as i64);
 
     // Record the total tokens in the chat completions total tokens metric
-    CHAT_COMPLETIONS_TOTAL_TOKENS.add(total_tokens, &[KeyValue::new("model", model_name.clone())]);
+    CHAT_COMPLETIONS_TOTAL_TOKENS.add(
+        total_tokens as u64,
+        &[KeyValue::new("model", model_name.clone())],
+    );
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;

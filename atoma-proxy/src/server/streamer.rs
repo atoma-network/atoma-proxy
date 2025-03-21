@@ -199,8 +199,10 @@ impl Streamer {
             })?;
 
         // Record the total tokens in the chat completions total tokens metric
-        CHAT_COMPLETIONS_TOTAL_TOKENS
-            .add(total_tokens, &[KeyValue::new("model", model_name.clone())]);
+        CHAT_COMPLETIONS_TOTAL_TOKENS.add(
+            total_tokens as u64,
+            &[KeyValue::new("model", self.model_name.clone())],
+        );
 
         // Update the nodes throughput performance
         if let Err(e) = self.state_manager_sender.send(
