@@ -32,6 +32,9 @@ pub struct PanelResponse {
     pub query: grafana::Query,
     /// The interval of the panel.
     pub interval: Option<String>,
+    /// Type of the graph.
+    #[serde(rename = "type")]
+    pub graph_type: String,
 }
 
 /// Dashboard response is part of the GraphsResponse.
