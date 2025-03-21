@@ -22,20 +22,6 @@ struct Time {
     to: String,
 }
 
-/// The defaults struct from grafana
-#[derive(Deserialize, Serialize)]
-struct Defaults {
-    /// The unit of the data
-    unit: Option<String>,
-}
-
-/// The fields config struct from grafana
-#[derive(Deserialize, Serialize)]
-struct FieldsConfig {
-    /// The defaults config
-    defaults: Defaults,
-}
-
 /// The panel struct from grafana, but incomplete, because we don't care about everything.
 #[derive(Deserialize, Serialize)]
 struct Panel {
@@ -47,7 +33,7 @@ struct Panel {
     description: Option<String>,
     /// The fields config
     #[serde(rename = "fieldConfig")]
-    field_config: FieldsConfig,
+    field_config: Value,
     /// Interval set in grafana
     interval: Option<String>,
     /// Type of the graph
@@ -102,7 +88,7 @@ impl From<Dashboard> for Vec<PanelResponse> {
             .map(|panel| PanelResponse {
                 title: panel.title,
                 description: panel.description,
-                unit: panel.field_config.defaults.unit,
+                field_config: panel.field_config,
                 interval: panel.interval,
                 graph_type: panel.graph_type,
                 query: Query {
