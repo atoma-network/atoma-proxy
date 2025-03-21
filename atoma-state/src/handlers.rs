@@ -1722,6 +1722,14 @@ pub mod remote_attestation_verification {
             .concat(),
         );
         let should_be_nonce_hex = hex::encode(should_be_nonce.as_bytes());
+        tracing::info!(
+            target = "atoma-state-handlers",
+            event = "attest-nvidia-evidence-list",
+            contract_nonce = contract_nonce,
+            new_public_key = hex::encode(new_public_key),
+            device_type = device_type,
+            "Attesting NVIDIA evidence list, with should_be_nonce: {should_be_nonce_hex}"
+        );
         let result = match attest_remote(evidence_data, &should_be_nonce_hex, None, None, None)
             .await
         {
