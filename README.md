@@ -209,6 +209,10 @@ docker compose --profile cloud up -d --build
 ATOMA_LOG_LEVELS=atoma_p2p=info,debug docker compose --profile local up -d --build
 ```
 
+Some examples for the ATOMA_LOG_LEVELS
+- `info,atoma_p2p=off,libp2p_mdns=off,opentelemetry_sdk=off,quinn_udp=off,tracing_loki=off` - no p2p/metrics logs
+- `info,sqlx=debug` for showing the sql queries
+
 #### Container Architecture
 
 The deployment consists of two main services:
