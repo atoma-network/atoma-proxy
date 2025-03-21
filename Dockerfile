@@ -6,8 +6,6 @@ ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG TARGETARCH
 
-# Trace level argument
-ARG TRACE_LEVEL
 ARG PROFILE
 
 # Install build dependencies
@@ -33,9 +31,9 @@ COPY . .
 
 # Compile
 RUN if [ "$PROFILE" = "cloud" ]; then \
-    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy --features google-oauth; \
+    cargo build --release --bin atoma-proxy --features google-oauth; \
     else \
-    RUST_LOG=${TRACE_LEVEL} cargo build --release --bin atoma-proxy; \
+    cargo build --release --bin atoma-proxy; \
     fi
 
 # Final stage

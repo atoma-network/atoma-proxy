@@ -76,7 +76,7 @@ git clone https://github.com/atoma-network/atoma-proxy.git
 cd atoma-proxy
 ```
 
-2. Configure environment variables by creating `.env` file. Please ensure you have created the requisite user and database in your postgres instance. Once you've done that, you can use `.env.example` as template for your `.env` file.
+1. Configure environment variables by creating `.env` file. Please ensure you have created the requisite user and database in your postgres instance. Once you've done that, you can use `.env.example` as template for your `.env` file.
 
 ```bash
 cp .env.example .env
@@ -88,54 +88,52 @@ Please ensure you have created the requisite user and database in your postgres 
 POSTGRES_DB=<YOUR_DB_NAME>
 POSTGRES_USER=<YOUR_DB_USER>
 POSTGRES_PASSWORD=<YOUR_DB_PASSWORD>
-
-TRACE_LEVEL=info
 ```
 
-3. Configure `config.toml`, using `config.example.toml` as template.
+1. Configure `config.toml`, using `config.example.toml` as template.
 
 ## Configuration Reference
 
 ### Sui Configuration (`[atoma_sui]`)
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `http_rpc_node_addr` | Sui RPC node endpoint for testnet network | `https://fullnode.testnet.sui.io:443` |
-| `atoma_db` | ATOMA database object ID on testnet | `0x741693...` |
-| `atoma_package_id` | ATOMA smart contract package ID on testnet | `0x0c4a52...` |
-| `usdc_package_id` | USDC smart contract package ID on testnet | `0xa1ec7f...` |
-| `request_timeout` | Maximum time to wait for RPC requests | `300 seconds` |
-| `max_concurrent_requests` | Maximum number of simultaneous RPC requests | `10` |
-| `limit` | Maximum number of items per page for paginated responses | `100` |
-| `sui_config_path` | Path to Sui client configuration file | `/root/.sui/sui_config/client.yaml` |
-| `sui_keystore_path` | Path to Sui keystore containing account keys | `/root/.sui/sui_config/sui.keystore` |
-| `cursor_path` | Path to store the event cursor state | `./cursor.toml` |
+| Parameter                 | Description                                              | Default                               |
+| ------------------------- | -------------------------------------------------------- | ------------------------------------- |
+| `http_rpc_node_addr`      | Sui RPC node endpoint for testnet network                | `https://fullnode.testnet.sui.io:443` |
+| `atoma_db`                | ATOMA database object ID on testnet                      | `0x741693...`                         |
+| `atoma_package_id`        | ATOMA smart contract package ID on testnet               | `0x0c4a52...`                         |
+| `usdc_package_id`         | USDC smart contract package ID on testnet                | `0xa1ec7f...`                         |
+| `request_timeout`         | Maximum time to wait for RPC requests                    | `300 seconds`                         |
+| `max_concurrent_requests` | Maximum number of simultaneous RPC requests              | `10`                                  |
+| `limit`                   | Maximum number of items per page for paginated responses | `100`                                 |
+| `sui_config_path`         | Path to Sui client configuration file                    | `/root/.sui/sui_config/client.yaml`   |
+| `sui_keystore_path`       | Path to Sui keystore containing account keys             | `/root/.sui/sui_config/sui.keystore`  |
+| `cursor_path`             | Path to store the event cursor state                     | `./cursor.toml`                       |
 
 ### State Configuration (`[atoma_state]`)
-| Parameter | Description | Example |
-|-----------|-------------|---------|
+| Parameter      | Description                                              | Example                                                                  |
+| -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `database_url` | PostgreSQL connection string (must match values in .env) | `postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@db:5432/<POSTGRES_DB>` |
 
 ### Service Configuration (`[atoma_service]`)
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `service_bind_address` | HTTP service binding address and port | `0.0.0.0:8080` |
-| `password` | Authentication password for the service API | `password` |
-| `models` | List of supported LLM models | `["meta-llama/Llama-3.3-70B-Instruct"]` |
-| `revisions` | Model revision/version tags | `["main"]` |
-| `hf_token` | Hugging Face API token for gated/private models | Required |
+| Parameter              | Description                                     | Example                                 |
+| ---------------------- | ----------------------------------------------- | --------------------------------------- |
+| `service_bind_address` | HTTP service binding address and port           | `0.0.0.0:8080`                          |
+| `password`             | Authentication password for the service API     | `password`                              |
+| `models`               | List of supported LLM models                    | `["meta-llama/Llama-3.3-70B-Instruct"]` |
+| `revisions`            | Model revision/version tags                     | `["main"]`                              |
+| `hf_token`             | Hugging Face API token for gated/private models | Required                                |
 
 ### Proxy Service Configuration (`[atoma_proxy_service]`)
-| Parameter | Description | Default |
-|-----------|-------------|---------|
+| Parameter              | Description                            | Default        |
+| ---------------------- | -------------------------------------- | -------------- |
 | `service_bind_address` | Proxy service binding address and port | `0.0.0.0:8081` |
 
 ### Authentication Configuration (`[atoma_auth]`)
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `secret_key` | JWT signing key for token generation | `secret_key` |
-| `access_token_lifetime` | Access token validity duration in minutes | `1` |
-| `refresh_token_lifetime` | Refresh token validity duration in days | `1` |
-| `google_client_id` | Google OAuth client ID (required for google-oauth feature) | `""` |
+| Parameter                | Description                                                | Default      |
+| ------------------------ | ---------------------------------------------------------- | ------------ |
+| `secret_key`             | JWT signing key for token generation                       | `secret_key` |
+| `access_token_lifetime`  | Access token validity duration in minutes                  | `1`          |
+| `refresh_token_lifetime` | Refresh token validity duration in days                    | `1`          |
+| `google_client_id`       | Google OAuth client ID (required for google-oauth feature) | `""`         |
 
 ### Example Configuration
 
@@ -204,6 +202,16 @@ docker compose --profile cloud up --build
 # Or run in detached mode
 docker compose --profile cloud up -d --build
 ```
+
+1. The deployment defaults to `info` level logs, in order to change the log level upon deployment, you can run set the `ATOMA_LOG_LEVELS` env variable at runtime.
+
+```bash
+ATOMA_LOG_LEVELS=atoma_p2p=info,debug docker compose --profile local up -d --build
+```
+
+Some examples for the ATOMA_LOG_LEVELS
+- `info,atoma_p2p=off,libp2p_mdns=off,opentelemetry_sdk=off,quinn_udp=off,tracing_loki=off` - no p2p/metrics logs
+- `info,sqlx=debug` for showing the sql queries
 
 #### Container Architecture
 
