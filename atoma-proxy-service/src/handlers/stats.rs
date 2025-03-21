@@ -26,8 +26,8 @@ pub struct PanelResponse {
     pub title: String,
     /// Description of the panel.
     pub description: Option<String>,
-    /// The unit of the panel.
-    pub unit: Option<String>,
+    /// The fieldConfig of the panel.
+    pub field_config: Value,
     /// The query for the panel.
     pub query: grafana::Query,
     /// The interval of the panel.
