@@ -50,6 +50,9 @@ struct Panel {
     field_config: FieldsConfig,
     /// Interval set in grafana
     interval: Option<String>,
+    /// Type of the graph
+    #[serde(rename = "type")]
+    graph_type: String,
 }
 
 /// The inner dashboard struct from grafana, but incomplete, because we don't care about everything.
@@ -101,6 +104,7 @@ impl From<Dashboard> for Vec<PanelResponse> {
                 description: panel.description,
                 unit: panel.field_config.defaults.unit,
                 interval: panel.interval,
+                graph_type: panel.graph_type,
                 query: Query {
                     queries: panel.targets,
                     from: from.clone(),
