@@ -149,6 +149,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
 	"https://github.com/asonnino/prometheus-parser",
 	"https://github.com/zhiburt/tabled",
+	"https://github.com/atoma-network/nvrust",
 ]
 
 [sources.allow-org]
