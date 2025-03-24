@@ -827,7 +827,7 @@ impl Auth {
             if balance_changes.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
         }
         let balance_changes = balance_changes.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
