@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Taplo
         env:
-          version: "0.8.1"
+          version: "0.9.3"
         run: |
           curl -Ls "https://github.com/tamasfe/taplo/releases/download/${{ env.version }}/taplo-full-linux-x86_64.gz" | \
           gzip -d > taplo && \
