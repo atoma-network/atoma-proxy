@@ -1,50 +1,62 @@
 [atoma_sui]
-http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"                              # Sui RPC node endpoint for testnet network
-atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"         # ATOMA database object ID on testnet
-atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0" # ATOMA smart contract package ID on testnet
-usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"  # USDC smart contract package ID on testnet
-request_timeout = { secs = 300, nanos = 0 }                                             # Maximum time to wait for RPC requests (in seconds)
-max_concurrent_requests = 10                                                            # Maximum number of simultaneous RPC requests
-limit = 100                                                                             # Maximum number of items per page for paginated responses
-sui_config_path = "~/.sui/sui_config/client.yaml"                                       # Path to Sui client configuration file (default for Unix systems)
-sui_keystore_path = "~/.sui/sui_config/sui.keystore"                                    # Path to Sui keystore containing account keys (default for Unix systems)
-cursor_path = "/app/data/cursor.toml"                                                           # Path to store the event cursor state
+atoma_db                = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859" # ATOMA database object ID on testnet
+atoma_package_id        = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0" # ATOMA smart contract package ID on testnet
+cursor_path             = "/app/data/cursor.toml"                                              # Path to store the event cursor state
+http_rpc_node_addr      = "https://fullnode.testnet.sui.io:443"                                # Sui RPC node endpoint for testnet network
+limit                   = 100                                                                  # Maximum number of items per page for paginated responses
+max_concurrent_requests = 10                                                                   # Maximum number of simultaneous RPC requests
+request_timeout         = { secs = 300, nanos = 0 }                                            # Maximum time to wait for RPC requests (in seconds)
+sui_config_path         = "~/.sui/sui_config/client.yaml"                                      # Path to Sui client configuration file (default for Unix systems)
+sui_keystore_path       = "~/.sui/sui_config/sui.keystore"                                     # Path to Sui keystore containing account keys (default for Unix systems)
+usdc_package_id         = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29" # USDC smart contract package ID on testnet
 
 [atoma_state]
 # PostgreSQL connection string. Must match ATOMA_STATE_DATABASE_URL in .env
 database_url = "postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB"
 
 [atoma_state.metrics_collection]
-metrics_url = ""                      # Prometheus endpoint for metrics collection
-models = [["MODALITY", "MODEL"]]      # Array of [modality_type, model_id] pairs for model configuration (possible values for modality are "Chat Completions", "Embeddings" and "Images Generations")
-top_k = 10                            # Number of top performing nodes to return in rankings
+metrics_url = "" # Prometheus endpoint for metrics collection
+models = [
+    [
+        "MODALITY",
+        "MODEL",
+    ],
+] # Array of [modality_type, model_id] pairs for model configuration (possible values for modality are "Chat Completions", "Embeddings" and "Images Generations")
+top_k = 10 # Number of top performing nodes to return in rankings
 
 [atoma_service]
-service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
-password = "password"                 # Authentication password for the service API
+hf_token = "<API_KEY>" # Hugging Face API token (required for gated/private models)
+modalities = [
+    [
+        "Chat Completions",
+    ],
+    [
+        "Chat Completions",
+    ],
+] # Supported interaction types for each model
 models = [
-  "meta-llama/Llama-3.2-3B-Instruct",
-  "meta-llama/Llama-3.2-1B-Instruct",
-]                                     # List of supported LLM models by the current proxy
-revisions = ["main", "main"]          # Model revision/version tags (must match models array length)
-modalities = [["Chat Completions"],["Chat Completions"]] # Supported interaction types for each model
-hf_token = "<API_KEY>"                # Hugging Face API token (required for gated/private models)
+    "meta-llama/Llama-3.2-1B-Instruct",
+    "meta-llama/Llama-3.2-3B-Instruct",
+] # List of supported LLM models by the current proxy
+password = "password" # Authentication password for the service API
+revisions = [ "main", "main" ] # Model revision/version tags (must match models array length)
+service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
 
 [atoma_proxy_service]
-service_bind_address = "0.0.0.0:8081" # Proxy service binding address and port (must match docker-compose.yml)
-grafana_url = ""                      # Grafana instance URL for metrics visualization
-grafana_api_token = ""                # Grafana API token (read-only permissions required)
-grafana_dashboard_tag=""              # Tag to filter which Grafana dashboards to expose
+grafana_api_token     = ""             # Grafana API token (read-only permissions required)
+grafana_dashboard_tag = ""             # Tag to filter which Grafana dashboards to expose
+grafana_url           = ""             # Grafana instance URL for metrics visualization
+service_bind_address  = "0.0.0.0:8081" # Proxy service binding address and port (must match docker-compose.yml)
 
 [atoma_auth]
-secret_key = "secret_key"             # JWT signing key for token generation
-access_token_lifetime = 1             # Access token validity duration in minutes
+access_token_lifetime  = 1            # Access token validity duration in minutes
+google_client_id       = ""           # Google OAuth client ID (required only when google-oauth feature is enabled)
 refresh_token_lifetime = 1            # Refresh token validity duration in days
-google_client_id=""                   # Google OAuth client ID (required only when google-oauth feature is enabled)
+secret_key             = "secret_key" # JWT signing key for token generation
 
 [atoma_p2p]
-heartbeat_interval = { secs = 30, nanos = 0 }        # Frequency of peer health check messages
-idle_connection_timeout = { secs = 60, nanos = 0 }   # Time after which inactive connections are closed
+heartbeat_interval      = { secs = 30, nanos = 0 } # Frequency of peer health check messages
+idle_connection_timeout = { secs = 60, nanos = 0 } # Time after which inactive connections are closed
 
 # Network listening addresses for P2P communication
 # Supports both TCP and QUIC protocols for better reliability and performance
@@ -57,19 +69,16 @@ listen_addrs = [
 ]
 
 # The list of bootstrap nodes to dial
-bootstrap_node_addrs = [
-    "/ip4/213.130.147.75/tcp/8083",
-    "/ip4/213.130.147.75/udp/8083/quic-v1",
-]
+bootstrap_node_addrs = [ "/ip4/213.130.147.75/tcp/8083", "/ip4/213.130.147.75/udp/8083/quic-v1" ]
 
 # DHT bootstrap nodes for initial P2P network discovery
 bootstrap_nodes = [
+    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
     "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
     "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
     "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
 ]
-metrics_endpoints = {}                 # Should be empty
+metrics_endpoints = {} # Should be empty
 # The path to the local key
 local_key = "/app/data/local_key"
