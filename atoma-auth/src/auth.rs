@@ -48,8 +48,8 @@ use tracing::{error, instrument};
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
 
-const SUI_BALANCE_RETRY_COUNT: usize = 3; // How many times to retry the Sui call for the balance
-const SUI_BALANCE_RETRY_PAUSE: usize = 1; // In seconds
+const SUI_BALANCE_RETRY_COUNT: usize = 5; // How many times to retry the Sui call for the balance
+const SUI_BALANCE_RETRY_PAUSE: usize = 500; // In milliseconds
 
 /// The claims struct for the JWT token
 #[derive(Debug, Serialize, Deserialize)]
@@ -827,7 +827,7 @@ impl Auth {
             if balance_changes.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_secs(SUI_BALANCE_RETRY_PAUSE)).await;
+            tokio::time::sleep(Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
         }
         let balance_changes = balance_changes.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
