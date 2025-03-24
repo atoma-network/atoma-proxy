@@ -1,39 +1,39 @@
 [package]
+name = "atoma-auth"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
-name              = "atoma-auth"
-version.workspace = true
 
 [dependencies]
-anyhow.workspace         = true
-atoma-state.workspace    = true
-atoma-sui.workspace      = true
-atoma-utils.workspace    = true
-base64.workspace         = true
-bcs.workspace            = true
-blake2.workspace         = true
-chrono.workspace         = true
-config.workspace         = true
-fastcrypto.workspace     = true
+anyhow.workspace = true
+atoma-state.workspace = true
+atoma-sui.workspace = true
+atoma-utils.workspace = true
+base64.workspace = true
+bcs.workspace = true
+blake2.workspace = true
+chrono.workspace = true
+config.workspace = true
+fastcrypto.workspace = true
 fastcrypto-zkp.workspace = true
-flume.workspace          = true
-hex.workspace            = true
-itertools.workspace      = true
-jsonwebtoken.workspace   = true
-pem.workspace            = true
-rand.workspace           = true
-regex.workspace          = true
-reqwest.workspace        = true
-rsa.workspace            = true
-serde                    = { workspace = true, features = [ "derive" ] }
-serde_json.workspace     = true
-shared-crypto.workspace  = true
-sui-keys.workspace       = true
-sui-sdk.workspace        = true
-sui-sdk-types            = { workspace = true, features = [ "serde" ] }
-thiserror.workspace      = true
-tokio.workspace          = true
-tracing.workspace        = true
+flume.workspace = true
+hex.workspace = true
+itertools.workspace = true
+jsonwebtoken.workspace = true
+pem.workspace = true
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+rsa.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+shared-crypto.workspace = true
+sui-keys.workspace = true
+sui-sdk.workspace = true
+sui-sdk-types = { workspace = true, features = ["serde"] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 [features]
-google-oauth = [  ]
+google-oauth = []
