@@ -816,8 +816,9 @@ impl Auth {
             },
         )?;
         result_receiver.await??;
-        let mut balance_changes = Err(AuthError::NoBalanceChangesFound);
-        for _ in 0..SUI_BALANCE_RETRY_COUNT {
+        let mut balance_changes;
+        let mut retry_cnt = 0;
+        loop {
             balance_changes = self
                 .sui
                 .read()
@@ -828,8 +829,14 @@ impl Auth {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
+            retry_cnt = retry_cnt + 1;
+            if retry_cnt > SUI_BALANCE_RETRY_COUNT {
+                return Err(AuthError::NoBalanceChangesFound);
+            }
         }
-        let balance_changes = balance_changes?.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
+        let balance_changes = balance_changes
+            .unwrap() // This unwrap is safe from the above loop.
+            .ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
         let mut receiver = None;
         let mut money_in = None;
