@@ -3,8 +3,11 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{Context, Result};
 use atoma_auth::{AtomaAuthConfig, Auth, Sui};
 use atoma_p2p::{AtomaP2pNode, AtomaP2pNodeConfig};
-use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, ProxyServiceState};
-use atoma_state::{AtomaState, AtomaStateManager, AtomaStateManagerConfig};
+use atoma_proxy_service::{run_proxy_service, AtomaProxyServiceConfig, Grafana, ProxyServiceState};
+use atoma_state::{
+    trigger_new_metrics_collection_task, AtomaState, AtomaStateManager, AtomaStateManagerConfig,
+    NodeMetricsCollector,
+};
 use atoma_sui::{config::Config as AtomaSuiConfig, subscriber::Subscriber};
 use atoma_utils::spawn_with_shutdown;
 use clap::Parser;
@@ -73,7 +76,7 @@ async fn main() -> Result<()> {
     let (_file_guard, _stdout_guard) =
         telemetry::setup_logging("./logs").context("Failed to setup logging")?;
 
-    info!(event = "startup", "Starting Atoma Proxy Service...");
+    info!("Starting Atoma Proxy Service...");
 
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
@@ -95,6 +98,7 @@ async fn main() -> Result<()> {
     let (_stack_retrieve_sender, stack_retrieve_receiver) = tokio::sync::mpsc::unbounded_channel();
     let sui_subscriber = Subscriber::new(
         config.sui.clone(),
+        true,
         event_subscriber_sender,
         stack_retrieve_receiver,
         confidential_compute_service_sender,
@@ -105,12 +109,26 @@ async fn main() -> Result<()> {
     let atoma_p2p_node =
         AtomaP2pNode::start(config.p2p, Arc::new(keystore), atoma_p2p_sender, true)?;
 
-    let sui = Arc::new(RwLock::new(Sui::new(&config.sui)?));
+    let (metrics_collector_sender, metrics_collector_receiver) = flume::unbounded();
+    let (_request_best_available_models_sender, request_best_available_models_receiver) =
+        flume::unbounded();
+    let node_metrics_collector = NodeMetricsCollector::new()?;
+    let metrics_collector_handle = spawn_with_shutdown(
+        trigger_new_metrics_collection_task(
+            node_metrics_collector,
+            config.state.metrics_collection,
+            metrics_collector_receiver,
+            request_best_available_models_receiver,
+            shutdown_receiver.clone(),
+        ),
+        shutdown_sender.clone(),
+    );
 
     // Initialize the `AtomaStateManager` service
     let state_manager = AtomaStateManager::new_from_url(
         &config.state.database_url,
         event_subscriber_receiver,
+        metrics_collector_sender,
         state_manager_receiver,
         atoma_p2p_receiver,
         sui.write().await.get_wallet_address()?.to_string(),
@@ -156,10 +174,17 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to bind proxy service TCP listener")?;
 
+    let grafana = Grafana::new(
+        config.proxy_service.grafana_url,
+        config.proxy_service.grafana_api_token,
+        config.proxy_service.grafana_dashboard_tag,
+    );
+
     let proxy_service_state = ProxyServiceState {
         atoma_state: AtomaState::new_from_url(&config.state.database_url).await?,
         auth,
         models_with_modalities,
+        grafana,
     };
 
     let proxy_service_handle = spawn_with_shutdown(
@@ -189,6 +214,7 @@ async fn main() -> Result<()> {
     });
 
     let (
+        metrics_collector_result,
         sui_subscriber_result,
         server_result,
         state_manager_result,
@@ -196,6 +222,7 @@ async fn main() -> Result<()> {
         atoma_p2p_node_result,
         (),
     ) = try_join!(
+        metrics_collector_handle,
         sui_subscriber_handle,
         server_handle,
         state_manager_handle,
@@ -205,6 +232,7 @@ async fn main() -> Result<()> {
     )?;
 
     handle_tasks_results(
+        metrics_collector_result,
         sui_subscriber_result,
         state_manager_result,
         server_result,
@@ -308,6 +336,7 @@ async fn initialize_tokenizers(
 /// Returns a `Result<()>`, which is `Ok(())` if all tasks succeeded, or an error if any task failed.
 #[instrument(level = "info", skip_all)]
 fn handle_tasks_results(
+    metrics_collector_result: Result<()>,
     sui_subscriber_result: Result<()>,
     state_manager_result: Result<()>,
     server_result: Result<()>,
@@ -326,6 +355,10 @@ fn handle_tasks_results(
         }
         Ok(())
     };
+    result_handler(
+        metrics_collector_result,
+        "Metrics collector terminated abruptly",
+    )?;
     result_handler(sui_subscriber_result, "Subscriber terminated abruptly")?;
     result_handler(state_manager_result, "State manager terminated abruptly")?;
     result_handler(server_result, "Server terminated abruptly")?;

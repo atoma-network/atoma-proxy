@@ -3,17 +3,14 @@ x-atoma-proxy-base: &atoma-proxy-base
   build: &atoma-proxy-base-build
     context: .
     dockerfile: Dockerfile
+  env_file:
+    - .env
   volumes:
     - ${CONFIG_PATH:-./config.toml}:/app/config.toml
     - ./logs:/app/logs
     - sui-config-volume:/root/.sui/sui_config
     - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
-    - ./data:/app/data
-  env_file:
-    - .env
-  environment:
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - RUST_LOG=${ATOMA_LOG_LEVELS:-info}
+
   depends_on:
     db:
       condition: service_healthy
@@ -42,9 +39,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "./letsencrypt:/letsencrypt"
     networks:
       - atoma-network
     labels:
@@ -57,19 +51,18 @@ services:
     profiles: ["local", "cloud"]
     image: postgres:13
     restart: always
+    env_file: .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - "${POSTGRES_PORT}:${POSTGRES_INTERNAL_PORT}"
     networks:
       - atoma-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p 5432 || exit 1"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_INTERNAL_PORT} || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -85,7 +78,6 @@ services:
     ports:
       - "${ATOMA_SERVICE_PORT:-8080}:8080"
       - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
-      - "${ATOMA_P2P_SERVICE_PORT:-8083}:8083"
 
   # Cloud proxy configuration
   atoma-proxy-cloud:
@@ -96,9 +88,6 @@ services:
       <<: *atoma-proxy-base-build
       args:
         PROFILE: cloud
-    ports:
-      - "${ATOMA_P2P_PORT:-8083}:8083/udp"
-      - "${ATOMA_P2P_PORT:-8083}:8083/tcp"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
@@ -115,9 +104,6 @@ services:
   backend:
     profiles: ["cloud"]
     image: mysten/zklogin:prover-stable
-    volumes:
-      # The ZKEY environment variable must be set to the path of the zkey file.
-      - ${ZKEY}:/app/binaries/zkLogin.zkey
     environment:
       - ZKEY=/app/binaries/zkLogin.zkey
       - WITNESS_BINARIES=/app/binaries
@@ -144,88 +130,8 @@ services:
     networks:
       - atoma-network
 
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.119.0
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
-    ports:
-      - "4317:4317" # OTLP gRPC receiver
-      - "4318:4318" # OTLP http receiver
-      - "8889:8889" # Prometheus metrics exporter
-    networks:
-      - atoma-network
-    depends_on:
-      - prometheus
-      - grafana
-      - loki
-      - tempo
-
-  prometheus:
-    image: prom/prometheus:v3.1.0
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.enable-lifecycle"
-    networks:
-      - atoma-network
-
-  grafana:
-    image: grafana/grafana:11.5.1
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    env_file: .env
-    environment:
-      - GF_SERVER_ROOT_URL=http://${GRAFANA_DOMAIN}:${GRAFANA_PORT:-3000}/
-    networks:
-      - atoma-network
-    depends_on:
-      - prometheus
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  loki:
-    image: grafana/loki:2.9.4
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/loki.yaml
-    volumes:
-      - ./loki.yaml:/etc/loki/loki.yaml
-      - loki-data:/loki
-    networks:
-      - atoma-network
-
-  tempo:
-    image: grafana/tempo:2.7.0
-    command: ["-config.file=/etc/tempo.yaml"]
-    volumes:
-      - ./tempo.yaml:/etc/tempo.yaml
-      - tempo-data:/tmp/tempo
-    ports:
-      - "3200:3200"
-    networks:
-      - atoma-network
-    user: "0"
-
 volumes:
-  postgres-data:
   sui-config-volume:
-  letsencrypt:
-  grafana_data:
-  prometheus-data:
-  loki-data:
-  tempo-data:
-  atoma-local-key:
 
 networks:
   atoma-network:

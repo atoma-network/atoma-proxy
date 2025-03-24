@@ -25,7 +25,7 @@ paths:
         '500':
           description: Service is unhealthy
   /generate_api_token:
-    get:
+    post:
       tags:
       - Auth
       summary: Generates an API token for the user.
@@ -39,6 +39,12 @@ paths:
 
         * `Result<Json<String>>` - A JSON response containing the generated API token
       operationId: generate_api_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTokenRequest'
+        required: true
       responses:
         '200':
           description: Generates an API token for the user
@@ -58,7 +64,7 @@ paths:
 
         * `proxy_service_state` - The shared state containing the state manager
         * `headers` - The headers of the request
-        * `body` - The request body containing the API token to revoke
+        * `body` - The request body containing the API token id to revoke
 
         # Returns
 
@@ -92,7 +98,7 @@ paths:
         # Arguments
 
         * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the new user
+        * `body` - The request body containing the email and password of the new user
 
         # Returns
 
@@ -102,7 +108,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRequest'
+              $ref: '#/components/schemas/RegisterAuthRequest'
         required: true
       responses:
         '200':
@@ -110,7 +116,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRequest'
+                $ref: '#/components/schemas/RegisterAuthRequest'
         '500':
           description: Failed to register user
   /login:
@@ -122,7 +128,7 @@ paths:
         # Arguments
 
         * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the username and password of the user
+        * `body` - The request body containing the email and password of the user
 
         # Returns
 
@@ -132,7 +138,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRequest'
+              $ref: '#/components/schemas/LoginAuthRequest'
         required: true
       responses:
         '200':
@@ -140,7 +146,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRequest'
+                $ref: '#/components/schemas/RegisterAuthRequest'
         '500':
           description: Failed to login user
   /api_tokens:
@@ -349,11 +355,46 @@ paths:
           description: Failed to get user profile
       security:
       - bearerAuth: []
-  /salt:
+  /set_user_profile:
     get:
       tags:
       - Auth
-      summary: Gets the salt for the user. It creates a new salt if the user does not have one.
+      summary: Retrieves the user profile for the user.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `headers` - The headers of the request
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the user profile
+
+        # Errors
+
+        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+      operationId: set_user_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfile'
+        required: true
+      responses:
+        '200':
+          description: Sets the user profile for the user
+        '401':
+          description: Unauthorized request
+        '500':
+          description: Failed to set user profile
+      security:
+      - bearerAuth: []
+  /zk_salt:
+    get:
+      tags:
+      - Auth
+      summary: Gets the zk_salt for the user. It creates a new zk_salt if the user does not have one.
       description: |-
         # Arguments
 
@@ -363,14 +404,14 @@ paths:
         # Returns
 
         * `Result<Json<()>>` - A JSON response indicating the success of the operation
-      operationId: get_salt
+      operationId: get_zk_salt
       responses:
         '200':
-          description: Sets the salt for the user
+          description: Sets the zk_salt for the user
         '401':
           description: Unauthorized request
         '500':
-          description: Failed to set salt
+          description: Failed to set zk_salt
       security:
       - bearerAuth: []
   /tasks:
@@ -583,21 +624,115 @@ paths:
               schema: {}
         '500':
           description: Failed to get node distribution
+  /get_graphs:
+    get:
+      tags:
+      - Stats
+      summary: Get graphs.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing a list of graphs
+          - `Ok(Json<Value>)` - Successfully retrieved graphs
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
+      operationId: get_graphs
+      responses:
+        '200':
+          description: Retrieves all graphs
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to get graphs
+  /get_graph_data:
+    post:
+      tags:
+      - Stats
+      summary: Get graph data.
+      description: |+
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `query` - The query for grafana
+
+        # Returns
+
+        * `Result<Json<Value>>` - A JSON response containing the graph data
+          - `Ok(Json<Value>)` - Successfully retrieved graph data
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graph data from state manager
+
+      operationId: get_graph_data
+      responses:
+        '200':
+          description: Retrieves graph data
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to get graph data
+  /google_oauth:
+    post:
+      tags:
+      - Auth
+      summary: |-
+        Logs in a user with the proxy service using Google OAuth.
+        This endpoint is used to verify a Google ID token and return an access token.
+      description: |-
+        # Arguments
+
+        * `proxy_service_state` - The shared state containing the state manager
+        * `body` - The request body containing the Google ID token
+
+        # Returns
+
+        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
+      operationId: google_oauth
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              type: string
+        required: true
+      responses:
+        '200':
+          description: Logs in a user with Google OAuth
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Failed to verify Google ID token
 components:
   schemas:
-    AuthRequest:
+    CreateTokenRequest:
+      type: object
+      description: |-
+        Request payload for creating a new API token
+
+        Contains the name of the token
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          description: The name of the token
+    LoginAuthRequest:
       type: object
       description: Request payload for user authentication
       required:
-      - username
+      - email
       - password
       properties:
+        email:
+          type: string
+          description: The user's unique identifier
         password:
           type: string
           description: The user's password
-        username:
-          type: string
-          description: The user's unique identifier
     ProofRequest:
       type: object
       description: |-
@@ -609,15 +744,30 @@ components:
       properties:
         signature:
           type: string
+          description: The signature of the user to prove ownership of the sui address
+    RegisterAuthRequest:
+      type: object
+      description: Request payload for user authentication
+      required:
+      - user_profile
+      - password
+      properties:
+        password:
+          type: string
+          description: The user's password
+        user_profile:
+          $ref: '#/components/schemas/UserProfile'
+          description: The user's unique identifier
     RevokeApiTokenRequest:
       type: object
       description: Request payload for revoking an API token
       required:
-      - api_token
+      - api_token_id
       properties:
-        api_token:
-          type: string
-          description: The API token to be revoked
+        api_token_id:
+          type: integer
+          format: int64
+          description: The API token id to be revoked
     UsdcPaymentRequest:
       type: object
       description: |-
@@ -631,8 +781,25 @@ components:
           type:
           - string
           - 'null'
+          description: The proof signature of the payment
         transaction_digest:
           type: string
+          description: The transaction digest of the payment
+    UserProfile:
+      type: object
+      description: |-
+        Represents a user profile
+        This struct is used to represent the response for the get_user_profile endpoint.
+      required:
+      - email
+      - name
+      properties:
+        email:
+          type: string
+          description: The user's email
+        name:
+          type: string
+          description: The user's name
   securitySchemes:
     bearerAuth:
       type: http

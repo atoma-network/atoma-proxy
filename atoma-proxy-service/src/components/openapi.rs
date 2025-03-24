@@ -1,4 +1,5 @@
 use axum::Router;
+use serde_json::json;
 use utoipa::{
     openapi::security::{Http, HttpAuthScheme, SecurityScheme},
     Modify, OpenApi,
@@ -10,20 +11,21 @@ use crate::handlers::auth::{GoogleOAuth, GOOGLE_OAUTH_PATH};
 use crate::{
     handlers::{
         auth::{
-            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSalt, GetSuiAddress,
-            GetUserProfile, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi, UpdateSuiAddress,
-            UsdcPayment, GENERATE_API_TOKEN_PATH, GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH,
-            GET_SALT_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH, LOGIN_PATH, REGISTER_PATH,
-            REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
+            GenerateApiTokenOpenApi, GetAllApiTokensOpenApi, GetBalance, GetSuiAddress,
+            GetUserProfile, GetZkSalt, LoginOpenApi, RegisterOpenApi, RevokeApiTokenOpenApi,
+            SetUserProfile, UpdateSuiAddress, UsdcPayment, GENERATE_API_TOKEN_PATH,
+            GET_ALL_API_TOKENS_PATH, GET_BALANCE_PATH, GET_SUI_ADDRESS_PATH, GET_USER_PROFILE_PATH,
+            GET_ZK_SALT_PATH, LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH,
+            SET_USER_PROFILE_PATH, UPDATE_SUI_ADDRESS_PATH, USDC_PAYMENT_PATH,
         },
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
             GET_CURRENT_STACKS_PATH,
         },
         stats::{
-            GetComputeUnitsProcessed, GetLatency, GetNodeDistribution, GetStatsStacks,
-            COMPUTE_UNITS_PROCESSED_PATH, GET_NODES_DISTRIBUTION_PATH, GET_STATS_STACKS_PATH,
-            LATENCY_PATH,
+            GetComputeUnitsProcessed, GetGraphData, GetGraphs, GetLatency, GetNodeDistribution,
+            GetStatsStacks, COMPUTE_UNITS_PROCESSED_PATH, GET_GRAPHS_PATH, GET_GRAPH_DATA_PATH,
+            GET_NODES_DISTRIBUTION_PATH, GET_STATS_STACKS_PATH, LATENCY_PATH,
         },
         subscriptions::{GetAllSubscriptionsOpenApi, SUBSCRIPTIONS_PATH},
         tasks::{GetAllTasksOpenApi, TASKS_PATH},
@@ -31,10 +33,11 @@ use crate::{
     HealthOpenApi, HEALTH_PATH,
 };
 
+#[allow(clippy::too_many_lines)]
 pub fn openapi_router() -> Router {
     #[derive(OpenApi)]
     #[openapi(
-        modifiers(&SecurityAddon),
+        modifiers(&SecurityAddon, &SpeakeasyExtension),
         nest(
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
             (path = GENERATE_API_TOKEN_PATH, api = GenerateApiTokenOpenApi, tags = ["Auth"]),
@@ -49,13 +52,16 @@ pub fn openapi_router() -> Router {
             (path = GET_ALL_STACKS_FOR_USER_PATH, api = GetStacksByUserId, tags = ["Stacks"]),
             (path = GET_BALANCE_PATH, api = GetBalance, tags = ["Auth"]),
             (path = GET_USER_PROFILE_PATH, api = GetUserProfile, tags = ["Auth"]),
-            (path = GET_SALT_PATH, api = GetSalt, tags = ["Auth"]),
+            (path = SET_USER_PROFILE_PATH, api = SetUserProfile, tags = ["Auth"]),
+            (path = GET_ZK_SALT_PATH, api = GetZkSalt, tags = ["Auth"]),
             (path = TASKS_PATH, api = GetAllTasksOpenApi, tags = ["Tasks"]),
             (path = COMPUTE_UNITS_PROCESSED_PATH, api = GetComputeUnitsProcessed, tags = ["Stats"]),
             (path = LATENCY_PATH, api = GetLatency, tags = ["Stats"]),
             (path = GET_STATS_STACKS_PATH, api = GetStatsStacks, tags = ["Stats"]),
             (path = SUBSCRIPTIONS_PATH, api = GetAllSubscriptionsOpenApi, tags = ["Subscriptions"]),
             (path = GET_NODES_DISTRIBUTION_PATH, api = GetNodeDistribution, tags = ["Stats"]),
+            (path = GET_GRAPHS_PATH, api = GetGraphs, tags = ["Stats"]),
+            (path = GET_GRAPH_DATA_PATH, api = GetGraphData, tags = ["Stats"]),
         ),
         tags(
             (name = "Health", description = "Health check endpoints"),
@@ -89,6 +95,9 @@ pub fn openapi_router() -> Router {
 
     struct SecurityAddon;
 
+    #[derive(Default)]
+    struct SpeakeasyExtension;
+
     impl Modify for SecurityAddon {
         fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
             if let Some(components) = openapi.components.as_mut() {
@@ -97,6 +106,27 @@ pub fn openapi_router() -> Router {
                     SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
                 );
             }
+        }
+    }
+
+    impl Modify for SpeakeasyExtension {
+        fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+            let extensions = openapi.extensions.get_or_insert_with(Default::default);
+
+            extensions.insert(
+                "x-speakeasy-retries".to_string(),
+                json!({
+                    "strategy": "backoff",
+                    "backoff": {
+                        "initialInterval": 500,
+                        "maxInterval": 60000,
+                        "maxElapsedTime": 3_600_000,
+                        "exponent": 1.5
+                    },
+                    "statusCodes": ["5XX"],
+                    "retryConnectionErrors": true
+                }),
+            );
         }
     }
 

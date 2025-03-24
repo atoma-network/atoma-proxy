@@ -16,14 +16,20 @@ ignore = [
 	# These are all related to the sui SDK, which is outside of our control
 	# derivative is not maintained
 	"RUSTSEC-2024-0388",
-	# difference 2.0.0 is unmaintained
-	"RUSTSEC-2020-0095",
 	# we don't do RSA signing on Sui (only verifying for zklogin)
 	"RUSTSEC-2023-0071",
 	# allow yaml-rust being unmaintained
 	"RUSTSEC-2024-0320",
 	# allow unmaintained proc-macro-error used in transitive dependencies
 	"RUSTSEC-2024-0370",
+	# protobuf crash due to uncontrolled recursion
+	"RUSTSEC-2024-0437",
+	# ring AES functions may panic with overflow checking
+	"RUSTSEC-2025-0009",
+	# ring unmaintained (older versions)
+	"RUSTSEC-2025-0010",
+	# paste is unmaintained
+	"RUSTSEC-2024-0436",
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
@@ -143,6 +149,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
 	"https://github.com/asonnino/prometheus-parser",
 	"https://github.com/zhiburt/tabled",
+	"https://github.com/atoma-network/nvrust",
 ]
 
 [sources.allow-org]

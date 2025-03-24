@@ -2,18 +2,39 @@ use config::Config;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Configuration for Postgres database connection.
+use crate::types::Modalities;
+
+/// Configuration for the Atoma State Manager instance.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AtomaStateManagerConfig {
     /// The URL of the Postgres database.
     pub database_url: String,
+
+    /// The configuration for metrics collection.
+    pub metrics_collection: MetricsCollectionConfig,
+}
+
+/// Configuration for metrics collection.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MetricsCollectionConfig {
+    /// The URL endpoint where metrics can be collected from.
+    pub metrics_url: String,
+
+    /// A vector of tuples containing modality types and their corresponding model identifiers.
+    pub models: Vec<(Modalities, String)>,
+
+    /// Optional parameter to limit the number of best nodes returned.
+    pub top_k: Option<usize>,
 }
 
 impl AtomaStateManagerConfig {
     /// Constructor
     #[must_use]
-    pub const fn new(database_url: String) -> Self {
-        Self { database_url }
+    pub const fn new(database_url: String, metrics_collection: MetricsCollectionConfig) -> Self {
+        Self {
+            database_url,
+            metrics_collection,
+        }
     }
 
     /// Creates a new `AtomaStateManagerConfig` instance from a configuration file.

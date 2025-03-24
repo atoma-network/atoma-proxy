@@ -79,56 +79,111 @@ cd atoma-proxy
 1. Configure environment variables by creating `.env` file. Please ensure you have created the requisite user and database in your postgres instance. Once you've done that, you can use `.env.example` as template for your `.env` file.
 
 ```bash
+cp .env.example .env
+```
+
+Please ensure you have created the requisite user and database in your postgres instance, as
+
+```bash
 POSTGRES_DB=<YOUR_DB_NAME>
 POSTGRES_USER=<YOUR_DB_USER>
 POSTGRES_PASSWORD=<YOUR_DB_PASSWORD>
-
-TRACE_LEVEL=info
 ```
 
-1. Configure `config.toml`, using `config.example.toml` as template:
+1. Configure `config.toml`, using `config.example.toml` as template.
+
+## Configuration Reference
+
+### Sui Configuration (`[atoma_sui]`)
+| Parameter                 | Description                                              | Default                               |
+| ------------------------- | -------------------------------------------------------- | ------------------------------------- |
+| `http_rpc_node_addr`      | Sui RPC node endpoint for testnet network                | `https://fullnode.testnet.sui.io:443` |
+| `atoma_db`                | ATOMA database object ID on testnet                      | `0x741693...`                         |
+| `atoma_package_id`        | ATOMA smart contract package ID on testnet               | `0x0c4a52...`                         |
+| `usdc_package_id`         | USDC smart contract package ID on testnet                | `0xa1ec7f...`                         |
+| `request_timeout`         | Maximum time to wait for RPC requests                    | `300 seconds`                         |
+| `max_concurrent_requests` | Maximum number of simultaneous RPC requests              | `10`                                  |
+| `limit`                   | Maximum number of items per page for paginated responses | `100`                                 |
+| `sui_config_path`         | Path to Sui client configuration file                    | `/root/.sui/sui_config/client.yaml`   |
+| `sui_keystore_path`       | Path to Sui keystore containing account keys             | `/root/.sui/sui_config/sui.keystore`  |
+| `cursor_path`             | Path to store the event cursor state                     | `./cursor.toml`                       |
+
+### State Configuration (`[atoma_state]`)
+| Parameter      | Description                                              | Example                                                                  |
+| -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `database_url` | PostgreSQL connection string (must match values in .env) | `postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@db:5432/<POSTGRES_DB>` |
+
+### Service Configuration (`[atoma_service]`)
+| Parameter              | Description                                     | Example                                 |
+| ---------------------- | ----------------------------------------------- | --------------------------------------- |
+| `service_bind_address` | HTTP service binding address and port           | `0.0.0.0:8080`                          |
+| `password`             | Authentication password for the service API     | `password`                              |
+| `models`               | List of supported LLM models                    | `["meta-llama/Llama-3.3-70B-Instruct"]` |
+| `revisions`            | Model revision/version tags                     | `["main"]`                              |
+| `hf_token`             | Hugging Face API token for gated/private models | Required                                |
+
+### Proxy Service Configuration (`[atoma_proxy_service]`)
+| Parameter              | Description                            | Default        |
+| ---------------------- | -------------------------------------- | -------------- |
+| `service_bind_address` | Proxy service binding address and port | `0.0.0.0:8081` |
+
+### Authentication Configuration (`[atoma_auth]`)
+| Parameter                | Description                                                | Default      |
+| ------------------------ | ---------------------------------------------------------- | ------------ |
+| `secret_key`             | JWT signing key for token generation                       | `secret_key` |
+| `access_token_lifetime`  | Access token validity duration in minutes                  | `1`          |
+| `refresh_token_lifetime` | Refresh token validity duration in days                    | `1`          |
+| `google_client_id`       | Google OAuth client ID (required for google-oauth feature) | `""`         |
+
+### Example Configuration
 
 ```toml
 [atoma_sui]
-http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"                              # Current RPC node address for testnet
-atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"         # Current ATOMA DB object ID for testnet
-atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0" # Current ATOMA package ID for testnet
-usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"  # Current USDC package ID for testnet
-request_timeout = { secs = 300, nanos = 0 }                                             # Some reference value
-max_concurrent_requests = 10                                                            # Some reference value
-limit = 100                                                                             # Some reference value
-sui_config_path = "/root/.sui/sui_config/client.yaml"                                       # Path to the Sui client configuration file, by default (on Linux, or MacOS)
-sui_keystore_path = "/root/.sui/sui_config/sui.keystore"                                    # Path to the Sui keystore file, by default (on Linux, or MacOS)
+http_rpc_node_addr = "https://fullnode.testnet.sui.io:443"
+atoma_db = "0x741693fc00dd8a46b6509c0c3dc6a095f325b8766e96f01ba73b668df218f859"
+atoma_package_id = "0x0c4a52c2c74f9361deb1a1b8496698c7e25847f7ad9abfbd6f8c511e508c62a0"
+usdc_package_id = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29"
+request_timeout = { secs = 300, nanos = 0 }
+max_concurrent_requests = 10
+limit = 100
+sui_config_path = "/root/.sui/sui_config/client.yaml"
+sui_keystore_path = "/root/.sui/sui_config/sui.keystore"
 cursor_path = "./cursor.toml"
 
 [atoma_state]
-# URL of the PostgreSQL database, the <POSTGRES_USER>, <POSTGRES_PASSWORD> and <POSTGRES_DB> variables values should be the exactly same as in the .env file
-database_url = "postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@db:5432/<POSTGRES_DB>"
+database_url = "postgresql://atoma_user:strong_password@db:5432/atoma_db"
 
 [atoma_service]
-service_bind_address = "0.0.0.0:8080" # Address to bind the service to
-password = "password" # Password for the service
-models = ["<MODEL_NAME>"] # Models supported by proxy (e.g. "meta-llama/Llama-3.3-70B-Instruct")
-revisions = ["<REVISION_NAME>"] # Revision of the above models (e.g. "main")
-hf_token = "<API_KEY>" # Hugging face api token, required if you want to access a gated model
+service_bind_address = "0.0.0.0:8080"
+password = "your_strong_service_password"
+models = ["meta-llama/Llama-3.3-70B-Instruct"]
+revisions = ["main"]
+hf_token = "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 [atoma_proxy_service]
 service_bind_address = "0.0.0.0:8081"
 
 [atoma_auth]
-secret_key = "secret_key" # Secret key for the tokens generation
-access_token_lifetime = 1 # In minutes
-refresh_token_lifetime = 1 # In days
-google_client_id="" # Google client id for google login (In case google-oauth feature is enabled)
+secret_key = "your_secure_secret_key"
+access_token_lifetime = 60    # 60 minutes
+refresh_token_lifetime = 7    # 7 days
+google_client_id = "123456789-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com"
 ```
 
-1. Create required directories
+### Important Notes:
+- Replace placeholder values (`<POSTGRES_USER>`, `<POSTGRES_PASSWORD>`, `<POSTGRES_DB>`) with actual values from your `.env` file
+- Ensure the `hf_token` is valid if using gated models
+- Use strong passwords and secret keys in production
+- The database URL must match the PostgreSQL configuration in your environment
+- Sui paths should match your deployment environment
+
+4. Create required directories
 
 ```bash
 mkdir -p data logs
 ```
 
-1. Start the containers with the desired inference services
+5. Start the containers with the desired inference services. In order to run a local deployment of the proxy, run
 
 ```bash
 # Build and start all services
@@ -138,11 +193,38 @@ docker compose --profile local up --build
 docker compose --profile local up -d --build
 ```
 
+If instead, one wishes to deploy the proxy as a cloud service, then run
+
+```bash
+# Build and start all services
+docker compose --profile cloud up --build
+
+# Or run in detached mode
+docker compose --profile cloud up -d --build
+```
+
+1. The deployment defaults to `info` level logs, in order to change the log level upon deployment, you can run set the `ATOMA_LOG_LEVELS` env variable at runtime.
+
+```bash
+ATOMA_LOG_LEVELS=atoma_p2p=info,debug docker compose --profile local up -d --build
+```
+
+Some examples for the ATOMA_LOG_LEVELS
+- `info,atoma_p2p=off,libp2p_mdns=off,opentelemetry_sdk=off,quinn_udp=off,tracing_loki=off` - no p2p/metrics logs
+- `info,sqlx=debug` for showing the sql queries
+
 #### Container Architecture
 
 The deployment consists of two main services:
 
+- **Grafana**: Manages the dashboard UI for the Atoma Proxy
 - **PostgreSQL**: Manages the database for the Atoma Proxy
+- **Traefik**: Manages the reverse proxy for the Atoma Proxy APIs, and the dashboard UI
+- **Loki**: Manages the logging for the Atoma Proxy
+- **Prometheus**: Manages the metrics for the Atoma Proxy
+- **Open Collector**: Manages the tracing for the Atoma Proxy
+- **Tempo**: Manages the tracing for the Atoma Proxy
+- **zkLogin backend and frontend**: Manages a zkLogin instance serving for login and registration of users for the Atoma Proxy, using Google OAuth and zkLogin
 - **Atoma Proxy**: Manages the proxy operations and connects to the Atoma Network
 
 #### Profiles
@@ -242,6 +324,9 @@ docker network inspect <NETWORK_NAME>
 ```bash
 # Allow Atoma Proxy port
 sudo ufw allow 8080/tcp
+
+# Allow Atoma Proxy P2P port
+sudo ufw allow 8083/tcp
 ```
 
 1. HuggingFace Token

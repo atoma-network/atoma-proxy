@@ -1,6 +1,7 @@
 use atoma_auth::AuthError;
 use atoma_state::types::{
-    AuthRequest, AuthResponse, ProofRequest, RevokeApiTokenRequest, UsdcPaymentRequest, UserProfile,
+    AuthResponse, CreateTokenRequest, LoginAuthRequest, ProofRequest, RegisterAuthRequest,
+    RevokeApiTokenRequest, TokenResponse, UsdcPaymentRequest, UserProfile,
 };
 use axum::{
     extract::State,
@@ -46,8 +47,11 @@ pub const GET_BALANCE_PATH: &str = "/balance";
 /// Get user profile endpoint
 pub const GET_USER_PROFILE_PATH: &str = "/user_profile";
 
+/// Set user profile endpoint
+pub const SET_USER_PROFILE_PATH: &str = "/set_user_profile";
+
 /// Set user's salt endpoint.
-pub const GET_SALT_PATH: &str = "/salt";
+pub const GET_ZK_SALT_PATH: &str = "/zk_salt";
 
 #[cfg(feature = "google-oauth")]
 /// The path for the google_oauth endpoint.
@@ -71,7 +75,7 @@ pub struct GetAllApiTokensOpenApi;
 pub fn auth_router() -> Router<ProxyServiceState> {
     let router = Router::new()
         .route(GET_ALL_API_TOKENS_PATH, get(get_all_api_tokens))
-        .route(GENERATE_API_TOKEN_PATH, get(generate_api_token))
+        .route(GENERATE_API_TOKEN_PATH, post(generate_api_token))
         .route(REVOKE_API_TOKEN_PATH, post(revoke_api_token))
         .route(REGISTER_PATH, post(register))
         .route(LOGIN_PATH, post(login))
@@ -80,7 +84,8 @@ pub fn auth_router() -> Router<ProxyServiceState> {
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
         .route(GET_BALANCE_PATH, get(get_balance))
         .route(GET_USER_PROFILE_PATH, get(get_user_profile))
-        .route(GET_SALT_PATH, get(get_salt));
+        .route(SET_USER_PROFILE_PATH, post(set_user_profile))
+        .route(GET_ZK_SALT_PATH, get(get_zk_salt));
     #[cfg(feature = "google-oauth")]
     let router = router.route(GOOGLE_OAUTH_PATH, post(google_oauth));
     router
@@ -121,7 +126,7 @@ fn get_jwt_from_headers(headers: &HeaderMap) -> Result<&str> {
 pub async fn get_all_api_tokens(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<String>>> {
+) -> Result<Json<Vec<TokenResponse>>> {
     let jwt = get_jwt_from_headers(&headers)?;
     Ok(Json(
         proxy_service_state
@@ -155,7 +160,7 @@ pub struct GenerateApiTokenOpenApi;
 ///
 /// * `Result<Json<String>>` - A JSON response containing the generated API token
 #[utoipa::path(
-    get,
+    post,
     path = "",
     security(
         ("bearerAuth" = [])
@@ -170,13 +175,14 @@ pub struct GenerateApiTokenOpenApi;
 pub async fn generate_api_token(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
+    body: Json<CreateTokenRequest>,
 ) -> Result<Json<String>> {
     let jwt = get_jwt_from_headers(&headers)?;
 
     Ok(Json(
         proxy_service_state
             .auth
-            .generate_api_token(jwt)
+            .generate_api_token(jwt, body.name.clone())
             .await
             .map_err(|e| {
                 error!("Failed to generate api token: {:?}", e);
@@ -200,7 +206,7 @@ pub struct RevokeApiTokenOpenApi;
 ///
 /// * `proxy_service_state` - The shared state containing the state manager
 /// * `headers` - The headers of the request
-/// * `body` - The request body containing the API token to revoke
+/// * `body` - The request body containing the API token id to revoke
 ///
 /// # Returns
 ///
@@ -227,7 +233,7 @@ pub async fn revoke_api_token(
 
     proxy_service_state
         .auth
-        .revoke_api_token(jwt, &body.api_token)
+        .revoke_api_token(jwt, body.api_token_id)
         .await
         .map_err(|e| {
             error!("Failed to revoke api token: {:?}", e);
@@ -250,7 +256,7 @@ pub struct RegisterOpenApi;
 /// # Arguments
 ///
 /// * `proxy_service_state` - The shared state containing the state manager
-/// * `body` - The request body containing the username and password of the new user
+/// * `body` - The request body containing the email and password of the new user
 ///
 /// # Returns
 ///
@@ -259,18 +265,18 @@ pub struct RegisterOpenApi;
     post,
     path = "",
     responses(
-        (status = OK, description = "Registers a new user", body = AuthRequest),
+        (status = OK, description = "Registers a new user", body = RegisterAuthRequest),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to register user")
     )
 )]
 #[instrument(level = "trace", skip_all)]
 pub async fn register(
     State(proxy_service_state): State<ProxyServiceState>,
-    body: Json<AuthRequest>,
+    body: Json<RegisterAuthRequest>,
 ) -> Result<Json<AuthResponse>> {
     let (refresh_token, access_token) = proxy_service_state
         .auth
-        .register(&body.username, &body.password)
+        .register(&body.user_profile, &body.password)
         .await
         .map_err(|e| {
             error!("Failed to register user: {:?}", e);
@@ -299,7 +305,7 @@ pub struct LoginOpenApi;
 /// # Arguments
 ///
 /// * `proxy_service_state` - The shared state containing the state manager
-/// * `body` - The request body containing the username and password of the user
+/// * `body` - The request body containing the email and password of the user
 ///
 /// # Returns
 ///
@@ -308,18 +314,18 @@ pub struct LoginOpenApi;
     post,
     path = "",
     responses(
-        (status = OK, description = "Logs in a user", body = AuthRequest),
+        (status = OK, description = "Logs in a user", body = RegisterAuthRequest),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to login user")
     )
 )]
 #[instrument(level = "trace", skip_all)]
 pub async fn login(
     State(proxy_service_state): State<ProxyServiceState>,
-    body: Json<AuthRequest>,
+    body: Json<LoginAuthRequest>,
 ) -> Result<Json<AuthResponse>> {
     let (refresh_token, access_token) = proxy_service_state
         .auth
-        .check_user_password(&body.username, &body.password)
+        .check_user_password(&body.email, &body.password)
         .await
         .map_err(|e| {
             error!("Failed to login user: {:?}", e);
@@ -657,16 +663,80 @@ pub async fn get_user_profile(
     ))
 }
 
-/// OpenAPI documentation for the get_salt endpoint.
+/// OpenAPI documentation for the set_user_profile endpoint.
 ///
-/// This struct is used to generate OpenAPI documentation for the get_salt
+/// This struct is used to generate OpenAPI documentation for the set_user_profile
 /// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
 /// the OpenAPI specification from the code.
 #[derive(OpenApi)]
-#[openapi(paths(get_salt))]
-pub struct GetSalt;
+#[openapi(paths(set_user_profile))]
+pub struct SetUserProfile;
 
-/// Gets the salt for the user. It creates a new salt if the user does not have one.
+/// Retrieves the user profile for the user.
+///
+/// # Arguments
+///
+/// * `proxy_service_state` - The shared state containing the state manager
+/// * `headers` - The headers of the request
+///
+/// # Returns
+///
+/// * `Result<Json<Value>>` - A JSON response containing the user profile
+///
+/// # Errors
+///
+/// * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
+/// * If the user profile cannot be retrieved, returns a 500 Internal Server Error
+#[utoipa::path(
+    get,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Sets the user profile for the user"),
+        (status = UNAUTHORIZED, description = "Unauthorized request"),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to set user profile")
+    )
+)]
+#[instrument(level = "info", skip_all)]
+pub async fn set_user_profile(
+    State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
+    Json(user_profile): Json<UserProfile>,
+) -> Result<Json<()>> {
+    let jwt = get_jwt_from_headers(&headers)?;
+
+    let user_id = proxy_service_state
+        .auth
+        .get_user_id_from_token(jwt)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user ID from token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    proxy_service_state
+        .atoma_state
+        .set_user_profile(user_id, user_profile)
+        .await
+        .map_err(|e| {
+            error!("Failed to get user profile: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(()))
+}
+
+/// OpenAPI documentation for the get_zk_salt endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the get_zk_salt
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(get_zk_salt))]
+pub struct GetZkSalt;
+
+/// Gets the zk_salt for the user. It creates a new zk_salt if the user does not have one.
 ///
 /// # Arguments
 ///
@@ -683,14 +753,14 @@ pub struct GetSalt;
         ("bearerAuth" = [])
     ),
     responses(
-        (status = OK, description = "Sets the salt for the user"),
+        (status = OK, description = "Sets the zk_salt for the user"),
         (status = UNAUTHORIZED, description = "Unauthorized request"),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to set salt")
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to set zk_salt")
     )
 )]
 #[instrument(level = "info", skip_all)]
 #[axum::debug_handler]
-pub async fn get_salt(
+pub async fn get_zk_salt(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,
 ) -> Result<Json<String>> {
@@ -705,30 +775,30 @@ pub async fn get_salt(
             StatusCode::UNAUTHORIZED
         })?;
 
-    let salt = proxy_service_state
+    let zk_salt = proxy_service_state
         .atoma_state
-        .get_salt(user_id)
+        .get_zk_salt(user_id)
         .await
         .map_err(|e| {
             error!("Failed to get user profile: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let salt = if let Some(salt) = salt {
-        salt
+    let zk_salt = if let Some(zk_salt) = zk_salt {
+        zk_salt
     } else {
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let salt: [u8; 16] = rng.gen();
-        let salt = BASE64_STANDARD.encode(salt);
+        let zk_salt: [u8; 16] = rng.gen();
+        let zk_salt = BASE64_STANDARD.encode(zk_salt);
         proxy_service_state
             .atoma_state
-            .set_salt(user_id, &salt)
+            .set_zk_salt(user_id, &zk_salt)
             .await
             .map_err(|e| {
-                error!("Failed to set salt: {:?}", e);
+                error!("Failed to set zk_salt: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        salt
+        zk_salt
     };
-    Ok(Json(salt))
+    Ok(Json(zk_salt))
 }

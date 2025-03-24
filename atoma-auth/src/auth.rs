@@ -6,7 +6,10 @@ use std::{str::FromStr, sync::Arc};
 use crate::google::{self, fetch_google_public_keys};
 use crate::{AtomaAuthConfig, Sui};
 use anyhow::anyhow;
-use atoma_state::{types::AtomaAtomaStateManagerEvent, AtomaStateManagerError};
+use atoma_state::{
+    types::{AtomaAtomaStateManagerEvent, TokenResponse, UserProfile},
+    AtomaStateManagerError,
+};
 use atoma_utils::hashing::blake2b_hash;
 use blake2::{
     digest::{consts::U32, generic_array::GenericArray},
@@ -44,6 +47,9 @@ use tracing::{error, instrument};
 
 /// The length of the API token
 const API_TOKEN_LENGTH: usize = 30;
+
+const SUI_BALANCE_RETRY_COUNT: usize = 5; // How many times to retry the Sui call for the balance
+const SUI_BALANCE_RETRY_PAUSE: u64 = 500; // In milliseconds
 
 /// The claims struct for the JWT token
 #[derive(Debug, Serialize, Deserialize)]
@@ -314,17 +320,28 @@ impl Auth {
         hex::encode(hash_result)
     }
 
-    /// Register user with username/password.
-    /// This method will register a new user with a username and password
+    /// Register user with email/password.
+    /// This method will register a new user with a email and password
     /// The password is hashed and stored in the DB
     /// The method will generate a new refresh and access token
     #[instrument(level = "info", skip(self, password))]
-    pub async fn register(&self, username: &str, password: &str) -> Result<(String, String)> {
+    pub async fn register(
+        &self,
+        user_profile: &UserProfile,
+        password: &str,
+    ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
+        let password_salt = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(30)
+            .map(char::from)
+            .collect::<String>();
+
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
-                username: username.to_string(),
-                password: self.hash_string(password),
+                user_profile: user_profile.clone(),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
+                password_salt,
                 result_sender,
             })?;
         let user_id = result_receiver
@@ -343,17 +360,27 @@ impl Auth {
     #[instrument(level = "info", skip(self, password))]
     pub async fn check_user_password(
         &self,
-        username: &str,
+        email: &str,
         password: &str,
     ) -> Result<(String, String)> {
         let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender.send(
-            AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-                username: username.to_string(),
-                password: self.hash_string(password),
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                email: email.to_string(),
                 result_sender,
-            },
-        )?;
+            })?;
+        let password_salt = result_receiver.await??;
+
+        let password_salt =
+            password_salt.ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
+
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+                email: email.to_string(),
+                password: self.hash_string(&format!("{password_salt}:{password}")),
+                result_sender,
+            })?;
         let user_id = result_receiver
             .await??
             .map(|user_id| user_id as u64)
@@ -385,7 +412,7 @@ impl Auth {
         };
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::OAuth {
-                username: email,
+                email,
                 result_sender,
             })?;
         let user_id = result_receiver.await??;
@@ -401,12 +428,13 @@ impl Auth {
     /// # Arguments
     ///
     /// * `jwt` - The access token to be used to generate the API token
+    /// * `name` - The name of the API token
     ///
     /// # Returns
     ///
     /// * `Result<String>` - The generated API token
     #[instrument(level = "info", skip(self))]
-    pub async fn generate_api_token(&self, jwt: &str) -> Result<String> {
+    pub async fn generate_api_token(&self, jwt: &str, name: String) -> Result<String> {
         let claims = self.get_claims_from_token(jwt).await?;
         let api_token: String = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
@@ -417,6 +445,7 @@ impl Auth {
             .send(AtomaAtomaStateManagerEvent::StoreNewApiToken {
                 user_id: claims.user_id,
                 api_token: api_token.clone(),
+                name,
             })?;
         Ok(api_token)
     }
@@ -434,12 +463,12 @@ impl Auth {
     ///
     /// * `Result<()>` - If the API token was revoked
     #[instrument(level = "info", skip(self))]
-    pub async fn revoke_api_token(&self, jwt: &str, api_token: &str) -> Result<()> {
+    pub async fn revoke_api_token(&self, jwt: &str, api_token_id: i64) -> Result<()> {
         let claims = self.get_claims_from_token(jwt).await?;
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RevokeApiToken {
                 user_id: claims.user_id,
-                api_token: api_token.to_string(),
+                api_token_id,
             })?;
         Ok(())
     }
@@ -456,7 +485,7 @@ impl Auth {
     ///
     /// * `Result<Vec<String>>` - The list of API tokens
     #[instrument(level = "info", skip(self))]
-    pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<String>> {
+    pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<TokenResponse>> {
         let claims = self.get_claims_from_token(jwt).await?;
 
         let (result_sender, result_receiver) = oneshot::channel();
@@ -787,13 +816,20 @@ impl Auth {
             },
         )?;
         result_receiver.await??;
-        let balance_changes = self
-            .sui
-            .read()
-            .await
-            .get_balance_changes(transaction_digest)
-            .await?;
-        let balance_changes = balance_changes.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
+        let mut balance_changes = Err(anyhow!("No balance changes found"));
+        for _ in 0..SUI_BALANCE_RETRY_COUNT {
+            balance_changes = self
+                .sui
+                .read()
+                .await
+                .get_balance_changes(transaction_digest)
+                .await;
+            if balance_changes.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
+        }
+        let balance_changes = balance_changes?.ok_or_else(|| AuthError::NoBalanceChangesFound)?;
         let mut sender = None;
         let mut receiver = None;
         let mut money_in = None;
@@ -1054,20 +1090,32 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
     #[tokio::test]
     async fn test_token_flow() {
         let user_id = 123;
-        let username = "user";
+        let email = "email";
+        let salt = "salt";
         let password = "top_secret";
         let (auth, receiver) = setup_test().await;
-        let hash_password = auth.hash_string(password);
+        let hash_password = auth.hash_string(&format!("{salt}:{password}"));
         let mock_handle = tokio::task::spawn(async move {
             // First event is for the user to log in to get the tokens
             let event = receiver.recv_async().await.unwrap();
             match event {
-                AtomaAtomaStateManagerEvent::GetUserIdByUsernamePassword {
-                    username: event_username,
+                AtomaAtomaStateManagerEvent::GetPasswordSalt {
+                    email: event_email,
+                    result_sender,
+                } => {
+                    assert_eq!(email, event_email);
+                    result_sender.send(Ok(Some(salt.to_string()))).unwrap();
+                }
+                _ => panic!("Unexpected event"),
+            }
+            let event = receiver.recv_async().await.unwrap();
+            match event {
+                AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+                    email: event_email,
                     password: event_password,
                     result_sender,
                 } => {
-                    assert_eq!(username, event_username);
+                    assert_eq!(email, event_email);
                     assert_eq!(hash_password, event_password);
                     result_sender.send(Ok(Some(user_id))).unwrap();
                 }
@@ -1101,6 +1149,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
                 AtomaAtomaStateManagerEvent::StoreNewApiToken {
                     user_id: event_user_id,
                     api_token: _api_token,
+                    name: _name,
                 } => {
                     assert_eq!(event_user_id, user_id);
                     // assert_eq!(event_api_token, api_token);
@@ -1109,7 +1158,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             }
         });
         let (refresh_token, access_token) =
-            auth.check_user_password(username, password).await.unwrap();
+            auth.check_user_password(email, password).await.unwrap();
         // Refresh token should not have refresh token hash
         let claims = auth.validate_token(&refresh_token, true).unwrap();
         assert_eq!(claims.user_id, user_id);
@@ -1119,7 +1168,10 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
         assert_eq!(claims.user_id, user_id);
         assert!(claims.refresh_token_hash.is_some());
         // Generate api token
-        let _api_token = auth.generate_api_token(&access_token).await.unwrap();
+        let _api_token = auth
+            .generate_api_token(&access_token, "test".to_string())
+            .await
+            .unwrap();
         if tokio::time::timeout(std::time::Duration::from_secs(1), mock_handle)
             .await
             .is_err()
@@ -1140,10 +1192,10 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             let event = receiver.recv_async().await.unwrap();
             match event {
                 AtomaAtomaStateManagerEvent::OAuth {
-                    username: event_username,
+                    email: event_email,
                     result_sender,
                 } => {
-                    assert_eq!(event_username, "email");
+                    assert_eq!(event_email, "email");
                     result_sender.send(Ok(1)).unwrap();
                 }
                 _ => panic!("Unexpected event"),

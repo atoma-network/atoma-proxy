@@ -7,15 +7,28 @@ license.workspace = true
 [dependencies]
 atoma-p2p = { workspace = true }
 atoma-sui = { workspace = true }
+atoma-utils = { workspace = true }
+blake3 = { workspace = true }
 chrono.workspace = true
 config = { workspace = true }
-dcap-qvl = { workspace = true }
-fastrand = "2.3.0"
+fastrand = { workspace = true }
 flume = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
 isocountry = { workspace = true }
+mockito = { workspace = true }
+prometheus = { workspace = true }
+remote-attestation = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["chrono", "runtime-tokio-native-tls", "sqlite"] }
+sqlx = { workspace = true, features = [
+	"chrono",
+	"runtime-tokio-native-tls",
+	"sqlite",
+] }
+once_cell = { workspace = true }
+opentelemetry = { workspace = true }
+reqwest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
@@ -24,5 +37,6 @@ utoipa = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
+proptest = { workspace = true }
 serial_test = { workspace = true }
 uuid = { workspace = true }

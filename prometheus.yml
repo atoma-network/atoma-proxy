@@ -4,9 +4,15 @@ global:
 
 scrape_configs:
   - job_name: "otel-collector"
+    scrape_interval: 10s
     static_configs:
       - targets: ["otel-collector:8889"] # This should match your collector service name
+    metric_relabel_configs:
+      - action: labelmap
+        regex: ^atoma_(.+)$
+        replacement: $1
 
   - job_name: "atoma-proxy"
     static_configs:
       - targets: ["localhost:8889"] # Local development scraping
+
