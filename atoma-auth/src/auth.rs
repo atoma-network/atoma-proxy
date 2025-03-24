@@ -816,7 +816,7 @@ impl Auth {
             },
         )?;
         result_receiver.await??;
-        let mut balance_changes = Err(AuthError::NoBalanceChangesFound);
+        let mut balance_changes = Err(anyhow!("No balance changes found"));
         for _ in 0..SUI_BALANCE_RETRY_COUNT {
             balance_changes = self
                 .sui
