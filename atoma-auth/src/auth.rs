@@ -829,7 +829,7 @@ impl Auth {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(SUI_BALANCE_RETRY_PAUSE)).await;
-            retry_cnt = retry_cnt + 1;
+            retry_cnt += 1;
             if retry_cnt > SUI_BALANCE_RETRY_COUNT {
                 return Err(AuthError::NoBalanceChangesFound);
             }
