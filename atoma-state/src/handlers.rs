@@ -1,9 +1,9 @@
 use atoma_p2p::{broadcast_metrics::NodeMetrics, AtomaP2pEvent};
 use atoma_sui::events::{
-    AtomaEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
+    AtomaEvent, ClaimedStackEvent, NewKeyRotationEvent, NewStackSettlementAttestationEvent,
     NodePublicKeyCommittmentEvent, NodeRegisteredEvent, NodeSubscribedToTaskEvent,
     NodeSubscriptionUpdatedEvent, NodeUnsubscribedFromTaskEvent, StackAttestationDisputeEvent,
-    StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent,
+    StackCreatedEvent, StackSettlementTicketClaimedEvent, StackSettlementTicketEvent, StackSmallId,
     StackTrySettleEvent, TaskDeprecationEvent, TaskRegisteredEvent,
 };
 use atoma_utils::compression::decompress_bytes;
@@ -122,6 +122,9 @@ pub async fn handle_atoma_event(
                 timestamp_to_datetime_or_now(timestamp),
             )
             .await
+        }
+        AtomaEvent::ClaimedStackEvent(event) => {
+            handle_claimed_stack_event(state_manager, event).await
         }
         AtomaEvent::StackSettlementTicketEvent(event) => {
             handle_stack_settlement_ticket_event(state_manager, event).await
@@ -660,6 +663,49 @@ pub async fn handle_stack_try_settle_event(
     state_manager
         .state
         .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
+        .await?;
+    Ok(())
+}
+
+/// Handles a claimed stack event.
+///
+/// This function processes a claimed stack event by parsing the event data,
+/// updating the stack as claimed and setting the user refund amount.
+///
+/// # Arguments
+///
+/// * `state_manager` - A reference to the `AtomaStateManager` for database operations.
+/// * `event` - A `ClaimedStackEvent` containing the details of the claimed stack event.
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok(()) if the event was processed successfully, or an error if something went wrong.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The event data cannot be deserialized into a `ClaimedStackEvent`.
+/// * The database operation to update the stack as claimed fails.
+#[instrument(level = "trace", skip_all)]
+pub async fn handle_claimed_stack_event(
+    state_manager: &AtomaStateManager,
+    event: ClaimedStackEvent,
+) -> Result<()> {
+    trace!(
+        target = "atoma-state-handlers",
+        event = "handle-claimed-stack-event",
+        "Processing claimed stack event"
+    );
+    let ClaimedStackEvent {
+        stack_small_id: StackSmallId {
+            inner: stack_small_id,
+        },
+        user_refund_amount,
+        ..
+    } = event;
+    state_manager
+        .state
+        .update_stack_claimed(stack_small_id as i64, user_refund_amount as i64)
         .await?;
     Ok(())
 }

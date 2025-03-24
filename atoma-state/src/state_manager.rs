@@ -339,7 +339,8 @@ impl AtomaState {
             selected_stack AS (
                 SELECT stacks.stack_small_id
                 FROM stacks
-                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id",
+                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
+                INNER JOIN stack_settlement_tickets ON stack_settlement_tickets.stack_small_id = stacks.stack_small_id",
         );
 
         if is_confidential {
@@ -353,7 +354,10 @@ impl AtomaState {
             r"
                 WHERE tasks.model_name = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
-                AND stacks.user_id = $3",
+                AND stacks.user_id = $3
+                AND stacks.is_claimed = false
+                AND stacks.in_settle_period = false
+                AND stack_settlement_tickets.is_claimed = false",
         );
 
         if is_confidential {
@@ -413,6 +417,36 @@ impl AtomaState {
             .into_iter()
             .map(|task| Task::from_row(&task).map_err(AtomaStateManagerError::from))
             .collect()
+    }
+
+    /// Updates a stack as claimed and sets the user refund amount.
+    ///
+    /// This method updates the stack's status to claimed and sets the user refund amount.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique identifier of the stack to update.
+    /// * `user_refund_amount` - The amount to refund to the user.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    #[instrument(level = "trace", skip_all, fields(%stack_small_id, %user_refund_amount))]
+    pub async fn update_stack_claimed(
+        &self,
+        stack_small_id: i64,
+        user_refund_amount: i64,
+    ) -> Result<()> {
+        sqlx::query("UPDATE stacks SET is_claimed = true, user_refund_amount = $2 WHERE stack_small_id = $1")
+            .bind(stack_small_id)
+            .bind(user_refund_amount)
+            .execute(&self.db)
+            .await?;
+        Ok(())
     }
 
     /// Gets the node with the cheapest price per one million compute units for a given model.
@@ -584,6 +618,8 @@ impl AtomaState {
         model: &str,
         max_num_tokens: i64,
     ) -> Result<Option<NodePublicKey>> {
+        // NOTE: We don't inner join with stack_settlement_tickets because we want to allow,
+        // as this method is dedicated for confidential compute requests/tasks.
         let node = sqlx::query(
             r"
             WITH latest_rotation AS (
@@ -605,6 +641,7 @@ impl AtomaState {
             AND tasks.security_level = 1
             AND tasks.is_deprecated = false
             AND stacks.num_compute_units - stacks.already_computed_units >= $2
+            AND stacks.is_claimed = false
             ORDER BY stacks.price_per_one_million_compute_units ASC
             LIMIT 1
             ",
@@ -640,6 +677,8 @@ impl AtomaState {
         stack_small_id: i64,
         available_compute_units: i64,
     ) -> Result<bool> {
+        // NOTE: We don't inner join with stack_settlement_tickets because we want to allow,
+        // as this method is dedicated for confidential compute requests/tasks.
         let result = sqlx::query_scalar::<_, bool>(
             r"
             WITH latest_rotation AS (
@@ -663,6 +702,7 @@ impl AtomaState {
                 AND tasks.security_level = 1
                 AND tasks.is_deprecated = false
                 AND stacks.in_settle_period = false
+                AND stacks.is_claimed = false
             )",
         )
         .bind(stack_small_id)
