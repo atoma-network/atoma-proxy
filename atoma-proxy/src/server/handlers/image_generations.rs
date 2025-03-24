@@ -388,7 +388,7 @@ async fn handle_image_generation_response(
         })
         .map(Json)?;
 
-    let guard = state.sui.blocking_read();
+    let guard = state.sui.read().await;
     let keystore = guard.get_keystore();
     let verify_hash = endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
 

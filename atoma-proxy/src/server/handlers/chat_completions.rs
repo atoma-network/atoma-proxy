@@ -599,7 +599,7 @@ async fn handle_non_streaming_response(
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 
-    let guard: tokio::sync::RwLockReadGuard<'_, atoma_auth::Sui> = state.sui.blocking_read();
+    let guard: tokio::sync::RwLockReadGuard<'_, atoma_auth::Sui> = state.sui.read().await;
     let keystore = guard.get_keystore();
     let proxy_signature = verify_and_sign_response(&response.0, verify_hash, keystore)?;
 
