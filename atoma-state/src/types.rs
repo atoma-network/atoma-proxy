@@ -796,6 +796,8 @@ pub enum AtomaAtomaStateManagerEvent {
     OAuth {
         /// The email of the user
         email: String,
+        /// Password salt
+        password_salt: String,
         /// The result sender to send back the user ID
         result_sender: oneshot::Sender<Result<i64>>,
     },

@@ -1283,9 +1283,10 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::OAuth {
             email,
+            password_salt,
             result_sender,
         } => {
-            let user_id = state_manager.state.oauth(&email).await;
+            let user_id = state_manager.state.oauth(&email, &password_salt).await;
             result_sender
                 .send(user_id)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
