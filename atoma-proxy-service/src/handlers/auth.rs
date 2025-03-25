@@ -47,9 +47,6 @@ pub const GET_BALANCE_PATH: &str = "/balance";
 /// Get user profile endpoint
 pub const GET_USER_PROFILE_PATH: &str = "/user_profile";
 
-/// Set user profile endpoint
-pub const SET_USER_PROFILE_PATH: &str = "/set_user_profile";
-
 /// Set user's salt endpoint.
 pub const GET_ZK_SALT_PATH: &str = "/zk_salt";
 
@@ -84,7 +81,6 @@ pub fn auth_router() -> Router<ProxyServiceState> {
         .route(GET_SUI_ADDRESS_PATH, get(get_sui_address))
         .route(GET_BALANCE_PATH, get(get_balance))
         .route(GET_USER_PROFILE_PATH, get(get_user_profile))
-        .route(SET_USER_PROFILE_PATH, post(set_user_profile))
         .route(GET_ZK_SALT_PATH, get(get_zk_salt));
     #[cfg(feature = "google-oauth")]
     let router = router.route(GOOGLE_OAUTH_PATH, post(google_oauth));
@@ -661,70 +657,6 @@ pub async fn get_user_profile(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?,
     ))
-}
-
-/// OpenAPI documentation for the set_user_profile endpoint.
-///
-/// This struct is used to generate OpenAPI documentation for the set_user_profile
-/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
-/// the OpenAPI specification from the code.
-#[derive(OpenApi)]
-#[openapi(paths(set_user_profile))]
-pub struct SetUserProfile;
-
-/// Retrieves the user profile for the user.
-///
-/// # Arguments
-///
-/// * `proxy_service_state` - The shared state containing the state manager
-/// * `headers` - The headers of the request
-///
-/// # Returns
-///
-/// * `Result<Json<Value>>` - A JSON response containing the user profile
-///
-/// # Errors
-///
-/// * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
-/// * If the user profile cannot be retrieved, returns a 500 Internal Server Error
-#[utoipa::path(
-    get,
-    path = "",
-    security(
-        ("bearerAuth" = [])
-    ),
-    responses(
-        (status = OK, description = "Sets the user profile for the user"),
-        (status = UNAUTHORIZED, description = "Unauthorized request"),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to set user profile")
-    )
-)]
-#[instrument(level = "info", skip_all)]
-pub async fn set_user_profile(
-    State(proxy_service_state): State<ProxyServiceState>,
-    headers: HeaderMap,
-    Json(user_profile): Json<UserProfile>,
-) -> Result<Json<()>> {
-    let jwt = get_jwt_from_headers(&headers)?;
-
-    let user_id = proxy_service_state
-        .auth
-        .get_user_id_from_token(jwt)
-        .await
-        .map_err(|e| {
-            error!("Failed to get user ID from token: {:?}", e);
-            StatusCode::UNAUTHORIZED
-        })?;
-
-    proxy_service_state
-        .atoma_state
-        .set_user_profile(user_id, user_profile)
-        .await
-        .map_err(|e| {
-            error!("Failed to get user profile: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    Ok(Json(()))
 }
 
 /// OpenAPI documentation for the get_zk_salt endpoint.

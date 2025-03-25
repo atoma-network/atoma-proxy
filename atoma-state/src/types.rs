@@ -147,8 +147,6 @@ pub struct ComputedUnitsProcessedResponse {
 pub struct UserProfile {
     /// The user's email
     pub email: String,
-    /// The user's name
-    pub name: String,
 }
 
 /// Represents a latency response.
