@@ -1183,9 +1183,8 @@ impl AtomaState {
         password_hash: &str,
         password_salt: &str,
     ) -> Result<Option<i64>> {
-        let result = sqlx::query("INSERT INTO users (email, name, password_hash, password_salt) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING RETURNING id")
+        let result = sqlx::query("INSERT INTO users (email, password_hash, password_salt) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id")
         .bind(user_profile.email)
-        .bind(user_profile.name)
         .bind(password_hash)
         .bind(password_salt)
         .fetch_optional(&self.db)
@@ -4173,52 +4172,12 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip_all)]
     pub async fn get_user_profile(&self, user_id: i64) -> Result<UserProfile> {
-        let user = sqlx::query("SELECT email, name FROM users WHERE id = $1")
+        let user = sqlx::query("SELECT email FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(&self.db)
             .await?;
 
         UserProfile::from_row(&user).map_err(AtomaStateManagerError::from)
-    }
-
-    /// Set the user profile by user_id.
-    ///
-    /// This method sets the user profile by user_id from the `users` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `user_id` - The unique identifier of the user.
-    /// * `user_profile` - The profile of the user.
-    ///
-    ///
-    /// # Returns
-    ///
-    /// - `Result<()>`: A result containing either:
-    ///   - `Ok(())`: The user profile for the user_id was set
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_profile(state_manager: &AtomaStateManager, user_id: i64, user_profile:UserProfile) -> Result<(), AtomaStateManagerError> {
-    ///     state_manager.set_user_profile(user_id, user_profile).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip_all)]
-    pub async fn set_user_profile(&self, user_id: i64, user_profile: UserProfile) -> Result<()> {
-        sqlx::query("UPDATE users SET name = $2 WHERE id = $1")
-            .bind(user_id)
-            .bind(user_profile.name)
-            .execute(&self.db)
-            .await?;
-        Ok(())
     }
 
     /// Get latency performance for the last `last_hours` hours.
