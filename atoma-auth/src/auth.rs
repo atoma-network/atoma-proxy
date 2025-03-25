@@ -410,9 +410,16 @@ impl Auth {
                 return Err(google::GoogleError::EmailNotFound)?;
             }
         };
+        // In case this user doesn't have an account yet, we will add the password salt
+        let password_salt = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(30)
+            .map(char::from)
+            .collect::<String>();
         self.state_manager_sender
             .send(AtomaAtomaStateManagerEvent::OAuth {
                 email,
+                password_salt,
                 result_sender,
             })?;
         let user_id = result_receiver.await??;
@@ -1193,6 +1200,7 @@ active_address: "0x939cfcc7fcbc71ce983203bcb36fa498901932ab9293dfa2b271203e71603
             match event {
                 AtomaAtomaStateManagerEvent::OAuth {
                     email: event_email,
+                    password_salt: _,
                     result_sender,
                 } => {
                     assert_eq!(event_email, "email");

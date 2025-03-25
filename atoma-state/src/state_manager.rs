@@ -3769,9 +3769,10 @@ impl AtomaState {
     ///    state_manager.oauth(email).await
     /// }
     /// ```
-    pub async fn oauth(&self, email: &str) -> Result<i64> {
-        let user = sqlx::query("INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id")
+    pub async fn oauth(&self, email: &str, password_salt: &str) -> Result<i64> {
+        let user = sqlx::query("INSERT INTO users (email, password_salt) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id")
                 .bind(email)
+                .bind(password_salt)
                 .fetch_one(&self.db).await?;
 
         Ok(user.get("id"))
