@@ -1,31 +1,31 @@
 [package]
-name = "atoma-proxy-service"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
+name              = "atoma-proxy-service"
+version.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-atoma-auth.workspace = true
-atoma-state.workspace = true
-atoma-sui.workspace = true
-axum.workspace = true
-base64.workspace = true
-chrono.workspace = true
-config.workspace = true
-rand.workspace = true
-reqwest.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_yaml = { workspace = true }
-serde_json.workspace = true
-sui-sdk.workspace = true
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-tower-http = { workspace = true, features = ["cors"] }
+anyhow.workspace             = true
+atoma-auth.workspace         = true
+atoma-state.workspace        = true
+atoma-sui.workspace          = true
+axum.workspace               = true
+base64.workspace             = true
+chrono.workspace             = true
+config.workspace             = true
+rand.workspace               = true
+reqwest.workspace            = true
+serde                        = { workspace = true, features = [ "derive" ] }
+serde_json.workspace         = true
+serde_yaml                   = { workspace = true }
+sui-sdk.workspace            = true
+thiserror                    = { workspace = true }
+tokio                        = { workspace = true, features = [ "full" ] }
+tower-http                   = { workspace = true, features = [ "cors" ] }
+tracing.workspace            = true
 tracing-subscriber.workspace = true
-tracing.workspace = true
-utoipa = { workspace = true, features = ["axum_extras"] }
-utoipa-swagger-ui = { workspace = true }
+utoipa                       = { workspace = true, features = [ "axum_extras" ] }
+utoipa-swagger-ui            = { workspace = true }
 
 [features]
-google-oauth = ["atoma-auth/google-oauth"]
+google-oauth = [ "atoma-auth/google-oauth" ]
