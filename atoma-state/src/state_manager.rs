@@ -699,10 +699,10 @@ impl AtomaState {
                 INNER JOIN valid_nodes ON valid_nodes.node_small_id = stacks.selected_node_id
                 WHERE stacks.stack_small_id = $1
                 AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND stacks.is_claimed = false
                 AND tasks.security_level = 1
                 AND tasks.is_deprecated = false
                 AND stacks.in_settle_period = false
-                AND stacks.is_claimed = false
             )",
         )
         .bind(stack_small_id)
