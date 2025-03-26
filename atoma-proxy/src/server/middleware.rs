@@ -28,7 +28,7 @@ use super::{types::ConfidentialComputeRequest, Result};
 ///
 /// NOTE: Right now, we buy the maximum number of compute units that a node supports
 /// as hardcoded in Atoma's smart contract.
-pub const STACK_SIZE_TO_BUY: i64 = 2_560_000;
+pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
 
 /// Default image resolution for image generations, in pixels.
 const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
