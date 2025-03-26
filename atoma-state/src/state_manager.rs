@@ -340,7 +340,7 @@ impl AtomaState {
                 SELECT stacks.stack_small_id
                 FROM stacks
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
-                INNER JOIN stack_settlement_tickets ON stack_settlement_tickets.stack_small_id = stacks.stack_small_id",
+                LEFT JOIN stack_settlement_tickets ON stack_settlement_tickets.stack_small_id = stacks.stack_small_id",
         );
 
         if is_confidential {
@@ -357,7 +357,7 @@ impl AtomaState {
                 AND stacks.user_id = $3
                 AND stacks.is_claimed = false
                 AND stacks.in_settle_period = false
-                AND stack_settlement_tickets.is_claimed = false",
+                AND (stack_settlement_tickets.is_claimed = false OR stack_settlement_tickets.is_claimed IS NULL)",
         );
 
         if is_confidential {
