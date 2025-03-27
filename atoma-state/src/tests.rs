@@ -293,6 +293,19 @@ async fn create_test_node_public_key(
     Ok(())
 }
 
+async fn create_test_user(pool: &sqlx::PgPool, user_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO users (id, email, password_salt, password_hash) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(user_id)
+    .bind(format!("user_{user_id}")) // Create unique email
+    .bind("test_password_salt") // Default password salt
+    .bind("test_password_hash") // Default password hash
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Helper function to create a test stack
 async fn create_test_stack(
     pool: &sqlx::PgPool,
@@ -303,15 +316,6 @@ async fn create_test_stack(
     num_compute_units: i64,
     user_id: i64,
 ) -> sqlx::Result<()> {
-    sqlx::query(
-        "INSERT INTO users (id, email, password_salt, password_hash) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(user_id)
-    .bind(format!("user_{user_id}")) // Create unique email
-    .bind("test_password_salt") // Default password salt
-    .bind("test_password_hash") // Default password hash
-    .execute(pool)
-    .await?;
     sqlx::query(
         "INSERT INTO stacks (
                 stack_small_id,
@@ -418,7 +422,8 @@ async fn test_get_cheapest_node_basic() {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+    create_test_user(&state.db, 1).await.unwrap();
+    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
         .await
         .unwrap();
 
@@ -509,6 +514,7 @@ async fn test_get_cheapest_node_multiple_prices() {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000)
         .await
         .unwrap();
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -516,14 +522,14 @@ async fn test_get_cheapest_node_multiple_prices() {
     create_test_node_subscription(&state.db, 2, 1, 50, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 2, 2, 50, 1000, 2)
+    create_test_stack(&state.db, 1, 2, 2, 50, 1000, 1)
         .await
         .unwrap();
     create_test_node(&state.db, 3).await.unwrap();
     create_test_node_subscription(&state.db, 3, 1, 150, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 3, 3, 150, 1000, 3)
+    create_test_stack(&state.db, 1, 3, 3, 150, 1000, 1)
         .await
         .unwrap();
     // Should return the cheapest node
@@ -598,7 +604,8 @@ async fn test_get_cheapest_node_confidential() {
     create_test_node_public_key(&state.db, 1, 2, true)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+    create_test_user(&state.db, 1).await.unwrap();
+    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
         .await
         .unwrap();
     // Test confidential computing requirements
@@ -628,7 +635,8 @@ async fn test_get_cheapest_node_invalid_public_key() {
     create_test_node_public_key(&state.db, 1, 1, false)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+    create_test_user(&state.db, 1).await.unwrap();
+    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
         .await
         .unwrap();
 
@@ -667,7 +675,8 @@ async fn test_get_cheapest_node_deprecated_task() {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1000)
+    create_test_user(&state.db, 1).await.unwrap();
+    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
         .await
         .unwrap();
     // Should return None for deprecated task
@@ -702,6 +711,7 @@ async fn test_get_cheapest_node_invalid_subscription() {
         .await
         .unwrap();
 
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -752,10 +762,11 @@ async fn test_get_cheapest_node_mixed_security_levels() {
     create_test_node_public_key(&state.db, 2, 1, true)
         .await
         .unwrap();
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 2, 1, 50, 1000, 2)
+    create_test_stack(&state.db, 1, 2, 1, 50, 1000, 1)
         .await
         .unwrap();
 
@@ -798,11 +809,12 @@ async fn test_basic_selection() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
 
     assert!(result.is_some());
@@ -817,6 +829,7 @@ async fn test_price_based_selection() -> Result<()> {
     let state = setup_test_environment().await?;
 
     // Setup nodes with different prices
+    create_test_user(&state.db, 1).await.unwrap();
     for (node_id, (i, price)) in [(1, 200), (2, 100), (3, 300)].iter().enumerate() {
         create_test_node(&state.db, node_id as i64).await?;
         create_test_node_subscription(&state.db, node_id as i64, 1, *price, 1000).await?;
@@ -829,14 +842,14 @@ async fn test_price_based_selection() -> Result<()> {
             node_id as i64,
             *price,
             1000,
-            node_id as i64,
+            1,
         )
         .await
         .unwrap();
     }
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
 
     assert!(result.is_some());
@@ -887,12 +900,13 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 1, 100, 500).await?; // Insufficient capacity
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 500, 1)
         .await
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -904,12 +918,12 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     create_test_node_subscription(&state.db, 2, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 2, 2, 1).await?;
     create_test_node_public_key(&state.db, 2, 2, true).await?;
-    create_test_stack(&state.db, 1, 2, 2, 100, 1000, 2)
+    create_test_stack(&state.db, 1, 2, 2, 100, 1000, 1)
         .await
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert_eq!(
         result.unwrap().node_small_id,
@@ -930,12 +944,13 @@ async fn test_invalid_configurations() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, false).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -944,7 +959,7 @@ async fn test_invalid_configurations() -> Result<()> {
 
     // Test non-existent model
     let result = state
-        .select_node_public_key_for_encryption("nonexistent-model", 800)
+        .select_node_public_key_for_encryption("nonexistent-model", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -967,11 +982,12 @@ async fn test_security_level_requirement() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 2, 100, 1000).await?;
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 2, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -990,6 +1006,7 @@ async fn test_edge_cases() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
@@ -1004,7 +1021,7 @@ async fn test_edge_cases() -> Result<()> {
 
     for (tokens, should_succeed, case) in test_cases {
         let result = state
-            .select_node_public_key_for_encryption("gpt-4", tokens)
+            .select_node_public_key_for_encryption("gpt-4", tokens, 1)
             .await?;
         assert_eq!(
             result.is_some(),
@@ -1025,11 +1042,12 @@ async fn test_concurrent_access() -> Result<()> {
     create_test_node_subscription(&state.db, 1, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
+    create_test_user(&state.db, 1).await.unwrap();
     create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
         .await
         .unwrap();
     let futures: Vec<_> = (0..5)
-        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800))
+        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800, 1))
         .collect();
 
     let results = futures::future::join_all(futures).await;
