@@ -1093,11 +1093,12 @@ pub async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
             model,
             max_num_tokens,
+            user_id,
             result_sender,
         } => {
             let node = state_manager
                 .state
-                .select_node_public_key_for_encryption(&model, max_num_tokens)
+                .select_node_public_key_for_encryption(&model, max_num_tokens, user_id)
                 .await?;
             result_sender
                 .send(node)
