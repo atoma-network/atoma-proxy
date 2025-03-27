@@ -672,6 +672,8 @@ pub enum AtomaAtomaStateManagerEvent {
         model: String,
         /// The maxinum number of tokens to be processed
         max_num_tokens: i64,
+        /// The user id of the stack owner (referencing local user table)
+        user_id: i64,
         /// Channel to send back the public key
         /// Returns Ok(Option<NodePublicKey>) with the public key or an error if the query fails
         result_sender: oneshot::Sender<Option<NodePublicKey>>,

@@ -265,12 +265,19 @@ pub async fn nodes_create_lock(
     Json(payload): Json<NodesCreateLockRequest>,
 ) -> Result<Json<NodesCreateLockResponse>, AtomaProxyError> {
     let (sender, receiver) = oneshot::channel();
+    let user_id = check_auth(
+        &state.state_manager_sender,
+        &headers,
+        NODES_CREATE_LOCK_PATH,
+    )
+    .await?;
     state
         .state_manager_sender
         .send(
             AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
                 model: payload.model.clone(),
                 max_num_tokens: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+                user_id,
                 result_sender: sender,
             },
         )
@@ -304,12 +311,6 @@ pub async fn nodes_create_lock(
     } else {
         // NOTE: We need to check the user's balance before acquiring a new stack entry.
         // If this is not the case, we actually do not need authentication from the user.
-        let user_id = check_auth(
-            &state.state_manager_sender,
-            &headers,
-            NODES_CREATE_LOCK_PATH,
-        )
-        .await?;
         let (sender, receiver) = oneshot::channel();
         state
             .state_manager_sender
