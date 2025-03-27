@@ -802,7 +802,7 @@ async fn test_basic_selection() -> Result<()> {
         .await
         .unwrap();
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
 
     assert!(result.is_some());
@@ -836,7 +836,7 @@ async fn test_price_based_selection() -> Result<()> {
     }
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, node_id)
         .await?;
 
     assert!(result.is_some());
@@ -892,7 +892,7 @@ async fn test_compute_capacity_requirements() -> Result<()> {
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -909,7 +909,7 @@ async fn test_compute_capacity_requirements() -> Result<()> {
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert_eq!(
         result.unwrap().node_small_id,
@@ -935,7 +935,7 @@ async fn test_invalid_configurations() -> Result<()> {
         .unwrap();
 
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -944,7 +944,7 @@ async fn test_invalid_configurations() -> Result<()> {
 
     // Test non-existent model
     let result = state
-        .select_node_public_key_for_encryption("nonexistent-model", 800)
+        .select_node_public_key_for_encryption("nonexistent-model", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -971,7 +971,7 @@ async fn test_security_level_requirement() -> Result<()> {
         .await
         .unwrap();
     let result = state
-        .select_node_public_key_for_encryption("gpt-4", 800)
+        .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
     assert!(
         result.is_none(),
@@ -1004,7 +1004,7 @@ async fn test_edge_cases() -> Result<()> {
 
     for (tokens, should_succeed, case) in test_cases {
         let result = state
-            .select_node_public_key_for_encryption("gpt-4", tokens)
+            .select_node_public_key_for_encryption("gpt-4", tokens, 1)
             .await?;
         assert_eq!(
             result.is_some(),
@@ -1029,7 +1029,7 @@ async fn test_concurrent_access() -> Result<()> {
         .await
         .unwrap();
     let futures: Vec<_> = (0..5)
-        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800))
+        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800, 1))
         .collect();
 
     let results = futures::future::join_all(futures).await;

@@ -617,6 +617,7 @@ impl AtomaState {
         &self,
         model: &str,
         max_num_tokens: i64,
+        user_id:i64,
     ) -> Result<Option<NodePublicKey>> {
         // NOTE: We don't inner join with stack_settlement_tickets because we want to allow,
         // as this method is dedicated for confidential compute requests/tasks.
@@ -642,12 +643,14 @@ impl AtomaState {
             AND tasks.is_deprecated = false
             AND stacks.num_compute_units - stacks.already_computed_units >= $2
             AND stacks.is_claimed = false
+            AND stacks.user_id = $3
             ORDER BY stacks.price_per_one_million_compute_units ASC
             LIMIT 1
             ",
         )
         .bind(model)
         .bind(max_num_tokens)
+        .bind(user_id)  
         .fetch_optional(&self.db)
         .await?;
         node.map(|node| NodePublicKey::from_row(&node).map_err(AtomaStateManagerError::from))
