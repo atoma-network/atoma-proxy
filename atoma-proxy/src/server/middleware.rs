@@ -227,7 +227,8 @@ impl RequestMetadataExtension {
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = %req.uri().path())
+    fields(endpoint = %req.uri().path()),
+    err
 )]
 pub async fn authenticate_middleware(
     state: State<ProxyState>,
@@ -387,7 +388,8 @@ pub async fn authenticate_middleware(
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = %req.uri().path())
+    fields(endpoint = %req.uri().path()),
+    err
 )]
 pub async fn confidential_compute_middleware(
     state: State<ProxyState>,
@@ -593,7 +595,8 @@ pub mod auth {
     #[instrument(
         level = "info",
         skip_all,
-        fields(endpoint = %endpoint)
+        fields(endpoint = %endpoint),
+        err
     )]
     pub async fn handle_authenticate_and_lock_compute_units(
         state: &ProxyState,
@@ -704,7 +707,8 @@ pub mod auth {
     #[instrument(
         level = "info",
         skip_all,
-        fields(endpoint = %endpoint)
+        fields(endpoint = %endpoint),
+        err
     )]
     pub async fn authenticate_and_lock_compute_units(
         state: &ProxyState,
@@ -812,7 +816,7 @@ pub mod auth {
     /// - `BAD_REQUEST`: Invalid payload format or unsupported model
     /// - `NOT_FOUND`: No available node address found
     /// - `INTERNAL_SERVER_ERROR`: Various internal processing failures
-    #[instrument(level = "info", skip_all)]
+    #[instrument(level = "info", skip_all, err)]
     pub async fn process_selected_stack(
         state: &ProxyState,
         headers: &mut HeaderMap,
@@ -883,107 +887,37 @@ pub mod auth {
         pub tx_digest: Option<TransactionDigest>,
     }
 
-    /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
+    pub struct NewStackResult {
+        stack_small_id: i64,
+        selected_node_id: i64,
+        tx_digest: TransactionDigest,
+    }
+
+    /// Acquires a new stack entry for the cheapest node.
     ///
-    /// This function follows a two-step process:
-    /// 1. First, it attempts to find existing stacks that can handle the requested model and compute units
-    /// 2. If no suitable stacks exist, it acquires a new stack entry by:
-    ///    - Finding available tasks for the model
-    ///    - Creating a new stack entry with predefined compute units and price
-    ///    - Registering the new stack with the state manager
+    /// This function acquires for the given node.
+    /// We spawn a tokio thread to make sure that the function finishes in case the thread is killed.
     ///
-    /// # Arguments
+    /// #Arguments
     ///
-    /// * `model` - The name/identifier of the AI model being requested
-    /// * `state_manager_sender` - Channel for sending events to the state manager
-    /// * `sui` - Reference to the Sui interface for blockchain operations
-    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    /// * `node` - The cheapest node to acquire a stack for
     ///
-    /// # Returns
+    /// #Returns
     ///
-    /// Returns a `SelectedNodeMetadata` containing:
+    /// Returns a `NewStackResult` containing:
     /// * `stack_small_id` - The identifier for the selected/created stack
     /// * `selected_node_id` - The identifier for the node that will process the request
-    /// * `tx_digest` - Optional transaction digest if a new stack was created
-    ///
-    /// # Errors
-    ///
-    /// Returns a `AtomaProxyError` error in the following cases:
-    /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager or Sui interface
-    /// * `NOT_FOUND` - No tasks available for the requested model
-    /// * `BAD_REQUEST` - Requested compute units exceed the maximum allowed limit
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// let metadata = get_selected_node(
-    ///     "gpt-4",
-    ///     &state_manager_sender,
-    ///     &sui,
-    ///     1000
-    /// ).await?;
-    /// println!("Selected stack ID: {}", metadata.stack_small_id);
-    /// ```
-    #[instrument(level = "info", skip_all, fields(%model))]
-    pub async fn get_selected_node(
-        model: &str,
-        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
-        sui: &Arc<RwLock<Sui>>,
-        optional_stack: Option<Stack>,
-        total_tokens: u64,
+    #[instrument(level = "info", skip_all, err)]
+    async fn acquire_new_stack(
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         user_id: i64,
-        endpoint: &str,
-    ) -> Result<SelectedNodeMetadata> {
-        if let Some(stack) = optional_stack {
-            Ok(SelectedNodeMetadata {
-                stack_small_id: stack.stack_small_id,
-                selected_node_id: stack.selected_node_id,
-                tx_digest: None,
-            })
-        } else {
-            // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
-            // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
-            if total_tokens > STACK_SIZE_TO_BUY as u64 {
-                return Err(AtomaProxyError::RequestError {
-                    message: format!(
-                        "Total tokens {total_tokens} exceed the maximum stack size of {STACK_SIZE_TO_BUY}"
-                    ),
-                    endpoint: endpoint.to_string(),
-                });
-            }
-            let (result_sender, result_receiver) = oneshot::channel();
-            state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                    model: model.to_string(),
-                    is_confidential: false,
-                    result_sender,
-                })
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to send GetTasksForModel event: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-            let node = result_receiver
-                .await
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to receive GetTasksForModel result: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to get GetTasksForModel result: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-            let node: atoma_state::types::CheapestNode = match node {
-                Some(node) => node,
-                None => {
-                    return Err(AtomaProxyError::RequestError {
-                        message: format!("No node found for model {model}"),
-                        endpoint: endpoint.to_string(),
-                    });
-                }
-            };
+        endpoint: String,
+        total_tokens: u64,
+        sui: Arc<RwLock<Sui>>,
+        node: atoma_state::types::CheapestNode,
+    ) -> Result<NewStackResult> {
+        let endpoint_clone = endpoint.clone();
+        tokio::spawn(async move {
             // This will fail if the balance is not enough.
             let (result_sender, result_receiver) = oneshot::channel();
             state_manager_sender
@@ -1045,6 +979,134 @@ pub mod auth {
                     client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
+            Ok(NewStackResult {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            })
+        })
+        .await
+        .map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Failed to acquire new stack: {e}"),
+            client_message: None,
+            endpoint: endpoint_clone,
+        })?
+    }
+
+    /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
+    ///
+    /// This function follows a two-step process:
+    /// 1. First, it attempts to find existing stacks that can handle the requested model and compute units
+    /// 2. If no suitable stacks exist, it acquires a new stack entry by:
+    ///    - Finding available tasks for the model
+    ///    - Creating a new stack entry with predefined compute units and price
+    ///    - Registering the new stack with the state manager
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The name/identifier of the AI model being requested
+    /// * `state_manager_sender` - Channel for sending events to the state manager
+    /// * `sui` - Reference to the Sui interface for blockchain operations
+    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    ///
+    /// # Returns
+    ///
+    /// Returns a `SelectedNodeMetadata` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    /// * `tx_digest` - Optional transaction digest if a new stack was created
+    ///
+    /// # Errors
+    ///
+    /// Returns a `AtomaProxyError` error in the following cases:
+    /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager or Sui interface
+    /// * `NOT_FOUND` - No tasks available for the requested model
+    /// * `BAD_REQUEST` - Requested compute units exceed the maximum allowed limit
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let metadata = get_selected_node(
+    ///     "gpt-4",
+    ///     &state_manager_sender,
+    ///     &sui,
+    ///     1000
+    /// ).await?;
+    /// println!("Selected stack ID: {}", metadata.stack_small_id);
+    /// ```
+    #[instrument(level = "info", skip_all, fields(%model), err)]
+    pub async fn get_selected_node(
+        model: &str,
+        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+        sui: &Arc<RwLock<Sui>>,
+        optional_stack: Option<Stack>,
+        total_tokens: u64,
+        user_id: i64,
+        endpoint: &str,
+    ) -> Result<SelectedNodeMetadata> {
+        if let Some(stack) = optional_stack {
+            Ok(SelectedNodeMetadata {
+                stack_small_id: stack.stack_small_id,
+                selected_node_id: stack.selected_node_id,
+                tx_digest: None,
+            })
+        } else {
+            // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
+            // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
+            if total_tokens > STACK_SIZE_TO_BUY as u64 {
+                return Err(AtomaProxyError::RequestError {
+                    message: format!(
+                        "Total tokens {total_tokens} exceed the maximum stack size of {STACK_SIZE_TO_BUY}"
+                    ),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+            let (result_sender, result_receiver) = oneshot::channel();
+            state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                    model: model.to_string(),
+                    is_confidential: false,
+                    result_sender,
+                })
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            let node = result_receiver
+                .await
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            let node: atoma_state::types::CheapestNode = match node {
+                Some(node) => node,
+                None => {
+                    return Err(AtomaProxyError::RequestError {
+                        message: format!("No node found for model {model}"),
+                        endpoint: endpoint.to_string(),
+                    });
+                }
+            };
+            let NewStackResult {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            } = acquire_new_stack(
+                state_manager_sender.clone(),
+                user_id,
+                endpoint.to_string(),
+                total_tokens,
+                Arc::clone(sui),
+                node,
+            )
+            .await?;
 
             Ok(SelectedNodeMetadata {
                 stack_small_id,
@@ -1130,11 +1192,7 @@ pub mod utils {
     /// * Stack ID
     /// * Endpoint path
     /// * Model name
-    #[instrument(level = "info", skip_all, fields(
-        %endpoint,
-        %total_compute_units,
-        %user_id
-    ))]
+    #[instrument(level = "info", skip_all, fields(%endpoint, %total_compute_units, %user_id), err)]
     #[allow(clippy::too_many_arguments)]
     pub async fn try_validate_stack_for_request(
         state: &State<ProxyState>,
@@ -1276,7 +1334,8 @@ pub mod utils {
             %endpoint,
             %stack_small_id,
             %available_compute_units
-        )
+        ),
+        err
     )]
     pub async fn verify_stack_for_confidential_compute(
         state: &State<ProxyState>,
@@ -1369,7 +1428,8 @@ pub mod utils {
             %endpoint,
             %stack_small_id,
             %available_compute_units
-        )
+        ),
+        err
     )]
     pub async fn lock_compute_units_for_stack(
         state: &State<ProxyState>,
@@ -1449,7 +1509,8 @@ pub mod utils {
     #[instrument(
         level = "info",
         skip_all,
-        fields(%endpoint, %stack_small_id)
+        fields(%endpoint, %stack_small_id),
+        err
     )]
     pub async fn get_node_address(
         state: &State<ProxyState>,
