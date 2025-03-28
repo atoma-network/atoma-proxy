@@ -9,9 +9,10 @@ use axum::{
     response::Response,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
-use reqwest::header::CONTENT_LENGTH;
+use reqwest::{header::CONTENT_LENGTH, StatusCode};
 use serde_json::Value;
 use tracing::instrument;
+use utils::is_confidential_compute_endpoint;
 
 use super::{
     check_auth,
@@ -486,6 +487,74 @@ pub async fn confidential_compute_middleware(
     Ok(next.run(req).await)
 }
 
+#[instrument(level = "info", skip_all, err)]
+pub async fn handle_locked_stack_middleware(
+    state: State<ProxyState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response> {
+    let endpoint = req.uri().path().to_string();
+    let (mut req_parts, body) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
+        .await
+        .map_err(|e| {
+            if let Some(source) = std::error::Error::source(&e) {
+                if source.is::<LengthLimitError>() {
+                    return AtomaProxyError::RequestError {
+                        message: format!("The body is too big: {e}"),
+                        endpoint: endpoint.to_string(),
+                    };
+                }
+            }
+            AtomaProxyError::InternalError {
+                message: format!("Failed to convert body to bytes: {e}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            }
+        })?;
+    let original_req = Request::from_parts(req_parts.clone(), Body::from(body_bytes.clone()));
+    let response = next.clone().run(original_req).await;
+    if response.status() == StatusCode::LOCKED {
+        // Lock the current stack, in the Proxy's internal state
+        let stack_small_id = req_parts
+            .headers
+            .remove(constants::STACK_SMALL_ID)
+            .ok_or_else(|| AtomaProxyError::InternalError {
+                message: "Stack small id not found".to_string(),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let stack_small_id = stack_small_id
+            .to_str()
+            .map_err(|_| AtomaProxyError::RequestError {
+                message: "Stack small id not found".to_string(),
+                endpoint: endpoint.to_string(),
+            })?
+            .parse::<i64>()
+            .map_err(|_| AtomaProxyError::RequestError {
+                message: "handle_locked_stack_middleware: Could not parse stack small id"
+                    .to_string(),
+                endpoint: endpoint.to_string(),
+            })?;
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::LockStack { stack_small_id })
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to send LockStack event: {e}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let req = Request::from_parts(req_parts, Body::from(body_bytes));
+        if is_confidential_compute_endpoint(&endpoint) {
+            confidential_compute_middleware(state, req, next).await
+        } else {
+            authenticate_middleware(state, req, next).await
+        }
+    } else {
+        Ok(response)
+    }
+}
+
 pub mod auth {
     use std::sync::Arc;
 
@@ -586,7 +655,8 @@ pub mod auth {
     #[instrument(
         level = "info",
         skip_all,
-        fields(endpoint = %endpoint)
+        fields(endpoint = %endpoint),
+        err
     )]
     pub async fn handle_authenticate_and_lock_compute_units(
         state: &ProxyState,
@@ -697,7 +767,8 @@ pub mod auth {
     #[instrument(
         level = "info",
         skip_all,
-        fields(endpoint = %endpoint)
+        fields(endpoint = %endpoint),
+        err
     )]
     pub async fn authenticate_and_lock_compute_units(
         state: &ProxyState,
@@ -798,7 +869,7 @@ pub mod auth {
     /// - `BAD_REQUEST`: Invalid payload format or unsupported model
     /// - `NOT_FOUND`: No available node address found
     /// - `INTERNAL_SERVER_ERROR`: Various internal processing failures
-    #[instrument(level = "info", skip_all)]
+    #[instrument(level = "info", skip_all, err)]
     pub async fn process_selected_stack(
         state: &ProxyState,
         headers: &mut HeaderMap,
@@ -910,7 +981,7 @@ pub mod auth {
     /// ).await?;
     /// println!("Selected stack ID: {}", metadata.stack_small_id);
     /// ```
-    #[instrument(level = "info", skip_all, fields(%model))]
+    #[instrument(level = "info", skip_all, fields(%model), err)]
     pub async fn get_selected_node(
         model: &str,
         state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
@@ -1044,7 +1115,14 @@ pub mod auth {
 pub mod utils {
     use sui_sdk::types::digests::TransactionDigest;
 
-    use crate::server::MODEL;
+    use crate::server::{
+        handlers::{
+            chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+            embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
+            image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+        },
+        MODEL,
+    };
 
     use super::{
         auth, constants, instrument, AtomaAtomaStateManagerEvent, AtomaProxyError, Body,
@@ -1120,7 +1198,7 @@ pub mod utils {
         %endpoint,
         %total_compute_units,
         %user_id
-    ))]
+    ), err)]
     #[allow(clippy::too_many_arguments)]
     pub async fn try_validate_stack_for_request(
         state: &State<ProxyState>,
@@ -1260,7 +1338,8 @@ pub mod utils {
             %endpoint,
             %stack_small_id,
             %available_compute_units
-        )
+        ),
+        err
     )]
     pub async fn verify_stack_for_confidential_compute(
         state: &State<ProxyState>,
@@ -1353,7 +1432,8 @@ pub mod utils {
             %endpoint,
             %stack_small_id,
             %available_compute_units
-        )
+        ),
+        err
     )]
     pub async fn lock_compute_units_for_stack(
         state: &State<ProxyState>,
@@ -1433,7 +1513,8 @@ pub mod utils {
     #[instrument(
         level = "info",
         skip_all,
-        fields(%endpoint, %stack_small_id)
+        fields(%endpoint, %stack_small_id),
+        err
     )]
     pub async fn get_node_address(
         state: &State<ProxyState>,
@@ -1470,5 +1551,105 @@ pub mod utils {
             message: "Node doesn't have public address".to_string(),
             endpoint: endpoint.to_string(),
         })
+    }
+
+    /// Locks the current stack in the Proxy's internal state.
+    ///
+    /// This function removes the stack small id from the request headers and parses it as an i64.
+    /// It then sends a `LockStack` event to the state manager to lock the stack.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Server state containing the state manager channel and other shared resources
+    /// * `req_parts` - Request parts containing the headers
+    /// * `endpoint` - The API endpoint path making the request (used for error context)
+    ///
+    /// # Returns
+    ///
+    /// Returns `AtomaProxyError::InternalError` if the stack small id is not found in the request headers.
+    /// Returns `AtomaProxyError::RequestError` if the stack small id is not found in the request headers.
+    /// Returns `Ok(())` if the stack is locked successfully.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use axum::extract::State;
+    ///
+    /// async fn lock_stack(state: State<ProxyState>) -> Result<()> {
+    ///     let (node_url, node_id) = get_node_address(
+    ///         &state,
+    ///         stack_small_id: 123,
+    ///         endpoint: "/v1/chat/completions"
+    ///     ).await?;
+    /// }
+    /// ```
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            endpoint = %endpoint
+        ),
+        err
+    )]
+    fn lock_stack(state: &State<ProxyState>, req_parts: &mut Parts, endpoint: &str) -> Result<()> {
+        let stack_small_id = req_parts
+            .headers
+            .remove(constants::STACK_SMALL_ID)
+            .ok_or_else(|| AtomaProxyError::InternalError {
+                message: "Stack small id not found".to_string(),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let stack_small_id = stack_small_id
+            .to_str()
+            .map_err(|_| AtomaProxyError::RequestError {
+                message: "Stack small id not found".to_string(),
+                endpoint: endpoint.to_string(),
+            })?
+            .parse::<i64>()
+            .map_err(|_| AtomaProxyError::RequestError {
+                message: "handle_locked_stack_middleware: Could not parse stack small id"
+                    .to_string(),
+                endpoint: endpoint.to_string(),
+            })?;
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::LockStack { stack_small_id })
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to send LockStack event: {e}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        Ok(())
+    }
+
+    /// Checks if the given endpoint is a confidential compute endpoint.
+    ///
+    /// This function checks if the provided endpoint string matches any of the
+    /// confidential compute endpoints defined in the `handlers` module.
+    ///
+    /// # Arguments
+    ///
+    /// * `endpoint` - The endpoint to check
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the endpoint is a confidential compute endpoint, otherwise `false`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use crate::server::utils::is_confidential_compute_endpoint;
+    ///
+    /// let endpoint = "/v1/chat/completions";
+    /// assert!(is_confidential_compute_endpoint(endpoint));
+    /// ```
+    pub fn is_confidential_compute_endpoint(endpoint: &str) -> bool {
+        [
+            CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+            CONFIDENTIAL_EMBEDDINGS_PATH,
+            CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+        ]
+        .contains(&endpoint)
     }
 }
