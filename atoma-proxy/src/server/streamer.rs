@@ -481,11 +481,11 @@ impl Stream for Streamer {
 
 impl Drop for Streamer {
     /// Drops the streamer, updating the state manager with the final token count.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `self` - The streamer to drop
-    /// 
+    ///
     /// # Returns
     ///
     /// Returns a `Result<(), Error>` where:
