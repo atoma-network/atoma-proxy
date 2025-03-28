@@ -18,12 +18,15 @@ use crate::server::error::AtomaProxyError;
 use crate::server::types::{ConfidentialComputeRequest, ConfidentialComputeResponse};
 use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtension};
 
+use super::handle_status_code_error;
 use super::metrics::{
     IMAGE_GEN_LATENCY_METRICS, IMAGE_GEN_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
     TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
-use super::{handle_status_code_error, verify_response_hash_and_signature};
-use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
+use super::{
+    request_model::RequestModel, update_state_manager, verify_and_sign_response,
+    PROXY_SIGNATURE_KEY, RESPONSE_HASH_KEY,
+};
 use crate::server::{Result, MODEL};
 
 /// Path for the confidential image generations endpoint.
@@ -336,6 +339,7 @@ pub async fn confidential_image_generations_create(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_image_generation_response(
     state: &ProxyState,
     node_address: String,
@@ -374,7 +378,7 @@ async fn handle_image_generation_response(
         handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
-    let response = response
+    let mut response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
@@ -384,8 +388,13 @@ async fn handle_image_generation_response(
         })
         .map(Json)?;
 
+    let guard = state.sui.read().await;
+    let keystore = guard.get_keystore();
     let verify_hash = endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
-    verify_response_hash_and_signature(&response.0, verify_hash)?;
+
+    let proxy_signature = verify_and_sign_response(&response.0, verify_hash, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     // Update the node throughput performance
     state

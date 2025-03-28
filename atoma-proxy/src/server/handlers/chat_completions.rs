@@ -44,7 +44,7 @@ use super::metrics::{
 };
 use super::request_model::RequestModel;
 use super::{
-    handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
+    handle_status_code_error, update_state_manager, verify_and_sign_response, PROXY_SIGNATURE_KEY,
     RESPONSE_HASH_KEY,
 };
 use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS, MODEL};
@@ -525,6 +525,7 @@ pub fn confidential_chat_completions_create_stream(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
@@ -561,7 +562,7 @@ async fn handle_non_streaming_response(
         handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
-    let response = response
+    let mut response = response
         .json::<Value>()
         .await
         .map_err(|err| AtomaProxyError::InternalError {
@@ -597,7 +598,12 @@ async fn handle_non_streaming_response(
     );
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
-    verify_response_hash_and_signature(&response.0, verify_hash)?;
+
+    let guard: tokio::sync::RwLockReadGuard<'_, atoma_auth::Sui> = state.sui.read().await;
+    let keystore = guard.get_keystore();
+    let proxy_signature = verify_and_sign_response(&response.0, verify_hash, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     state
         .state_manager_sender
@@ -760,6 +766,7 @@ async fn handle_streaming_response(
         state.state_manager_sender.clone(),
         selected_stack_small_id,
         estimated_total_tokens,
+        state.sui.clone(),
         start,
         node_id,
         model_name,

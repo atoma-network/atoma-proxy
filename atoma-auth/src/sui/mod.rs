@@ -403,6 +403,16 @@ impl Sui {
         Ok(signature.encode_base64())
     }
 
+    /// Get the underlying keystore
+    ///
+    /// # Returns
+    ///
+    /// Returns the keystore.
+    #[must_use]
+    pub fn get_keystore(&self) -> &Keystore {
+        &self.wallet_ctx.config.keystore
+    }
+
     /// Sign a hash using the wallet's private key
     ///
     /// # Arguments

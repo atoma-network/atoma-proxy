@@ -1,6 +1,7 @@
 #![allow(clippy::cognitive_complexity)]
 #![allow(clippy::too_many_lines)]
 
+use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
@@ -10,6 +11,12 @@ use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
+use tokio::sync::RwLock;
+
+use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
+
+use super::handlers::verify_and_sign_response;
+use std::sync::Arc;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -17,14 +24,11 @@ use std::{
 };
 use tracing::{error, info, instrument, warn};
 
-use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
-
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
     CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
     CHAT_COMPLETIONS_TOTAL_TOKENS,
 };
-use super::handlers::verify_response_hash_and_signature;
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -52,6 +56,8 @@ pub struct Streamer {
     status: StreamStatus,
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
+    /// Keystore
+    sui: Arc<RwLock<Sui>>,
     /// Stack small id
     stack_small_id: i64,
     /// State manager sender
@@ -99,6 +105,7 @@ impl Streamer {
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         stack_small_id: i64,
         estimated_total_tokens: i64,
+        sui: Arc<RwLock<Sui>>,
         start: Instant,
         node_id: i64,
         model_name: String,
@@ -108,6 +115,7 @@ impl Streamer {
             stream: Box::pin(stream),
             status: StreamStatus::NotStarted,
             estimated_total_tokens,
+            sui,
             stack_small_id,
             state_manager_sender,
             start,
@@ -450,15 +458,6 @@ impl Stream for Streamer {
                 // is not running within a secure enclave. Otherwise, the fact that the node can process requests
                 // with confidential data is proof of data integrity.
                 let verify_hash = self.endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
-                verify_response_hash_and_signature(&chunk, verify_hash).map_err(|e| {
-                    error!(
-                        target = "atoma-service-streamer",
-                        level = "error",
-                        "Error verifying response: {}",
-                        e
-                    );
-                    Error::new(format!("Error verifying and signing response: {e:?}"))
-                })?;
 
                 if self.start_decode.is_none() {
                     self.start_decode = Some(Instant::now());
@@ -501,6 +500,11 @@ impl Stream for Streamer {
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;
+                    let _ = {
+                        let guard = self.sui.blocking_read();
+                        verify_and_sign_response(&chunk, verify_hash, guard.get_keystore())
+                            .map_err(|e| Error::new(e.to_string()))?
+                    }; // guard is dropped immediately after signature is created
                     self.handle_final_chunk(usage)?;
                 }
 

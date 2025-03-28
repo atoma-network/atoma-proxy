@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
-use base64::engine::{general_purpose::STANDARD, Engine};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use blake2::Digest;
 use fastcrypto::{
     ed25519::{Ed25519PublicKey, Ed25519Signature},
@@ -11,6 +11,7 @@ use fastcrypto::{
 };
 use flume::Sender;
 use reqwest::StatusCode;
+use sui_keys::keystore::{AccountKeystore, Keystore};
 use sui_sdk::types::crypto::{PublicKey, Signature, SignatureScheme, SuiSignature};
 use tracing::instrument;
 
@@ -30,6 +31,9 @@ pub const RESPONSE_HASH_KEY: &str = "response_hash";
 
 /// Key for the signature in the payload
 pub const SIGNATURE_KEY: &str = "signature";
+
+/// Key for the proxy signature in the payload
+pub const PROXY_SIGNATURE_KEY: &str = "proxy_signature";
 
 /// Updates the state manager with token usage and hash information for a stack.
 ///
@@ -82,16 +86,17 @@ pub fn update_state_manager(
     Ok(())
 }
 
-/// Verifies a Sui signature from a handler response
+/// Verifies a Sui signature and creates a new signature using the proxy's key
 ///
 /// # Arguments
 ///
 /// * `payload` - JSON payload containing the response hash and its signature
 /// * `node_public_key` - Public key of the node that signed the response
+/// * `proxy_keystore` - Keystore containing the proxy's signing key
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` if verification succeeds,
+/// Returns `Ok(String)` with the new signature if verification succeeds,
 /// or an error if verification fails or signing fails
 ///
 /// # Errors
@@ -99,13 +104,15 @@ pub fn update_state_manager(
 /// This function will return an error if:
 /// - The payload format is invalid
 /// - The signature verification fails
+/// - Creating the new signature fails
 #[instrument(level = "debug", skip_all)]
-pub fn verify_response_hash_and_signature(
+pub fn verify_and_sign_response(
     payload: &serde_json::Value,
     verify_hash: bool,
-) -> Result<()> {
+    keystore: &Keystore,
+) -> Result<String> {
     // Extract response hash and signature from payload
-    let response_hash =
+    let response_hash_str =
         payload[RESPONSE_HASH_KEY]
             .as_str()
             .ok_or_else(|| AtomaProxyError::InternalError {
@@ -113,11 +120,21 @@ pub fn verify_response_hash_and_signature(
                 client_message: Some("Invalid response from inference service".to_string()),
                 endpoint: "verify_signature".to_string(),
             })?;
-    let response_hash = STANDARD.decode(response_hash).unwrap();
 
     if verify_hash {
-        verify_response_hash(payload, &response_hash)?;
+        // Decode base64 string to bytes for verification
+        let response_hash_bytes =
+            BASE64
+                .decode(response_hash_str)
+                .map_err(|e| AtomaProxyError::InternalError {
+                    message: format!("Failed to decode response hash: {e}"),
+                    client_message: Some("Invalid response from inference service".to_string()),
+                    endpoint: "verify_signature".to_string(),
+                })?;
+        verify_response_hash(payload, &response_hash_bytes)?;
     }
+
+    let response_hash_bytes = BASE64.decode(response_hash_str).unwrap();
 
     let node_signature =
         payload[SIGNATURE_KEY]
@@ -163,7 +180,7 @@ pub fn verify_response_hash_and_signature(
                     }
                 })?;
             public_key
-                .verify(response_hash.as_slice(), &signature)
+                .verify(response_hash_bytes.as_slice(), &signature)
                 .map_err(|e| AtomaProxyError::InternalError {
                     message: format!("Failed to verify ed25519 signature: {e}"),
                     client_message: Some("Invalid response from inference service".to_string()),
@@ -187,7 +204,7 @@ pub fn verify_response_hash_and_signature(
                     }
                 })?;
             public_key
-                .verify(response_hash.as_slice(), &signature)
+                .verify(response_hash_bytes.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
                     message: "Failed to verify secp256k1 signature".to_string(),
                     client_message: Some("Invalid response from inference service".to_string()),
@@ -211,7 +228,7 @@ pub fn verify_response_hash_and_signature(
                     }
                 })?;
             public_key
-                .verify(response_hash.as_slice(), &signature)
+                .verify(response_hash_bytes.as_slice(), &signature)
                 .map_err(|_| AtomaProxyError::InternalError {
                     message: "Failed to verify secp256r1 signature".to_string(),
                     client_message: Some("Invalid response from inference service".to_string()),
@@ -227,7 +244,25 @@ pub fn verify_response_hash_and_signature(
         }
     }
 
-    Ok(())
+    // Sign with proxy's key
+    let proxy_signature = match keystore {
+        Keystore::File(keystore) => keystore
+            .sign_hashed(&keystore.addresses()[0], &response_hash_bytes)
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to create proxy signature: {e}"),
+                client_message: Some("Invalid response from inference service".to_string()),
+                endpoint: "verify_signature".to_string(),
+            })?,
+        Keystore::InMem(keystore) => keystore
+            .sign_hashed(&keystore.addresses()[0], &response_hash_bytes)
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to create proxy signature: {e}"),
+                client_message: Some("Invalid response from inference service".to_string()),
+                endpoint: "verify_signature".to_string(),
+            })?,
+    };
+    // Convert signature to base64
+    Ok(BASE64.encode(proxy_signature.as_ref()))
 }
 
 /// Verifies that a response hash matches the computed hash of the payload

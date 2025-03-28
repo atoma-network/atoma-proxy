@@ -32,7 +32,7 @@ use super::{
         TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
     },
     request_model::RequestModel,
-    update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
+    update_state_manager, verify_and_sign_response, PROXY_SIGNATURE_KEY, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -357,6 +357,7 @@ pub async fn confidential_embeddings_create(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_embeddings_response(
     state: &ProxyState,
     node_address: String,
@@ -397,7 +398,7 @@ async fn handle_embeddings_response(
         handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
-    let response =
+    let mut response =
         response
             .json::<Value>()
             .await
@@ -407,8 +408,13 @@ async fn handle_embeddings_response(
                 endpoint: endpoint.to_string(),
             })?;
 
+    let guard = state.sui.blocking_read();
+    let keystore = guard.get_keystore();
     let verify_hash = endpoint != CONFIDENTIAL_EMBEDDINGS_PATH;
-    verify_response_hash_and_signature(&response, verify_hash)?;
+
+    let proxy_signature = verify_and_sign_response(&response, verify_hash, keystore)?;
+
+    response[PROXY_SIGNATURE_KEY] = Value::String(proxy_signature);
 
     let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
         response
