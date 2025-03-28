@@ -22,6 +22,7 @@ use super::metrics::{
     IMAGE_GEN_LATENCY_METRICS, IMAGE_GEN_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
     TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
+use super::request_model::ComputeUnitsEstimate;
 use super::{handle_status_code_error, verify_response_hash_and_signature};
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
@@ -98,7 +99,10 @@ impl RequestModel for RequestModelImageGenerations {
         self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, _tokenizer: Option<&Tokenizer>) -> Result<u64> {
+    fn get_compute_units_estimate(
+        &self,
+        _tokenizer: Option<&Tokenizer>,
+    ) -> Result<ComputeUnitsEstimate> {
         // Parse dimensions from size string (e.g., "1024x1024")
         let dimensions: Vec<u64> = self
             .size
@@ -117,7 +121,10 @@ impl RequestModel for RequestModelImageGenerations {
         let height = dimensions[1];
 
         // Calculate compute units based on number of images and pixel count
-        Ok(self.n * width * height)
+        Ok(ComputeUnitsEstimate {
+            num_input_compute_units: self.n * width * height,
+            max_total_compute_units: self.n * width * height,
+        })
     }
 }
 
