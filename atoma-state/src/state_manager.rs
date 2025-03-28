@@ -2148,19 +2148,10 @@ impl AtomaState {
         total_tokens: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "WITH updated AS (
-                UPDATE stacks
+            "UPDATE stacks
                 SET already_computed_units = already_computed_units - ($1 - $2)
                 WHERE stack_small_id = $3
-                RETURNING already_computed_units, num_compute_units
-            )
-            UPDATE stacks
-            SET is_locked = CASE 
-                WHEN (SELECT CAST(already_computed_units AS FLOAT) / CAST(num_compute_units AS FLOAT) FROM updated) > 0.95 
-                THEN true 
-                ELSE is_locked 
-            END
-            WHERE stack_small_id = $3",
+           ",
         )
         .bind(estimated_total_tokens)
         .bind(total_tokens)
