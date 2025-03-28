@@ -21,6 +21,7 @@ use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_st
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
     CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
     CHAT_COMPLETIONS_TOTAL_TOKENS,
 };
@@ -76,6 +77,13 @@ pub struct Streamer {
     /// We need store it as an option because we need to consume its value
     /// once the first token is generated
     first_token_generation_timer: Option<Instant>,
+    /// Whether the final chunk has been handled, this is used to prevent
+    /// updating the stack num tokens if the final chunk has not been handled
+    /// in case the client has dropped the connection.
+    is_final_chunk_handled: bool,
+    /// Number of generated tokens so far. It is only used when the client
+    /// drops the connection, before the final chunk is processed.
+    num_generated_tokens: i64,
 }
 
 /// Represents the various states of a streaming process
@@ -98,6 +106,7 @@ impl Streamer {
         stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         stack_small_id: i64,
+        num_input_tokens: i64,
         estimated_total_tokens: i64,
         start: Instant,
         node_id: i64,
@@ -119,6 +128,8 @@ impl Streamer {
             keep_alive_pos: 0,
             first_token_generation_timer: Some(start),
             inter_stream_token_latency_timer: None,
+            is_final_chunk_handled: false,
+            num_generated_tokens: num_input_tokens,
         }
     }
 
@@ -161,7 +172,6 @@ impl Streamer {
         )
     )]
     fn handle_final_chunk(&mut self, usage: &Value) -> Result<(), Error> {
-        // Get input tokens
         let input_tokens = usage
             .get("prompt_tokens")
             .and_then(serde_json::Value::as_i64)
@@ -173,7 +183,6 @@ impl Streamer {
                 );
                 Error::new("Error getting prompt tokens from usage")
             })?;
-        // Get output tokens
         let output_tokens = usage
             .get("completion_tokens")
             .and_then(serde_json::Value::as_i64)
@@ -185,7 +194,6 @@ impl Streamer {
                 );
                 Error::new("Error getting completion tokens from usage")
             })?;
-        // Get total tokens
         let total_tokens = usage
             .get("total_tokens")
             .and_then(serde_json::Value::as_i64)
@@ -197,73 +205,18 @@ impl Streamer {
                 );
                 Error::new("Error getting total tokens from usage")
             })?;
-
-        // Record the total tokens in the chat completions total tokens metric
         CHAT_COMPLETIONS_TOTAL_TOKENS.add(
             total_tokens as u64,
             &[KeyValue::new("model", self.model_name.clone())],
         );
-
-        // Update the nodes throughput performance
-        if let Err(e) = self.state_manager_sender.send(
-            AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-                timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name: self.model_name.clone(),
-                node_small_id: self.node_id,
-                input_tokens,
-                output_tokens,
-                time: self.start.elapsed().as_secs_f64(),
-            },
-        ) {
-            error!(
-                target = "atoma-service-streamer",
-                level = "error",
-                "Error updating node throughput performance: {e:?}"
-            );
-            return Err(Error::new(format!(
-                "Error updating node throughput performance: {e:?}"
-            )));
-        }
-
-        if let Err(e) = self.state_manager_sender.send(
-            AtomaAtomaStateManagerEvent::UpdateNodeDecodePerformance {
-                node_small_id: self.node_id,
-                tokens: output_tokens,
-                time: self
-                    .start_decode
-                    .expect("This should be filled on the first token")
-                    .elapsed()
-                    .as_secs_f64(),
-            },
-        ) {
-            error!(
-                target = "atoma-service-streamer",
-                level = "error",
-                "Error updating node decode performance: {}",
-                e
-            );
-            return Err(Error::new(format!(
-                "Error updating node decode performance: {e:?}"
-            )));
-        }
-        if let Err(e) = self.state_manager_sender.send(
-            AtomaAtomaStateManagerEvent::UpdateNodePrefillPerformance {
-                node_small_id: self.node_id,
-                tokens: input_tokens,
-                time: (self.start_decode.unwrap() - self.start).as_secs_f64(),
-            },
-        ) {
-            error!(
-                target = "atoma-service-streamer",
-                level = "error",
-                "Error updating node prefill performance: {e:?}"
-            );
-            return Err(Error::new(format!(
-                "Error updating node prefill performance: {e:?}"
-            )));
-        }
-
-        // Update stack num tokens
+        CHAT_COMPLETIONS_INPUT_TOKENS.add(
+            input_tokens as u64,
+            &[KeyValue::new("model", self.model_name.clone())],
+        );
+        CHAT_COMPLETIONS_COMPLETIONS_TOKENS.add(
+            output_tokens as u64,
+            &[KeyValue::new("model", self.model_name.clone())],
+        );
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,
             self.stack_small_id,
@@ -281,7 +234,6 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
-
         Ok(())
     }
 }
@@ -503,7 +455,7 @@ impl Stream for Streamer {
                     self.status = StreamStatus::Completed;
                     self.handle_final_chunk(usage)?;
                 }
-
+                self.num_generated_tokens += 1;
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))
             }
             Poll::Ready(Some(Err(e))) => {
@@ -524,5 +476,28 @@ impl Stream for Streamer {
             }
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+impl Drop for Streamer {
+    fn drop(&mut self) {
+        if self.is_final_chunk_handled {
+            return;
+        }
+        if let Err(e) = update_state_manager(
+            &self.state_manager_sender,
+            self.stack_small_id,
+            self.estimated_total_tokens,
+            self.num_generated_tokens,
+            &self.endpoint,
+        ) {
+            error!(
+                target = "atoma-service-streamer",
+                level = "error",
+                "Error updating stack num tokens: {}",
+                e
+            );
+        }
+        self.status = StreamStatus::Completed;
     }
 }

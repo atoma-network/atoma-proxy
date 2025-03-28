@@ -171,6 +171,44 @@ pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
         .build()
 });
 
+/// Counter metric that tracks the total number of input tokens processed in chat completions.
+///
+/// This metric counts the cumulative number of tokens in the input prompts,
+/// broken down by model type. This helps monitor token usage and costs
+/// across different models and client applications.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completions_input_tokens`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: tokens (count)
+pub static CHAT_COMPLETIONS_INPUT_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completions_input_tokens")
+        .with_description("The number of input tokens processed")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of completions tokens processed in chat completions.
+///
+/// This metric counts the cumulative number of tokens in the completions,
+/// broken down by model type. This helps monitor token usage and costs
+/// across different models and client applications.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completions_completions_tokens`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: tokens (count)
+pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completions_completions_tokens")
+        .with_description("The number of completions tokens processed")
+        .with_unit("tokens")
+        .build()
+});
+
 /// Histogram metric that tracks the time until the first token is generated in chat completions.
 ///
 /// This metric measures the initial latency before token generation begins,
