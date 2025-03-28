@@ -355,41 +355,6 @@ paths:
           description: Failed to get user profile
       security:
       - bearerAuth: []
-  /set_user_profile:
-    get:
-      tags:
-      - Auth
-      summary: Retrieves the user profile for the user.
-      description: |-
-        # Arguments
-
-        * `proxy_service_state` - The shared state containing the state manager
-        * `headers` - The headers of the request
-
-        # Returns
-
-        * `Result<Json<Value>>` - A JSON response containing the user profile
-
-        # Errors
-
-        * If the user ID cannot be retrieved from the token, returns a 401 Unauthorized error
-        * If the user profile cannot be retrieved, returns a 500 Internal Server Error
-      operationId: set_user_profile
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UserProfile'
-        required: true
-      responses:
-        '200':
-          description: Sets the user profile for the user
-        '401':
-          description: Unauthorized request
-        '500':
-          description: Failed to set user profile
-      security:
-      - bearerAuth: []
   /zk_salt:
     get:
       tags:
@@ -792,14 +757,10 @@ components:
         This struct is used to represent the response for the get_user_profile endpoint.
       required:
       - email
-      - name
       properties:
         email:
           type: string
           description: The user's email
-        name:
-          type: string
-          description: The user's name
   securitySchemes:
     bearerAuth:
       type: http
@@ -817,3 +778,13 @@ tags:
   description: Stacks management
 - name: Stats
   description: Stats and metrics
+x-speakeasy-retries:
+  strategy: backoff
+  backoff:
+    initialInterval: 500
+    maxInterval: 60000
+    maxElapsedTime: 3600000
+    exponent: 1.5
+  statusCodes:
+  - 5XX
+  retryConnectionErrors: true
