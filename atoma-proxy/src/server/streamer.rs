@@ -480,6 +480,34 @@ impl Stream for Streamer {
 }
 
 impl Drop for Streamer {
+    /// Drops the streamer, updating the state manager with the final token count.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `self` - The streamer to drop
+    /// 
+    /// # Returns
+    ///
+    /// Returns a `Result<(), Error>` where:
+    /// * `()` - The streamer is dropped
+    /// * `Error` - An error that can occur during:
+    ///   - State manager update
+    ///
+    /// # State Updates
+    ///
+    /// This method sends an event to the state manager to update the stack num tokens.
+    /// If the final chunk has not been handled, it will not update the stack num tokens.
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            streamer = "drop-streamer",
+            num_generated_tokens = self.num_generated_tokens,
+            estimated_total_tokens = self.estimated_total_tokens,
+            stack_small_id = self.stack_small_id,
+            endpoint = self.endpoint,
+        )
+    )]
     fn drop(&mut self) {
         if self.is_final_chunk_handled {
             return;
