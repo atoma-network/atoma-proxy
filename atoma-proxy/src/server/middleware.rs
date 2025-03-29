@@ -1,6 +1,6 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
-use auth::{ProcessedRequest, SelectedNodeMetadata};
+use auth::{ProcessedRequest, SelectedNodeMetadata, StackMetadata};
 use axum::{
     body::Body,
     extract::{rejection::LengthLimitError, Request, State},
@@ -270,14 +270,19 @@ pub async fn authenticate_middleware(
     //
     // NOTE: If this method succeeds and the `optional_stack` is Some, this means that the proxy has locked
     // enough compute units for the request, within the state manager. Otherwise, this has not been the case.
-    let (optional_stack, num_input_tokens, total_compute_units, model, user_id) =
-        auth::handle_authenticate_and_lock_compute_units(
-            &state,
-            &req_parts.headers,
-            &body_json,
-            &endpoint,
-        )
-        .await?;
+    let StackMetadata {
+        optional_stack,
+        num_input_compute_units,
+        max_total_compute_units,
+        model,
+        user_id,
+    } = auth::handle_authenticate_and_lock_compute_units(
+        &state,
+        &req_parts.headers,
+        &body_json,
+        &endpoint,
+    )
+    .await?;
 
     // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
     //
@@ -593,6 +598,22 @@ pub mod auth {
 
     use super::STACK_SIZE_TO_BUY;
 
+    /// Metadata about the stack that was selected for the request.
+    /// This is used to update the stack's num_tokens after the request is processed.  
+    #[derive(Clone, Debug)]
+    pub struct StackMetadata {
+        /// The stack that was selected for the request.
+        pub optional_stack: Option<Stack>,
+        /// The number of input compute units for the request.
+        pub num_input_compute_units: u64,
+        /// The maximum total compute units for the request.
+        pub max_total_compute_units: u64,
+        /// The model that was selected for the request.
+        pub model: String,
+        /// The user ID that made the request.
+        pub user_id: i64,
+    }
+
     /// Handles authentication and compute unit locking for incoming API requests.
     ///
     /// This function serves as a routing layer that processes different types of API requests
@@ -672,7 +693,7 @@ pub mod auth {
         headers: &HeaderMap,
         body_json: &Value,
         endpoint: &str,
-    ) -> Result<(Option<Stack>, u64, u64, String, i64)> {
+    ) -> Result<StackMetadata> {
         match endpoint {
             CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
@@ -784,7 +805,7 @@ pub mod auth {
         headers: &HeaderMap,
         request_model: impl RequestModel + Send,
         endpoint: &str,
-    ) -> Result<(Option<Stack>, u64, u64, String, i64)> {
+    ) -> Result<StackMetadata> {
         let user_id = check_auth(&state.state_manager_sender, headers, endpoint).await?;
 
         // Retrieve the model and the appropriate tokenizer
@@ -838,13 +859,13 @@ pub mod auth {
                 endpoint: endpoint.to_string(),
             })?;
 
-        Ok((
+        Ok(StackMetadata {
             optional_stack,
             num_input_compute_units,
             max_total_compute_units,
             model,
             user_id,
-        ))
+        })
     }
 
     /// Represents the processed and validated request data after authentication and initial processing.
