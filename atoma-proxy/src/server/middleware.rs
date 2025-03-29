@@ -1474,6 +1474,9 @@ pub mod auth {
                 node,
             )
             .await?;
+            // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+            // in the AtomaStateManager's internal state, for this reason it is safe to remove the lock here,
+            // as any new request querying the state manager after this lock removal will see the new stack.
             state.users_buy_stack_lock_map.remove(&user_id);
             new_stack_result
         };
