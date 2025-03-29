@@ -44,7 +44,9 @@ use super::handlers::image_generations::{
 use super::handlers::nodes::{
     nodes_create, nodes_create_lock, NODES_CREATE_LOCK_PATH, NODES_CREATE_PATH,
 };
-use super::middleware::{authenticate_middleware, confidential_compute_middleware};
+use super::middleware::{
+    authenticate_middleware, confidential_compute_middleware, handle_locked_stack_middleware,
+};
 use super::AtomaServiceConfig;
 
 /// Path for health check endpoint.
@@ -153,7 +155,12 @@ pub async fn health() -> Result<Json<HealthResponse>> {
 ///
 /// Returns an configured `Router` instance with all routes and middleware set up
 pub fn create_router(state: &ProxyState) -> Router {
-    let confidential_router = Router::new()
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_headers(Any);
+
+    let confidential_routes = Router::new()
         .route(
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             post(confidential_chat_completions_create),
@@ -165,33 +172,47 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
             post(confidential_image_generations_create),
-        )
-        .layer(ServiceBuilder::new().layer(from_fn_with_state(
-            state.clone(),
-            confidential_compute_middleware,
-        )))
-        .with_state(state.clone());
+        );
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(vec![Method::GET, Method::POST])
-        .allow_headers(Any);
-
-    Router::new()
+    let regular_routes = Router::new()
         .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
-        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
-        .layer(
-            ServiceBuilder::new()
-                .layer(from_fn_with_state(state.clone(), authenticate_middleware))
-                .into_inner(),
-        )
+        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create));
+
+    let node_routes = Router::new()
         .route(NODES_CREATE_PATH, post(nodes_create))
-        .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock))
+        .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock));
+
+    let public_routes = Router::new().route(HEALTH_PATH, get(health));
+
+    Router::new()
+        .merge(
+            confidential_routes.layer(
+                ServiceBuilder::new()
+                    .layer(from_fn_with_state(
+                        state.clone(),
+                        handle_locked_stack_middleware,
+                    ))
+                    .layer(from_fn_with_state(
+                        state.clone(),
+                        confidential_compute_middleware,
+                    )),
+            ),
+        )
+        .merge(
+            regular_routes.layer(
+                ServiceBuilder::new()
+                    .layer(from_fn_with_state(
+                        state.clone(),
+                        handle_locked_stack_middleware,
+                    ))
+                    .layer(from_fn_with_state(state.clone(), authenticate_middleware)),
+            ),
+        )
+        .merge(node_routes)
+        .merge(public_routes)
         .with_state(state.clone())
-        .route(HEALTH_PATH, get(health))
-        .merge(confidential_router)
         .merge(openapi_routes())
         .layer(cors)
 }

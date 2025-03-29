@@ -2068,6 +2068,45 @@ impl AtomaState {
         Ok(())
     }
 
+    /// Locks a stack
+    ///
+    /// This method locks a stack by setting the `is_locked` field to true for the specified `stack_small_id`.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack_small_id` - The unique small identifier of the stack to lock.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn lock_stack(state_manager: &AtomaStateManager, stack_small_id: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.lock_stack(stack_small_id).await
+    /// }
+    /// ```
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%stack_small_id)
+    )]
+    pub async fn lock_stack(&self, stack_small_id: i64) -> Result<()> {
+        sqlx::query("UPDATE stacks SET is_locked = true WHERE stack_small_id = $1")
+            .bind(stack_small_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
     /// Updates the number of tokens already computed for a stack.
     ///
     /// This method updates the `already_computed_units` field in the `stacks` table
@@ -2109,19 +2148,10 @@ impl AtomaState {
         total_tokens: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "WITH updated AS (
-                UPDATE stacks
+            "UPDATE stacks
                 SET already_computed_units = already_computed_units - ($1 - $2)
                 WHERE stack_small_id = $3
-                RETURNING already_computed_units, num_compute_units
-            )
-            UPDATE stacks
-            SET is_locked = CASE 
-                WHEN (SELECT CAST(already_computed_units AS FLOAT) / CAST(num_compute_units AS FLOAT) FROM updated) > 0.95 
-                THEN true 
-                ELSE is_locked 
-            END
-            WHERE stack_small_id = $3",
+           ",
         )
         .bind(estimated_total_tokens)
         .bind(total_tokens)
