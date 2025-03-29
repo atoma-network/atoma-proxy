@@ -1288,7 +1288,9 @@ pub mod auth {
     /// * Checks if the user's stack is locked using the users_buy_stack_lock_map
     /// * If locked, retries up to MAX_STACK_WAIT_ATTEMPTS times with MAX_STACK_WAIT_TIME delay
     /// * Each retry attempts to fetch the stack metadata via try_get_stack_for_user_id
-    /// * Follows Sui's Mysticeti fast finality estimation times for retry delays
+    /// * We don't wait for the Sui blockchain to finalize the stack creation, as we store the stack creation event
+    ///   right after the call to the Sui blockchain, and we don't wait to catch the event from the Sui blockchain,
+    ///   as this can take extra time (roughly 300ms following Sui's Mysticeti finality times).
     #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
     async fn get_stack_if_locked_with_request_model(
         state: &ProxyState,
@@ -1304,9 +1306,11 @@ pub mod auth {
         };
         if stack_is_locked {
             // NOTE: This means a concurrent request is already buying a stack, so we wait for it to finish,
-            // and for the stack creation event to be emitted by the Sui blockchain. After some period
-            // (say 300ms, following Sui's Mysticeti fast finality estimation times), we will try again,
-            // for a fixed number of times. If the stack is still not created, we return an error.
+            // and for the stack creation event to be stored on the AtomaStateManager's internal state, as
+            // we store it right after the call to the Sui blockchain and don't wait to catch the event
+            // from the Sui blockchain, as this can take extra time (roughly 300ms following Sui's Mysticeti
+            // finality times). We will try again, for a fixed number of times. If the stack is still not created,
+            // we return an error.
             for _ in 0..MAX_STACK_WAIT_ATTEMPTS {
                 let stack_metadata =
                     try_get_stack_for_user_id(state, user_id, request_model.clone(), endpoint)
