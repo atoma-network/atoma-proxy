@@ -38,11 +38,12 @@ use tracing::instrument;
 use utoipa::OpenApi;
 
 use super::metrics::{
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS,
     CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
-use super::request_model::RequestModel;
+use super::request_model::{ComputeUnitsEstimate, RequestModel};
 use super::{
     handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
     RESPONSE_HASH_KEY,
@@ -260,6 +261,7 @@ async fn handle_chat_completions_request(
             metadata.node_id,
             headers,
             &payload,
+            metadata.num_input_tokens.map(|v| v as i64),
             metadata.num_compute_units as i64,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
@@ -590,9 +592,17 @@ async fn handle_non_streaming_response(
         .and_then(serde_json::Value::as_u64)
         .map_or(0, |n| n as i64);
 
-    // Record the total tokens in the chat completions total tokens metric
+    // Record the total tokens in the chat completions tokens metrics
     CHAT_COMPLETIONS_TOTAL_TOKENS.add(
         total_tokens as u64,
+        &[KeyValue::new("model", model_name.clone())],
+    );
+    CHAT_COMPLETIONS_INPUT_TOKENS.add(
+        input_tokens as u64,
+        &[KeyValue::new("model", model_name.clone())],
+    );
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS.add(
+        output_tokens as u64,
         &[KeyValue::new("model", model_name.clone())],
     );
 
@@ -722,6 +732,7 @@ async fn handle_streaming_response(
     node_id: i64,
     headers: HeaderMap,
     payload: &Value,
+    num_input_tokens: Option<i64>,
     estimated_total_tokens: i64,
     selected_stack_small_id: i64,
     endpoint: String,
@@ -755,10 +766,19 @@ async fn handle_streaming_response(
     let stream = response.bytes_stream();
 
     // Create the SSE stream
+    // NOTE: The number of input tokens is only available for non-confidential requests,
+    // for confidential requests, the input message is encrypted. In that case, we set it to `0`,
+    // and we allow for the proxy to underestimate the total tokens, relative to the node, if
+    // the last stream chunk is not received (containing full usage). This situation is fine,
+    // for two reasons:
+    // 1. The node is running in confidential compute mode, so we can trust the real usage information by node
+    //    (say when claiming stacks from the blockchain).
+    // 2. It only affects requests whose connection is dropped before the final chunk is processed, by the client.
     let stream = Sse::new(Streamer::new(
         stream,
         state.state_manager_sender.clone(),
         selected_stack_small_id,
+        num_input_tokens.unwrap_or(0),
         estimated_total_tokens,
         start,
         node_id,
@@ -836,7 +856,10 @@ impl RequestModel for RequestModelChatCompletions {
     /// We support either string or array of content parts. We further assume that all content messages
     /// share the same previous messages. That said, we further assume that content parts formatted into arrays
     /// are to be concatenated and treated as a single message, by the model and from the estimate point of view.
-    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64> {
+    fn get_compute_units_estimate(
+        &self,
+        tokenizer: Option<&Tokenizer>,
+    ) -> Result<ComputeUnitsEstimate> {
         // In order to account for the possibility of not taking into account possible additional special tokens,
         // which might not be considered by the tokenizer, we add a small overhead to the total number of tokens, per message.
         const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
@@ -905,7 +928,10 @@ impl RequestModel for RequestModelChatCompletions {
             }
         }
         // add the max completion tokens, to account for the response
-        Ok(total_num_tokens + self.max_completion_tokens)
+        Ok(ComputeUnitsEstimate {
+            num_input_compute_units: total_num_tokens,
+            max_total_compute_units: total_num_tokens + self.max_completion_tokens,
+        })
     }
 }
 
@@ -1930,7 +1956,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 21); // 8 tokens + 3 overhead + 10 completion
+        assert_eq!(result.unwrap().max_total_compute_units, 21); // 8 tokens + 3 overhead + 10 completion
     }
 
     #[tokio::test]
@@ -1952,7 +1978,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 32); // (8+8) tokens + (3+3) overhead + 10 completion
+        assert_eq!(result.unwrap().max_total_compute_units, 32); // (8+8) tokens + (3+3) overhead + 10 completion
     }
 
     #[tokio::test]
@@ -1978,7 +2004,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 32); // (8+8) tokens  (3 + 3) overhead + 10 completion
+        assert_eq!(result.unwrap().max_total_compute_units, 32); // (8+8) tokens  (3 + 3) overhead + 10 completion
     }
 
     #[tokio::test]
@@ -1994,7 +2020,7 @@ mod tests {
         let tokenizer = load_tokenizer().await;
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 14); // 1 tokens (special token) + 3 overhead + 10 completion
+        assert_eq!(result.unwrap().max_total_compute_units, 14); // 1 tokens (special token) + 3 overhead + 10 completion
     }
 
     #[tokio::test]
@@ -2034,7 +2060,7 @@ mod tests {
         // System message: tokens + 15 completion
         // User message array: (2 text parts tokens) + (15 * 2 for text completion for parts)
         let tokens = result.unwrap();
-        assert_eq!(tokens, 48); // 3 * 8 + 3 * 3 overhead + 15
+        assert_eq!(tokens.max_total_compute_units, 48); // 3 * 8 + 3 * 3 overhead + 15
     }
 
     #[tokio::test]
@@ -2089,6 +2115,6 @@ mod tests {
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         let tokens = result.unwrap();
-        assert!(tokens > 13); // Should be more than minimum (3 overhead + 10 completion)
+        assert!(tokens.max_total_compute_units > 13); // Should be more than minimum (3 overhead + 10 completion)
     }
 }
