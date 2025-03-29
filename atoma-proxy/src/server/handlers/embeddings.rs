@@ -12,7 +12,6 @@ use base64::engine::{general_purpose::STANDARD, Engine};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
@@ -171,17 +170,14 @@ pub async fn embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             num_compute_units: num_input_compute_units,
             ..
         } = metadata;
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
-            num_input_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -267,17 +263,14 @@ pub async fn confidential_embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             num_compute_units: num_input_compute_units,
             ..
         } = metadata;
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
-            num_input_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -362,14 +355,11 @@ pub async fn confidential_embeddings_create(
         estimated_total_tokens
     )
 )]
-#[allow(clippy::too_many_arguments)]
 async fn handle_embeddings_response(
     state: &ProxyState,
     node_address: String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
-    num_input_compute_units: i64,
     endpoint: String,
     model_name: String,
     stack_small_id: i64,
@@ -415,33 +405,6 @@ async fn handle_embeddings_response(
 
     let verify_hash = endpoint != CONFIDENTIAL_EMBEDDINGS_PATH;
     verify_response_hash_and_signature(&response, verify_hash)?;
-
-    let num_input_compute_units = if endpoint == CONFIDENTIAL_EMBEDDINGS_PATH {
-        response
-            .get("total_tokens")
-            .map_or(0, |u| u.as_u64().unwrap_or(0)) as i64
-    } else {
-        num_input_compute_units
-    };
-
-    // Update the node throughput performance
-    state
-        .state_manager_sender
-        .send(
-            AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-                timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
-                node_small_id: selected_node_id,
-                input_tokens: num_input_compute_units,
-                output_tokens: 0,
-                time: time.elapsed().as_secs_f64(),
-            },
-        )
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
 
     // NOTE: It is not very secure to rely on the node's computed response hash,
     // if the node is not running in a TEE, but for now it suffices

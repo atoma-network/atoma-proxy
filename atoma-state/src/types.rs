@@ -149,30 +149,6 @@ pub struct UserProfile {
     pub email: String,
 }
 
-/// Represents a latency response.
-///
-/// Tracks hourly latency measurements for the system.
-/// Each measurement includes:
-/// - Total latency for all requests in the hour
-/// - Number of requests processed
-/// - Timestamp of the measurement
-///
-/// # Example
-/// For two requests in an hour:
-/// - Request 1: 1 second latency
-/// - Request 2: 2 seconds latency
-/// - Total latency = 3 seconds
-/// - Total requests = 2
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
-pub struct LatencyResponse {
-    /// Timestamp of the latency measurement
-    pub timestamp: DateTime<Utc>,
-    /// Sum of all latencies (in seconds) in that hour
-    pub latency: f64,
-    /// Total number of requests in that hour
-    pub requests: i64,
-}
-
 /// Represents a stats stacks response.
 ///
 /// This struct tracks hourly statistics about compute units in the system.
@@ -725,48 +701,6 @@ pub enum AtomaAtomaStateManagerEvent {
         transaction_timestamp: DateTime<Utc>,
         /// User id of the stack owner (referencing local user table)
         user_id: i64,
-    },
-    /// Records statistics about a node's throughput performance
-    UpdateNodeThroughputPerformance {
-        /// Timestamp of the transaction that created the stack
-        timestamp: DateTime<Utc>,
-        /// The name/identifier of the model
-        model_name: String,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of input tokens
-        input_tokens: i64,
-        /// Number of output tokens
-        output_tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's prefill performance
-    UpdateNodePrefillPerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's decode performance
-    UpdateNodeDecodePerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's latency performance
-    UpdateNodeLatencyPerformance {
-        /// Timestamp of the transaction that created the stack
-        timestamp: DateTime<Utc>,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Latency in seconds
-        latency: f64,
     },
     /// Registers a new user with a password
     RegisterUserWithPassword {
