@@ -32,7 +32,6 @@ use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest}
 use opentelemetry::KeyValue;
 use serde::Deserialize;
 use serde_json::Value;
-use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::OpenApi;
@@ -258,7 +257,6 @@ async fn handle_chat_completions_request(
         handle_streaming_response(
             state,
             &metadata.node_address,
-            metadata.node_id,
             headers,
             &payload,
             metadata.num_input_tokens.map(|v| v as i64),
@@ -272,7 +270,6 @@ async fn handle_chat_completions_request(
         handle_non_streaming_response(
             state,
             &metadata.node_address,
-            metadata.node_id,
             headers,
             &payload,
             metadata.num_compute_units as i64,
@@ -530,7 +527,6 @@ pub fn confidential_chat_completions_create_stream(
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: &Value,
     estimated_total_tokens: i64,
@@ -608,24 +604,6 @@ async fn handle_non_streaming_response(
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
-
-    state
-        .state_manager_sender
-        .send(
-            AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-                timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
-                node_small_id: selected_node_id,
-                input_tokens,
-                output_tokens,
-                time: time.elapsed().as_secs_f64(),
-            },
-        )
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating node throughput performance: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
 
     // NOTE: It is not very secure to rely on the node's computed response hash,
     // if the node is not running in a TEE, but for now it suffices
@@ -729,7 +707,6 @@ async fn handle_non_streaming_response(
 async fn handle_streaming_response(
     state: &ProxyState,
     node_address: &String,
-    node_id: i64,
     headers: HeaderMap,
     payload: &Value,
     num_input_tokens: Option<i64>,
@@ -781,7 +758,6 @@ async fn handle_streaming_response(
         num_input_tokens.unwrap_or(0),
         estimated_total_tokens,
         start,
-        node_id,
         model_name,
         endpoint,
     ))

@@ -9,7 +9,6 @@ use base64::engine::{general_purpose::STANDARD, Engine};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
@@ -168,10 +167,8 @@ pub async fn image_generations_create(
         match handle_image_generation_response(
             &state,
             metadata.node_address,
-            metadata.node_id,
             headers,
             payload,
-            metadata.num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -261,10 +258,8 @@ pub async fn confidential_image_generations_create(
         match handle_image_generation_response(
             &state,
             metadata.node_address,
-            metadata.node_id,
             headers,
             payload,
-            metadata.num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -342,14 +337,11 @@ pub async fn confidential_image_generations_create(
         estimated_total_tokens
     )
 )]
-#[allow(clippy::too_many_arguments)]
 async fn handle_image_generation_response(
     state: &ProxyState,
     node_address: String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
-    total_tokens: i64,
     endpoint: String,
     model_name: String,
     stack_small_id: i64,
@@ -393,25 +385,6 @@ async fn handle_image_generation_response(
 
     let verify_hash = endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
-
-    // Update the node throughput performance
-    state
-        .state_manager_sender
-        .send(
-            AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-                timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
-                node_small_id: selected_node_id,
-                input_tokens: 0,
-                output_tokens: total_tokens,
-                time: time.elapsed().as_secs_f64(),
-            },
-        )
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to update node throughput performance: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
 
     let total_hash = response
         .get(RESPONSE_HASH_KEY)
