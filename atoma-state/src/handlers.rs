@@ -990,6 +990,15 @@ pub async fn handle_state_manager_event(
                 .send(result)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::LockStack { stack_small_id } => {
+            trace!(
+                target = "atoma-state-handlers",
+                event = "handle-state-manager-event",
+                "Locking stack with id: {}",
+                stack_small_id
+            );
+            state_manager.state.lock_stack(stack_small_id).await?;
+        }
         AtomaAtomaStateManagerEvent::UpdateStackNumTokens {
             stack_small_id,
             estimated_total_tokens,
