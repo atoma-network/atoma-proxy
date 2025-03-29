@@ -282,7 +282,7 @@ pub async fn authenticate_middleware(
         &body_json,
         &endpoint,
     )
-        .await?;
+    .await?;
 
     // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
     //
