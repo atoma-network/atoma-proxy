@@ -299,7 +299,7 @@ pub async fn authenticate_middleware(
         &state.state_manager_sender,
         &state.sui,
         optional_stack,
-        total_compute_units,
+        max_total_compute_units,
         user_id,
         &endpoint,
     )
@@ -315,8 +315,8 @@ pub async fn authenticate_middleware(
         &mut req_parts,
         selected_node_id,
         stack_small_id,
-        num_input_tokens,
-        total_compute_units,
+        num_input_compute_units,
+        max_total_compute_units,
         tx_digest,
         user_id,
         &endpoint,
@@ -328,7 +328,7 @@ pub async fn authenticate_middleware(
             update_state_manager(
                 &state.state_manager_sender,
                 stack_small_id,
-                total_compute_units as i64,
+                max_total_compute_units as i64,
                 0,
                 &endpoint,
             )?;
