@@ -5,19 +5,20 @@ name              = "atoma-proxy"
 version.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-async-trait.workspace = true
-atoma-auth.workspace = true
-atoma-p2p.workspace = true
-atoma-proxy-service.workspace = true
-atoma-state.workspace = true
-atoma-sui.workspace = true
-atoma-utils.workspace = true
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+atoma-auth = { workspace = true }
+atoma-p2p = { workspace = true }
+atoma-proxy-service = { workspace = true }
+atoma-state = { workspace = true }
+atoma-sui = { workspace = true }
+atoma-utils = { workspace = true }
 axum = { workspace = true, features = [ "json" ] }
 base64 = { workspace = true }
-blake2.workspace = true
-clap.workspace = true
-config.workspace = true
+blake2 = { workspace = true }
+clap = { workspace = true }
+config = { workspace = true }
+dashmap = { workspace = true }
 fastcrypto.workspace = true
 flume.workspace = true
 futures = { workspace = true }
@@ -35,19 +36,19 @@ opentelemetry_sdk = { workspace = true, features = [ "logs", "metrics", "rt-toki
 rand = { workspace = true }
 reqwest = { workspace = true, features = [ "json" ] }
 serde = { workspace = true, features = [ "derive" ] }
-serde_json.workspace = true
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-sqlx.workspace = true
-sui-keys.workspace = true
-sui-sdk.workspace = true
+sqlx = { workspace = true }
+sui-keys = { workspace = true }
+sui-sdk = { workspace = true }
 thiserror = { workspace = true }
 tokenizers = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
 tonic = { workspace = true, features = [ "prost", "tls", "tls-roots" ] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = [ "cors" ] }
-tracing.workspace = true
-tracing-appender.workspace = true
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
 tracing-loki = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = [ "env-filter", "json", "time" ] }

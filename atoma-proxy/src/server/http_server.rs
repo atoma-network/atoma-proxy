@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use dashmap::DashMap;
 use flume::Sender;
 use reqwest::Method;
 use serde::Serialize;
@@ -54,6 +55,8 @@ use super::AtomaServiceConfig;
 /// This endpoint is used to check the health of the atoma proxy service.
 pub const HEALTH_PATH: &str = "/health";
 
+pub type UserId = i64;
+
 /// Represents the shared state of the application.
 ///
 /// This struct holds various components and configurations that are shared
@@ -67,6 +70,8 @@ pub struct ProxyState {
     /// state manager, allowing for efficient handling of application state
     /// updates and notifications across different components.
     pub state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+
+    pub users_buy_stack_lock_map: DashMap<UserId, bool>,
 
     /// `Sui` struct for handling Sui-related operations.
     ///
@@ -243,6 +248,7 @@ pub async fn start_server(
 
     let proxy_state = ProxyState {
         state_manager_sender,
+        users_buy_stack_lock_map: DashMap::new(),
         sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
