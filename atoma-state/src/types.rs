@@ -578,6 +578,11 @@ pub struct NodePublicKey {
 }
 
 pub enum AtomaAtomaStateManagerEvent {
+    /// Locks a stack
+    LockStack {
+        /// Unique small integer identifier for the stack
+        stack_small_id: i64,
+    },
     /// Represents an update to the number of tokens in a stack
     UpdateStackNumTokens {
         /// Unique small integer identifier for the stack
