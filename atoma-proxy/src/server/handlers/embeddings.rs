@@ -31,7 +31,7 @@ use super::{
         TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
         TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
     },
-    request_model::RequestModel,
+    request_model::{ComputeUnitsEstimate, RequestModel},
     update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
@@ -100,7 +100,10 @@ impl RequestModel for RequestModelEmbeddings {
         self.model.clone()
     }
 
-    fn get_compute_units_estimate(&self, tokenizer: Option<&Tokenizer>) -> Result<u64> {
+    fn get_compute_units_estimate(
+        &self,
+        tokenizer: Option<&Tokenizer>,
+    ) -> Result<ComputeUnitsEstimate> {
         let Some(tokenizer) = tokenizer else {
             return Err(AtomaProxyError::InternalError {
                 client_message: Some("No available tokenizer found for current model, try again later or open a ticket".to_string()),
@@ -119,7 +122,10 @@ impl RequestModel for RequestModelEmbeddings {
             })?
             .get_ids()
             .len() as u64;
-        Ok(num_tokens)
+        Ok(ComputeUnitsEstimate {
+            num_input_compute_units: num_tokens,
+            max_total_compute_units: num_tokens,
+        })
     }
 }
 

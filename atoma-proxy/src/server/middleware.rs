@@ -52,6 +52,11 @@ pub struct RequestMetadataExtension {
     /// This ID is used to track and manage node-specific operations and state.
     pub node_id: i64,
 
+    /// Number of input tokens for the request.
+    /// This is only set for non-confidential requests, for confidential requests,
+    /// the input tokens are not known, so we don't count it.
+    pub num_input_tokens: Option<u64>,
+
     /// Estimated compute units required for this request.
     /// This represents the total computational resources needed for both input and output processing.
     pub num_compute_units: u64,
@@ -223,7 +228,8 @@ impl RequestMetadataExtension {
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = %req.uri().path())
+    fields(endpoint = %req.uri().path()),
+    err
 )]
 pub async fn authenticate_middleware(
     state: State<ProxyState>,
@@ -264,7 +270,7 @@ pub async fn authenticate_middleware(
     //
     // NOTE: If this method succeeds and the `optional_stack` is Some, this means that the proxy has locked
     // enough compute units for the request, within the state manager. Otherwise, this has not been the case.
-    let (optional_stack, total_compute_units, model, user_id) =
+    let (optional_stack, num_input_tokens, total_compute_units, model, user_id) =
         auth::handle_authenticate_and_lock_compute_units(
             &state,
             &req_parts.headers,
@@ -304,6 +310,7 @@ pub async fn authenticate_middleware(
         &mut req_parts,
         selected_node_id,
         stack_small_id,
+        num_input_tokens,
         total_compute_units,
         tx_digest,
         user_id,
@@ -382,7 +389,8 @@ pub async fn authenticate_middleware(
 #[instrument(
     level = "info",
     skip_all,
-    fields(endpoint = %req.uri().path())
+    fields(endpoint = %req.uri().path()),
+    err
 )]
 pub async fn confidential_compute_middleware(
     state: State<ProxyState>,
@@ -577,6 +585,7 @@ pub mod auth {
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
     use crate::server::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
+    use crate::server::handlers::request_model::ComputeUnitsEstimate;
     use crate::server::{
         check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
         http_server::ProxyState, Result, ONE_MILLION,
@@ -663,7 +672,7 @@ pub mod auth {
         headers: &HeaderMap,
         body_json: &Value,
         endpoint: &str,
-    ) -> Result<(Option<Stack>, u64, String, i64)> {
+    ) -> Result<(Option<Stack>, u64, u64, String, i64)> {
         match endpoint {
             CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
@@ -775,14 +784,17 @@ pub mod auth {
         headers: &HeaderMap,
         request_model: impl RequestModel + Send,
         endpoint: &str,
-    ) -> Result<(Option<Stack>, u64, String, i64)> {
+    ) -> Result<(Option<Stack>, u64, u64, String, i64)> {
         let user_id = check_auth(&state.state_manager_sender, headers, endpoint).await?;
 
         // Retrieve the model and the appropriate tokenizer
         let model = request_model.get_model();
-        let total_compute_units = if (endpoint != IMAGE_GENERATIONS_PATH)
-            && (endpoint != CONFIDENTIAL_IMAGE_GENERATIONS_PATH)
-        {
+        let ComputeUnitsEstimate {
+            num_input_compute_units,
+            max_total_compute_units,
+        } = if [IMAGE_GENERATIONS_PATH, CONFIDENTIAL_IMAGE_GENERATIONS_PATH].contains(&endpoint) {
+            request_model.get_compute_units_estimate(None)?
+        } else {
             let tokenizer_index =
                 state
                     .models
@@ -794,8 +806,6 @@ pub mod auth {
                     })?;
             let tokenizer = state.tokenizers[tokenizer_index].clone();
             request_model.get_compute_units_estimate(Some(&tokenizer))?
-        } else {
-            request_model.get_compute_units_estimate(None)?
         };
 
         let (result_sender, result_receiver) = oneshot::channel();
@@ -804,7 +814,7 @@ pub mod auth {
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
                 model: model.to_string(),
-                free_compute_units: total_compute_units as i64,
+                free_compute_units: max_total_compute_units as i64,
                 user_id,
                 is_confidential: false, // NOTE: This method is only used for non-confidential compute
                 result_sender,
@@ -828,7 +838,13 @@ pub mod auth {
                 endpoint: endpoint.to_string(),
             })?;
 
-        Ok((optional_stack, total_compute_units, model, user_id))
+        Ok((
+            optional_stack,
+            num_input_compute_units,
+            max_total_compute_units,
+            model,
+            user_id,
+        ))
     }
 
     /// Represents the processed and validated request data after authentication and initial processing.
@@ -940,6 +956,112 @@ pub mod auth {
         pub tx_digest: Option<TransactionDigest>,
     }
 
+    pub struct NewStackResult {
+        stack_small_id: i64,
+        selected_node_id: i64,
+        tx_digest: TransactionDigest,
+    }
+
+    /// Acquires a new stack entry for the cheapest node.
+    ///
+    /// This function acquires for the given node.
+    /// We spawn a tokio thread to make sure that the function finishes in case the thread is killed.
+    ///
+    /// #Arguments
+    ///
+    /// * `node` - The cheapest node to acquire a stack for
+    ///
+    /// #Returns
+    ///
+    /// Returns a `NewStackResult` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    #[instrument(level = "info", skip_all, err)]
+    async fn acquire_new_stack(
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        user_id: i64,
+        endpoint: String,
+        total_tokens: u64,
+        sui: Arc<RwLock<Sui>>,
+        node: atoma_state::types::CheapestNode,
+    ) -> Result<NewStackResult> {
+        let endpoint_clone = endpoint.clone();
+        tokio::spawn(async move {
+            // This will fail if the balance is not enough.
+            let (result_sender, result_receiver) = oneshot::channel();
+            state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
+                    user_id,
+                    amount: node.price_per_one_million_compute_units * STACK_SIZE_TO_BUY
+                        / ONE_MILLION as i64,
+                    result_sender,
+                })
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to send DeductFromUsdc event: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+
+            result_receiver
+                .await
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?
+                .map_err(|err| AtomaProxyError::BalanceError {
+                    message: format!("Balance error : {err:?}"),
+                    endpoint: endpoint.to_string(),
+                })?;
+            let StackEntryResponse {
+                transaction_digest: tx_digest,
+                stack_created_event: event,
+                timestamp_ms,
+            } = sui
+                .write()
+                .await
+                .acquire_new_stack_entry(
+                    node.task_small_id as u64,
+                    STACK_SIZE_TO_BUY as u64,
+                    node.price_per_one_million_compute_units as u64,
+                )
+                .await
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to acquire new stack entry: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+
+            let stack_small_id = event.stack_small_id.inner as i64;
+            let selected_node_id = event.selected_node_id.inner as i64;
+
+            // Send the NewStackAcquired event to the state manager, so we have it in the DB.
+            state_manager_sender
+                .send(AtomaAtomaStateManagerEvent::NewStackAcquired {
+                    event,
+                    already_computed_units: total_tokens as i64,
+                    transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
+                    user_id,
+                })
+                .map_err(|err| AtomaProxyError::InternalError {
+                    message: format!("Failed to send NewStackAcquired event: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            Ok(NewStackResult {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            })
+        })
+        .await
+        .map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Failed to acquire new stack: {e}"),
+            client_message: None,
+            endpoint: endpoint_clone,
+        })?
+    }
+
     /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
     ///
     /// This function follows a two-step process:
@@ -1041,67 +1163,19 @@ pub mod auth {
                     });
                 }
             };
-            // This will fail if the balance is not enough.
-            let (result_sender, result_receiver) = oneshot::channel();
-            state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
-                    user_id,
-                    amount: node.price_per_one_million_compute_units * STACK_SIZE_TO_BUY
-                        / ONE_MILLION as i64,
-                    result_sender,
-                })
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to send DeductFromUsdc event: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-
-            result_receiver
-                .await
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?
-                .map_err(|err| AtomaProxyError::BalanceError {
-                    message: format!("Balance error : {err:?}"),
-                    endpoint: endpoint.to_string(),
-                })?;
-            let StackEntryResponse {
-                transaction_digest: tx_digest,
-                stack_created_event: event,
-                timestamp_ms,
-            } = sui
-                .write()
-                .await
-                .acquire_new_stack_entry(
-                    node.task_small_id as u64,
-                    STACK_SIZE_TO_BUY as u64,
-                    node.price_per_one_million_compute_units as u64,
-                )
-                .await
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to acquire new stack entry: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-
-            let stack_small_id = event.stack_small_id.inner as i64;
-            let selected_node_id = event.selected_node_id.inner as i64;
-
-            // Send the NewStackAcquired event to the state manager, so we have it in the DB.
-            state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::NewStackAcquired {
-                    event,
-                    already_computed_units: total_tokens as i64,
-                    transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
-                    user_id,
-                })
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to send NewStackAcquired event: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
+            let NewStackResult {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            } = acquire_new_stack(
+                state_manager_sender.clone(),
+                user_id,
+                endpoint.to_string(),
+                total_tokens,
+                Arc::clone(sui),
+                node,
+            )
+            .await?;
 
             Ok(SelectedNodeMetadata {
                 stack_small_id,
@@ -1206,6 +1280,7 @@ pub mod utils {
         req_parts: &mut Parts,
         selected_node_id: i64,
         selected_stack_small_id: i64,
+        num_input_tokens: u64,
         total_compute_units: u64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
@@ -1274,6 +1349,7 @@ pub mod utils {
         req_parts.extensions.insert(RequestMetadataExtension {
             node_address,
             node_id: selected_node_id,
+            num_input_tokens: Some(num_input_tokens),
             num_compute_units: total_compute_units,
             selected_stack_small_id,
             endpoint: endpoint.to_string(),
