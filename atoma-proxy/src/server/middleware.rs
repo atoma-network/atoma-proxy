@@ -599,6 +599,7 @@ pub mod auth {
         http_server::ProxyState, Result, ONE_MILLION,
     };
 
+    use super::acquire_stack_lock;
     use super::STACK_SIZE_TO_BUY;
 
     /// The maximum time to wait for a stack to be created, on the Sui blockchain,
@@ -1448,38 +1449,32 @@ pub mod auth {
                 });
             }
         };
-        let stack_is_locked = {
-            state
-                .users_buy_stack_lock_map
-                .get(&user_id)
-                .is_some_and(|lock| *lock)
-        };
-        if stack_is_locked {
+        let Some(_lock_guard) =
+            acquire_stack_lock::LockGuard::try_lock(&state.users_buy_stack_lock_map, user_id)
+        else {
+            // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+            // so we try to get the stack from the state manager, and if it is not found, we return an error.
             return get_stack_if_locked(state, user_id, body_json, endpoint).await;
-        }
+        };
+        // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         let NewStackResult {
             stack_small_id,
             selected_node_id,
             tx_digest,
-        } = {
-            // NOTE: We lock the stack for the user here, so that no other concurrent requests can try to acquire a new stack,
-            // to avoid buying multiple redundant stacks, at the same time (that is in a window of 300ms, following Sui's Mysticeti fast finality estimation times).
-            state.users_buy_stack_lock_map.insert(user_id, true);
-            let new_stack_result = acquire_new_stack(
-                state.state_manager_sender.clone(),
-                user_id,
-                endpoint.to_string(),
-                total_tokens,
-                Arc::clone(sui),
-                node,
-            )
-            .await?;
-            // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
-            // in the AtomaStateManager's internal state, for this reason it is safe to remove the lock here,
-            // as any new request querying the state manager after this lock removal will see the new stack.
-            state.users_buy_stack_lock_map.remove(&user_id);
-            new_stack_result
-        };
+        } = acquire_new_stack(
+            state.state_manager_sender.clone(),
+            user_id,
+            endpoint.to_string(),
+            total_tokens,
+            Arc::clone(sui),
+            node,
+        )
+        .await?;
+        // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+        // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
+        // lock guard release will see the new stack.
+        // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
+        // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
 
         Ok(SelectedNodeMetadata {
             stack_small_id,
@@ -2030,5 +2025,67 @@ pub mod utils {
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         ]
         .contains(&endpoint)
+    }
+}
+
+pub mod acquire_stack_lock {
+    use dashmap::DashMap;
+    use tracing::{info, instrument};
+
+    /// A guard that locks a stack for a user id.
+    ///
+    /// This struct is used to lock a stack for a user id, so that no other concurrent requests can try to acquire a new stack,
+    /// to avoid buying multiple redundant stacks, at the same time (that is in a window of 300ms, following Sui's Mysticeti fast finality estimation times).
+    pub struct LockGuard<'a> {
+        /// The map of user id to lock status.
+        map: &'a DashMap<i64, bool>,
+        /// The user id to lock.
+        key: i64,
+        /// Whether the lock is held.
+        locked: bool,
+    }
+    impl<'a> LockGuard<'a> {
+        /// Tries to lock a stack for a user id.
+        ///
+        /// This method checks if the user id is already locked in the map. If it is, it returns `None`,
+        /// indicating that the stack is already locked. Otherwise, it locks the stack and returns a new `LockGuard`.
+        ///
+        /// # Arguments
+        ///
+        /// * `map` - The map of user id to lock status.
+        /// * `key` - The user id to lock.
+        ///
+        /// # Returns
+        ///
+        /// Returns a new `LockGuard` if the stack is not locked, otherwise `None`.
+        pub fn try_lock(map: &'a DashMap<i64, bool>, key: i64) -> Option<Self> {
+            match map.entry(key) {
+                dashmap::mapref::entry::Entry::Occupied(_) => None, // Already locked
+                dashmap::mapref::entry::Entry::Vacant(entry) => {
+                    entry.insert(true);
+                    Some(Self {
+                        map,
+                        key,
+                        locked: true,
+                    })
+                }
+            }
+        }
+    }
+
+    impl Drop for LockGuard<'_> {
+        /// Drops the lock guard and releases the lock.
+        ///
+        /// This method removes the lock from the map when the lock guard goes out of scope.
+        /// It logs a message indicating that the lock has been released for the user id.
+        #[instrument(level = "info", skip_all, fields(user_id = %self.key))]
+        fn drop(&mut self) {
+            if self.locked {
+                let previous_lock = self.map.remove(&self.key);
+                if previous_lock.is_some() {
+                    info!("Held lock has been released for user id: {}", self.key);
+                }
+            }
+        }
     }
 }
