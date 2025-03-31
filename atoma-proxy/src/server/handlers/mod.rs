@@ -317,6 +317,10 @@ pub fn handle_status_code_error(
             client_message: Some(error.to_string()), // The message coming here is from node in the format format!("Inference service returned bad request error: {error}"),
             endpoint: endpoint.to_string(),
         }),
+        StatusCode::LOCKED => Err(AtomaProxyError::Locked {
+            message: format!("Inference service returned locked error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
         _ => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned non-success error: {error}"),
             client_message: Some(format!(
