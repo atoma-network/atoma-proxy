@@ -102,6 +102,14 @@ pub enum AtomaProxyError {
     },
 
     /// Error returned when a service is unavailable
+    #[error("Locked: {message}")]
+    Locked {
+        /// Description of the locked
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
+
     #[error("Too many requests: {message}")]
     TooManyRequests {
         /// Description of the too many requests
@@ -136,6 +144,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "NOT_IMPLEMENTED",
             Self::ServiceUnavailable { .. } => "SERVICE_UNAVAILABLE",
             Self::BalanceError { .. } => "BALANCE_ERROR",
+            Self::Locked { .. } => "LOCKED",
             Self::TooManyRequests { .. } => "TOO_MANY_REQUESTS",
         }
     }
@@ -166,6 +175,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
             Self::BalanceError { .. } => "Insufficient balance".to_string(),
+            Self::Locked { .. } => "Locked".to_string(),
             Self::TooManyRequests { .. } => "Too many requests".to_string(),
         }
     }
@@ -189,6 +199,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::BalanceError { .. } => StatusCode::PAYMENT_REQUIRED,
+            Self::Locked { .. } => StatusCode::LOCKED,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
         }
     }
@@ -210,6 +221,7 @@ impl AtomaProxyError {
             | Self::NotImplemented { endpoint, .. }
             | Self::ServiceUnavailable { endpoint, .. }
             | Self::BalanceError { endpoint, .. }
+            | Self::Locked { endpoint, .. }
             | Self::TooManyRequests { endpoint, .. } => endpoint.clone(),
         }
     }
@@ -238,6 +250,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {message}"),
             Self::BalanceError { message, .. } => format!("Insufficient balance: {message}"),
+            Self::Locked { message, .. } => format!("Locked: {message}"),
             Self::TooManyRequests { message, .. } => format!("Too many requests: {message}"),
         }
     }
