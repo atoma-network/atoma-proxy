@@ -48,6 +48,7 @@ const SIZE: &str = "size";
 ///
 /// This struct encapsulates the required parameters for generating images through
 /// the API endpoint.
+#[derive(Debug, Clone)]
 pub struct RequestModelImageGenerations {
     /// The identifier of the AI model to use for image generation
     model: String,

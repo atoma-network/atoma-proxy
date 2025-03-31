@@ -1,6 +1,6 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
-use auth::{ProcessedRequest, SelectedNodeMetadata, StackMetadata};
+use auth::{GetSelectedNodeArgs, ProcessedRequest, SelectedNodeMetadata, StackMetadata};
 use axum::{
     body::Body,
     extract::{rejection::LengthLimitError, Request, State},
@@ -32,7 +32,7 @@ use super::{types::ConfidentialComputeRequest, Result};
 ///
 /// NOTE: Right now, we buy the maximum number of compute units that a node supports
 /// as hardcoded in Atoma's smart contract.
-pub const STACK_SIZE_TO_BUY: i64 = 2_560_000;
+pub const STACK_SIZE_TO_BUY: i64 = 1_000_000;
 
 /// Default image resolution for image generations, in pixels.
 const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
@@ -298,15 +298,16 @@ pub async fn authenticate_middleware(
         stack_small_id,
         selected_node_id,
         tx_digest,
-    } = auth::get_selected_node(
-        &model,
-        &state.state_manager_sender,
-        &state.sui,
+    } = auth::get_selected_node(GetSelectedNodeArgs {
+        model: &model,
+        state: &state,
+        body_json: &body_json,
+        sui: &state.sui,
         optional_stack,
-        max_total_compute_units,
+        total_tokens: max_total_compute_units,
         user_id,
-        &endpoint,
-    )
+        endpoint: &endpoint,
+    })
     .await?;
 
     // Validates the stack for the request.
@@ -596,6 +597,7 @@ pub async fn handle_locked_stack_middleware(
 
 pub mod auth {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use atoma_auth::StackEntryResponse;
     use atoma_auth::Sui;
@@ -616,12 +618,22 @@ pub mod auth {
     use crate::server::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::request_model::ComputeUnitsEstimate;
+    use crate::server::http_server::UserId;
     use crate::server::{
         check_auth, error::AtomaProxyError, handlers::request_model::RequestModel,
         http_server::ProxyState, Result, ONE_MILLION,
     };
 
+    use super::acquire_stack_lock;
     use super::STACK_SIZE_TO_BUY;
+
+    /// The maximum time to wait for a stack to be created, on the Sui blockchain,
+    /// and the corresponding event to be emitted by the Sui blockchain and captured
+    /// by the Proxy's state manager.
+    const MAX_STACK_WAIT_TIME: Duration = Duration::from_millis(300);
+
+    /// The maximum number of attempts to wait for a stack to be created.
+    const MAX_STACK_WAIT_ATTEMPTS: usize = 3;
 
     /// Metadata about the stack that was selected for the request.
     /// This is used to update the stack's num_tokens after the request is processed.  
@@ -891,6 +903,93 @@ pub mod auth {
         })
     }
 
+    /// Attempts to retrieve stack metadata for a user's stack based on the endpoint type
+    ///
+    /// This function serves as a routing layer that handles different API endpoints
+    /// (chat completions, embeddings, and image generations) by parsing their specific
+    /// request models and delegating to a common stack retrieval implementation.
+    ///
+    /// # Arguments
+    /// * `state` - Reference to the ProxyState containing application state
+    /// * `user_id` - The ID of the user requesting the stack
+    /// * `request_model` - Implementation of RequestModel trait containing request details
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// * `Result<Option<SelectedNodeMetadata>>` - Stack metadata if successful
+    ///
+    /// # Error Conditions
+    /// * Returns `AtomaProxyError::RequestError` if:
+    ///   - The endpoint is not supported
+    ///   - Request body parsing fails for any endpoint type
+    ///   - Underlying stack retrieval fails
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn try_get_stack_for_user_id(
+        state: &ProxyState,
+        user_id: UserId,
+        task_small_id: i64,
+        request_model: impl RequestModel + Send,
+        endpoint: &str,
+    ) -> Result<Option<SelectedNodeMetadata>> {
+        let model = request_model.get_model();
+        let ComputeUnitsEstimate {
+            max_total_compute_units,
+            ..
+        } = if [IMAGE_GENERATIONS_PATH, CONFIDENTIAL_IMAGE_GENERATIONS_PATH].contains(&endpoint) {
+            request_model.get_compute_units_estimate(None)?
+        } else {
+            let tokenizer_index =
+                state
+                    .models
+                    .iter()
+                    .position(|m| m == &model)
+                    .ok_or_else(|| AtomaProxyError::RequestError {
+                        message: "Model not supported".to_string(),
+                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                    })?;
+            let tokenizer = state.tokenizers[tokenizer_index].clone();
+            request_model.get_compute_units_estimate(Some(&tokenizer))?
+        };
+
+        let (result_sender, result_receiver) = oneshot::channel();
+
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetStacksForTask {
+                task_small_id,
+                free_compute_units: max_total_compute_units as i64,
+                user_id,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetStacksForTask event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        let optional_stack = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetStacksForTask result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get GetStacksForTask result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        if let Some(stack) = optional_stack {
+            Ok(Some(SelectedNodeMetadata {
+                stack_small_id: stack.stack_small_id,
+                selected_node_id: stack.selected_node_id,
+                tx_digest: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Represents the processed and validated request data after authentication and initial processing.
     ///
     /// This struct contains all the necessary information needed to forward a request to an inference node,
@@ -996,10 +1095,15 @@ pub mod auth {
         pub tx_digest: Option<TransactionDigest>,
     }
 
+    /// The result of acquiring a new stack entry.
+    #[derive(Debug)]
     pub struct NewStackResult {
-        stack_small_id: i64,
-        selected_node_id: i64,
-        tx_digest: TransactionDigest,
+        /// The small ID of the stack
+        pub stack_small_id: i64,
+        /// The small ID of the selected node
+        pub selected_node_id: i64,
+        /// The transaction digest of the stack entry creation transaction
+        pub tx_digest: TransactionDigest,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1025,6 +1129,8 @@ pub mod auth {
         sui: Arc<RwLock<Sui>>,
         node: atoma_state::types::CheapestNode,
     ) -> Result<NewStackResult> {
+        // NOTE: This method is called only if there was no prior lock to an already existing stack
+        // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
         tokio::spawn(async move {
             // This will fail if the balance is not enough.
@@ -1102,6 +1208,193 @@ pub mod auth {
         })?
     }
 
+    /// Retrieves stack metadata for a locked user stack based on the endpoint type
+    ///
+    /// This function serves as a routing layer that handles different API endpoints
+    /// (chat completions, embeddings, and image generations) by parsing their specific
+    /// request models and delegating to a common stack retrieval implementation.
+    ///
+    /// # Arguments
+    /// * `state` - Reference to the ProxyState containing application state
+    /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `body_json` - The raw JSON request body as a serde_json Value
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
+    ///
+    /// # Error Conditions
+    /// * Returns `AtomaProxyError::RequestError` if:
+    ///   - The endpoint is not supported
+    ///   - Request body parsing fails for any endpoint type
+    ///   - Underlying stack retrieval fails
+    ///
+    /// # Supported Endpoints
+    /// * `CHAT_COMPLETIONS_PATH` - Handles chat completion requests
+    /// * `EMBEDDINGS_PATH` - Handles embedding generation requests
+    /// * `IMAGE_GENERATIONS_PATH` - Handles image generation requests
+    ///
+    /// # Implementation Details
+    /// * Matches on the endpoint type to determine the appropriate request model
+    /// * Parses the request body into the corresponding model type
+    /// * Delegates to get_stack_if_locked_with_request_model for actual stack retrieval
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn get_stack_if_locked(
+        state: &ProxyState,
+        user_id: i64,
+        task_small_id: i64,
+        body_json: &Value,
+        endpoint: &str,
+    ) -> Result<SelectedNodeMetadata> {
+        match endpoint {
+            CHAT_COMPLETIONS_PATH => {
+                let request_model = RequestModelChatCompletions::new(body_json).map_err(|err| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse chat completions request: {err:?}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
+            }
+            EMBEDDINGS_PATH => {
+                let request_model = RequestModelEmbeddings::new(body_json).map_err(|err| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse embeddings request: {err:?}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
+            }
+            IMAGE_GENERATIONS_PATH => {
+                let request_model =
+                    RequestModelImageGenerations::new(body_json).map_err(|err| {
+                        AtomaProxyError::RequestError {
+                            message: format!("Failed to parse image generations request: {err:?}"),
+                            endpoint: endpoint.to_string(),
+                        }
+                    })?;
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
+            }
+            _ => {
+                return Err(AtomaProxyError::RequestError {
+                    message: format!("Unsupported endpoint: {endpoint}"),
+                    endpoint: endpoint.to_string(),
+                })
+            }
+        }
+    }
+
+    /// Attempts to retrieve stack metadata if a user's stack is currently locked during purchase
+    ///
+    /// This function handles concurrent stack purchase requests by implementing a retry mechanism
+    /// when a user's stack is locked. It's designed to wait for an ongoing stack purchase
+    /// transaction to complete on the Sui blockchain.
+    ///
+    /// # Arguments
+    /// * `state` - Reference to the ProxyState containing application state
+    /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `request_model` - Implementation of RequestModel trait containing request details
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
+    ///
+    /// # Error Conditions
+    /// * Returns `AtomaProxyError::RequestError` if the maximum number of retry attempts is
+    ///   exceeded and the stack is still not available
+    ///
+    /// # Implementation Details
+    /// * Checks if the user's stack is locked using the users_buy_stack_lock_map
+    /// * If locked, retries up to MAX_STACK_WAIT_ATTEMPTS times with MAX_STACK_WAIT_TIME delay
+    /// * Each retry attempts to fetch the stack metadata via try_get_stack_for_user_id
+    /// * We don't wait for the Sui blockchain to finalize the stack creation, as we store the stack creation event
+    ///   right after the call to the Sui blockchain, and we don't wait to catch the event from the Sui blockchain,
+    ///   as this can take extra time (roughly 300ms following Sui's Mysticeti finality times).
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn get_stack_if_locked_with_request_model(
+        state: &ProxyState,
+        user_id: i64,
+        task_small_id: i64,
+        request_model: impl RequestModel + Send,
+        endpoint: &str,
+    ) -> Result<SelectedNodeMetadata> {
+        let stack_is_locked = {
+            state
+                .users_buy_stack_lock_map
+                .get(&(user_id, task_small_id))
+                .is_some_and(|lock| *lock)
+        };
+        if stack_is_locked {
+            // NOTE: This means a concurrent request is already buying a stack, so we wait for it to finish,
+            // and for the stack creation event to be stored on the AtomaStateManager's internal state, as
+            // we store it right after the call to the Sui blockchain and don't wait to catch the event
+            // from the Sui blockchain, as this can take extra time (roughly 300ms following Sui's Mysticeti
+            // finality times). We will try again, for a fixed number of times. If the stack is still not created,
+            // we return an error.
+            for _ in 0..MAX_STACK_WAIT_ATTEMPTS {
+                let stack_metadata = try_get_stack_for_user_id(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model.clone(),
+                    endpoint,
+                )
+                .await?;
+                if let Some(stack_metadata) = stack_metadata {
+                    return Ok(stack_metadata);
+                }
+                tokio::time::sleep(MAX_STACK_WAIT_TIME).await;
+            }
+        }
+        Err(AtomaProxyError::RequestError {
+            message: format!("User {user_id} has already bought a stack"),
+            endpoint: endpoint.to_string(),
+        })
+    }
+
+    /// Arguments for the get_selected_node function.
+    pub struct GetSelectedNodeArgs<'a> {
+        /// The name/identifier of the AI model being requested
+        pub model: &'a str,
+        /// The state of the proxy
+        pub state: &'a ProxyState,
+        /// The raw JSON request body as a serde_json Value
+        pub body_json: &'a Value,
+        /// The Sui interface for blockchain operations
+        pub sui: &'a Arc<RwLock<Sui>>,
+        /// The optional stack to use for the request
+        pub optional_stack: Option<Stack>,
+        /// The total number of compute units (tokens) needed for the request
+        pub total_tokens: u64,
+        /// The user ID of the request
+        pub user_id: i64,
+        /// The endpoint of the request
+        pub endpoint: &'a str,
+    }
+
     /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
     ///
     /// This function follows a two-step process:
@@ -1143,86 +1436,105 @@ pub mod auth {
     /// ).await?;
     /// println!("Selected stack ID: {}", metadata.stack_small_id);
     /// ```
-    #[instrument(level = "info", skip_all, fields(%model), err)]
-    pub async fn get_selected_node(
-        model: &str,
-        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
-        sui: &Arc<RwLock<Sui>>,
-        optional_stack: Option<Stack>,
-        total_tokens: u64,
-        user_id: i64,
-        endpoint: &str,
+    #[instrument(level = "info", skip_all, fields(model =%args.model), err)]
+    pub async fn get_selected_node<'a>(
+        args: GetSelectedNodeArgs<'a>,
     ) -> Result<SelectedNodeMetadata> {
+        let GetSelectedNodeArgs {
+            model,
+            state,
+            body_json,
+            sui,
+            optional_stack,
+            total_tokens,
+            user_id,
+            endpoint,
+        } = args;
         if let Some(stack) = optional_stack {
-            Ok(SelectedNodeMetadata {
+            return Ok(SelectedNodeMetadata {
                 stack_small_id: stack.stack_small_id,
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-            })
-        } else {
-            // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
-            // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
-            if total_tokens > STACK_SIZE_TO_BUY as u64 {
-                return Err(AtomaProxyError::RequestError {
+            });
+        }
+        // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
+        // by the smart contract. If we update the smart contract to not force a maximum stack size, we SHOULD revision this check constraint.
+        if total_tokens > STACK_SIZE_TO_BUY as u64 {
+            return Err(AtomaProxyError::RequestError {
                     message: format!(
                         "Total tokens {total_tokens} exceed the maximum stack size of {STACK_SIZE_TO_BUY}"
                     ),
                     endpoint: endpoint.to_string(),
                 });
-            }
-            let (result_sender, result_receiver) = oneshot::channel();
-            state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                    model: model.to_string(),
-                    is_confidential: false,
-                    result_sender,
-                })
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to send GetTasksForModel event: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-            let node = result_receiver
-                .await
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to receive GetTasksForModel result: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to get GetTasksForModel result: {err:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
-            let node: atoma_state::types::CheapestNode = match node {
-                Some(node) => node,
-                None => {
-                    return Err(AtomaProxyError::RequestError {
-                        message: format!("No node found for model {model}"),
-                        endpoint: endpoint.to_string(),
-                    });
-                }
-            };
-            let NewStackResult {
-                stack_small_id,
-                selected_node_id,
-                tx_digest,
-            } = acquire_new_stack(
-                state_manager_sender.clone(),
-                user_id,
-                endpoint.to_string(),
-                total_tokens,
-                Arc::clone(sui),
-                node,
-            )
-            .await?;
-
-            Ok(SelectedNodeMetadata {
-                stack_small_id,
-                selected_node_id,
-                tx_digest: Some(tx_digest),
-            })
         }
+        let (result_sender, result_receiver) = oneshot::channel();
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                model: model.to_string(),
+                is_confidential: false,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let node = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let node: atoma_state::types::CheapestNode = match node {
+            Some(node) => node,
+            None => {
+                return Err(AtomaProxyError::RequestError {
+                    message: format!("No node found for model {model}"),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+        };
+        let Some(_lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+            &state.users_buy_stack_lock_map,
+            (user_id, node.task_small_id),
+        ) else {
+            // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+            // so we try to get the stack from the state manager, and if it is not found, we return an error.
+            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint)
+                .await;
+        };
+        // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+        let NewStackResult {
+            stack_small_id,
+            selected_node_id,
+            tx_digest,
+        } = acquire_new_stack(
+            state.state_manager_sender.clone(),
+            user_id,
+            endpoint.to_string(),
+            total_tokens,
+            Arc::clone(sui),
+            node,
+        )
+        .await?;
+        // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+        // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
+        // lock guard release will see the new stack.
+        // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
+        // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
+
+        Ok(SelectedNodeMetadata {
+            stack_small_id,
+            selected_node_id,
+            tx_digest: Some(tx_digest),
+        })
     }
 }
 
@@ -1770,5 +2082,75 @@ pub mod utils {
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         ]
         .contains(&endpoint)
+    }
+}
+
+pub mod acquire_stack_lock {
+    use dashmap::DashMap;
+    use tracing::{info, instrument};
+
+    use crate::server::http_server::{TaskId, UserId};
+
+    /// A guard that locks a stack for a user id.
+    ///
+    /// This struct is used to lock a stack for a user id, so that no other concurrent requests can try to acquire a new stack,
+    /// to avoid buying multiple redundant stacks, at the same time (that is in a window of 300ms, following Sui's Mysticeti fast finality estimation times).
+    pub struct LockGuard<'a> {
+        /// The map of user id and task id to lock status.
+        map: &'a DashMap<(UserId, TaskId), bool>,
+        /// The user id and task id to lock.
+        key: (UserId, TaskId),
+        /// Whether the lock is held.
+        locked: bool,
+    }
+    impl<'a> LockGuard<'a> {
+        /// Tries to lock a stack for a user id.
+        ///
+        /// This method checks if the user id is already locked in the map. If it is, it returns `None`,
+        /// indicating that the stack is already locked. Otherwise, it locks the stack and returns a new `LockGuard`.
+        ///
+        /// # Arguments
+        ///
+        /// * `map` - The map of user id to lock status.
+        /// * `key` - The user id to lock.
+        ///
+        /// # Returns
+        ///
+        /// Returns a new `LockGuard` if the stack is not locked, otherwise `None`.
+        pub fn try_lock(
+            map: &'a DashMap<(UserId, TaskId), bool>,
+            key: (UserId, TaskId),
+        ) -> Option<Self> {
+            match map.entry(key) {
+                dashmap::mapref::entry::Entry::Occupied(_) => None, // Already locked
+                dashmap::mapref::entry::Entry::Vacant(entry) => {
+                    entry.insert(true);
+                    Some(Self {
+                        map,
+                        key,
+                        locked: true,
+                    })
+                }
+            }
+        }
+    }
+
+    impl Drop for LockGuard<'_> {
+        /// Drops the lock guard and releases the lock.
+        ///
+        /// This method removes the lock from the map when the lock guard goes out of scope.
+        /// It logs a message indicating that the lock has been released for the user id.
+        #[instrument(level = "info", skip_all, fields(user_id = %self.key.0, task_small_id = %self.key.1))]
+        fn drop(&mut self) {
+            if self.locked {
+                let previous_lock = self.map.remove(&self.key);
+                if previous_lock.is_some() {
+                    info!(
+                        "Held lock has been released for user id: {} and task small id: {}",
+                        self.key.0, self.key.1
+                    );
+                }
+            }
+        }
     }
 }

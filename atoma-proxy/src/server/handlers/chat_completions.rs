@@ -801,6 +801,7 @@ async fn handle_streaming_response(
 }
 
 /// Represents a chat completion request model following the OpenAI API format
+#[derive(Debug, Clone)]
 pub struct RequestModelChatCompletions {
     /// The identifier of the model to use for the completion
     /// (e.g., "gpt-3.5-turbo", "meta-llama/Llama-3.3-70B-Instruct", etc.)
