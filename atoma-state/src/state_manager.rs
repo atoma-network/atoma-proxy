@@ -428,7 +428,7 @@ impl AtomaState {
     ) -> Result<Option<Stack>> {
         let stack = sqlx::query(
             "
-            SELECT * FROM stacks 
+        SELECT * FROM stacks 
             WHERE task_small_id = $1 
             AND num_compute_units - already_computed_units >= $2 
             AND user_id = $3 
