@@ -214,11 +214,11 @@ pub fn create_router(state: &ProxyState) -> Router {
         .merge(
             regular_routes.layer(
                 ServiceBuilder::new()
+                    .layer(from_fn_with_state(state.clone(), authenticate_middleware))
                     .layer(from_fn_with_state(
                         state.clone(),
-                        authenticate_middleware,
-                    ))
-                    .layer(from_fn_with_state(state.clone(), handle_locked_stack_middleware)),
+                        handle_locked_stack_middleware,
+                    )),
             ),
         )
         .merge(node_routes)
