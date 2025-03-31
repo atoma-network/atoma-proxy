@@ -1234,8 +1234,14 @@ pub mod auth {
                         endpoint: endpoint.to_string(),
                     }
                 })?;
-                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
-                    .await
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
             }
             EMBEDDINGS_PATH => {
                 let request_model = RequestModelEmbeddings::new(body_json).map_err(|err| {
@@ -1244,8 +1250,14 @@ pub mod auth {
                         endpoint: endpoint.to_string(),
                     }
                 })?;
-                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
-                    .await
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
             }
             IMAGE_GENERATIONS_PATH => {
                 let request_model =
@@ -1255,8 +1267,14 @@ pub mod auth {
                             endpoint: endpoint.to_string(),
                         }
                     })?;
-                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
-                    .await
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
             }
             _ => {
                 return Err(AtomaProxyError::RequestError {
@@ -1456,12 +1474,14 @@ pub mod auth {
                 });
             }
         };
-        let Some(_lock_guard) =
-            acquire_stack_lock::LockGuard::try_lock(&state.users_buy_stack_lock_map, (user_id, node.task_small_id))
-        else {
+        let Some(_lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+            &state.users_buy_stack_lock_map,
+            (user_id, node.task_small_id),
+        ) else {
             // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
             // so we try to get the stack from the state manager, and if it is not found, we return an error.
-            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint).await;
+            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint)
+                .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         let NewStackResult {
@@ -2067,7 +2087,10 @@ pub mod acquire_stack_lock {
         /// # Returns
         ///
         /// Returns a new `LockGuard` if the stack is not locked, otherwise `None`.
-        pub fn try_lock(map: &'a DashMap<(UserId, TaskId), bool>, key: (UserId, TaskId)) -> Option<Self> {
+        pub fn try_lock(
+            map: &'a DashMap<(UserId, TaskId), bool>,
+            key: (UserId, TaskId),
+        ) -> Option<Self> {
             match map.entry(key) {
                 dashmap::mapref::entry::Entry::Occupied(_) => None, // Already locked
                 dashmap::mapref::entry::Entry::Vacant(entry) => {
@@ -2092,7 +2115,10 @@ pub mod acquire_stack_lock {
             if self.locked {
                 let previous_lock = self.map.remove(&self.key);
                 if previous_lock.is_some() {
-                    info!("Held lock has been released for user id: {}, task small id: {}", self.key.0, self.key.1);
+                    info!(
+                        "Held lock has been released for user id: {}, task small id: {}",
+                        self.key.0, self.key.1
+                    );
                 }
             }
         }
