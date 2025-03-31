@@ -100,6 +100,15 @@ pub enum AtomaProxyError {
         /// The endpoint that the error occurred on
         endpoint: String,
     },
+
+    /// Error returned when a service is unavailable
+    #[error("Locked: {message}")]
+    Locked {
+        /// Description of the locked
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
 }
 
 impl AtomaProxyError {
@@ -127,6 +136,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "NOT_IMPLEMENTED",
             Self::ServiceUnavailable { .. } => "SERVICE_UNAVAILABLE",
             Self::BalanceError { .. } => "BALANCE_ERROR",
+            Self::Locked { .. } => "LOCKED",
         }
     }
 
@@ -156,6 +166,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { .. } => "Service unavailable".to_string(),
             Self::BalanceError { .. } => "Insufficient balance".to_string(),
+            Self::Locked { .. } => "Locked".to_string(),
         }
     }
 
@@ -178,6 +189,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::BalanceError { .. } => StatusCode::PAYMENT_REQUIRED,
+            Self::Locked { .. } => StatusCode::LOCKED,
         }
     }
 
@@ -197,7 +209,8 @@ impl AtomaProxyError {
             | Self::NotFound { endpoint, .. }
             | Self::NotImplemented { endpoint, .. }
             | Self::ServiceUnavailable { endpoint, .. }
-            | Self::BalanceError { endpoint, .. } => endpoint.clone(),
+            | Self::BalanceError { endpoint, .. }
+            | Self::Locked { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -225,6 +238,7 @@ impl AtomaProxyError {
             Self::NotImplemented { .. } => "Endpoint not implemented".to_string(),
             Self::ServiceUnavailable { message, .. } => format!("Service unavailable: {message}"),
             Self::BalanceError { message, .. } => format!("Insufficient balance: {message}"),
+            Self::Locked { message, .. } => format!("Locked: {message}"),
         }
     }
 }
