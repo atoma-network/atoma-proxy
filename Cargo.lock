@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#9ef880bbea3da0547f2c3f49eb6dc096f02207e6"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#3057699a04bddc8213cd1f645052ed207bce66a3"
 dependencies = [
  "blake3",
  "bytes",
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#9ef880bbea3da0547f2c3f49eb6dc096f02207e6"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#3057699a04bddc8213cd1f645052ed207bce66a3"
 dependencies = [
  "anyhow",
  "config",
@@ -864,7 +864,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#9ef880bbea3da0547f2c3f49eb6dc096f02207e6"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#3057699a04bddc8213cd1f645052ed207bce66a3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1260,9 +1260,9 @@ dependencies = [
 
 [[package]]
 name = "blake3"
-version = "1.7.0"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17679a8d69b6d7fd9cd9801a536cec9fa5e5970b69f9d4747f70b39b031f5e7"
+checksum = "34a796731680be7931955498a16a10b2270c7762963d5d570fdbfe02dcbf314f"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -5920,9 +5920,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.1"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75b0bedcc4fe52caa0e03d9f1151a323e4aa5e2d78ba3580400cd3c9e2bc4bc"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "onig"
@@ -6729,7 +6729,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
