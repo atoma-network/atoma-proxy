@@ -389,6 +389,64 @@ impl AtomaState {
         Ok(stack)
     }
 
+    /// Get a stack by its unique identifier.
+    ///
+    /// This method fetches a stack from the database based on the provided `task_small_id` and `free_units`.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_small_id` - The unique identifier for the task to be fetched.
+    /// * `free_units` - The number of free units available.
+    /// * `user_id` - The user id of the stack to be fetched.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<Stack>>`: A result containing either:
+    ///   - `Ok(Stack)`: The stack with the specified `task_small_id`.
+    ///   - `Err(AtomaStateManagerError)`: An error if the stack is not found or other database operation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let state = AtomaState::new(db);
+    /// let stack = state.get_stacks_for_task(1, 1000, 1).await?;
+    /// ```
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%task_small_id, %free_units, %user_id)
+    )]
+    pub async fn get_stacks_for_task(
+        &self,
+        task_small_id: i64,
+        free_units: i64,
+        user_id: i64,
+    ) -> Result<Option<Stack>> {
+        let stack = sqlx::query(
+            "
+            SELECT * FROM stacks 
+            WHERE task_small_id = $1 
+            AND num_compute_units - already_computed_units >= $2 
+            AND user_id = $3 
+            AND is_claimed = false 
+            AND is_locked = false 
+            AND in_settle_period = false
+            LIMIT 1",
+        )
+        .bind(task_small_id)
+        .bind(free_units)
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?
+        .map(|stack| Stack::from_row(&stack).map_err(AtomaStateManagerError::from))
+        .transpose()?;
+        Ok(stack)
+    }
+
     /// Get tasks for model.
     ///
     /// This method fetches all tasks from the database that are associated with

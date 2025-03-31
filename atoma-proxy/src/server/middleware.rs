@@ -887,6 +887,7 @@ pub mod auth {
     /// # Arguments
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task to be fetched
     /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
     ///
@@ -902,6 +903,7 @@ pub mod auth {
     async fn try_get_stack_for_user_id(
         state: &ProxyState,
         user_id: UserId,
+        task_small_id: i64,
         request_model: impl RequestModel + Send,
         endpoint: &str,
     ) -> Result<Option<SelectedNodeMetadata>> {
@@ -929,15 +931,14 @@ pub mod auth {
 
         state
             .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
-                model: model.to_string(),
+            .send(AtomaAtomaStateManagerEvent::GetStacksForTask {
+                task_small_id,
                 free_compute_units: max_total_compute_units as i64,
                 user_id,
-                is_confidential: false, // NOTE: This method is only used for non-confidential compute
                 result_sender,
             })
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetStacksForModel event: {err:?}"),
+                message: format!("Failed to send GetStacksForTask event: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
@@ -945,12 +946,12 @@ pub mod auth {
         let optional_stack = result_receiver
             .await
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetStacksForModel result: {err:?}"),
+                message: format!("Failed to receive GetStacksForTask result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetStacksForModel result: {err:?}"),
+                message: format!("Failed to get GetStacksForTask result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
@@ -1333,9 +1334,14 @@ pub mod auth {
             // finality times). We will try again, for a fixed number of times. If the stack is still not created,
             // we return an error.
             for _ in 0..MAX_STACK_WAIT_ATTEMPTS {
-                let stack_metadata =
-                    try_get_stack_for_user_id(state, user_id, request_model.clone(), endpoint)
-                        .await?;
+                let stack_metadata = try_get_stack_for_user_id(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model.clone(),
+                    endpoint,
+                )
+                .await?;
                 if let Some(stack_metadata) = stack_metadata {
                     return Ok(stack_metadata);
                 }
@@ -1449,19 +1455,19 @@ pub mod auth {
                 result_sender,
             })
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                message: format!("Failed to send GetCheapestNodeForModel event: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
         let node = result_receiver
             .await
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                message: format!("Failed to receive GetCheapestNodeForModel result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                message: format!("Failed to get GetCheapestNodeForModel result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;

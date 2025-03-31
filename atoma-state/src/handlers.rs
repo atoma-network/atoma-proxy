@@ -1034,8 +1034,8 @@ pub async fn handle_state_manager_event(
             model,
             free_compute_units,
             user_id,
-            result_sender,
             is_confidential,
+            result_sender,
         } => {
             trace!(
                 target = "atoma-state-handlers",
@@ -1047,6 +1047,26 @@ pub async fn handle_state_manager_event(
             let stack = state_manager
                 .state
                 .get_stacks_for_model(&model, free_compute_units, user_id, is_confidential)
+                .await;
+            result_sender
+                .send(stack)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetStacksForTask {
+            task_small_id,
+            free_compute_units,
+            user_id,
+            result_sender,
+        } => {
+            trace!(
+                target = "atoma-state-handlers",
+                event = "handle-state-manager-event",
+                "Getting stacks for task with id: {}",
+                task_small_id
+            );
+            let stack = state_manager
+                .state
+                .get_stacks_for_task(task_small_id, free_compute_units, user_id)
                 .await;
             result_sender
                 .send(stack)
