@@ -57,6 +57,8 @@ pub const HEALTH_PATH: &str = "/health";
 
 pub type UserId = i64;
 
+pub type TaskId = i64;
+
 /// Represents the shared state of the application.
 ///
 /// This struct holds various components and configurations that are shared
@@ -71,7 +73,11 @@ pub struct ProxyState {
     /// updates and notifications across different components.
     pub state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
 
-    pub users_buy_stack_lock_map: DashMap<UserId, bool>,
+    /// Map of user ids to their stack lock status.
+    ///
+    /// This map is used to prevent race conditions when multiple requests
+    /// try to acquire the same stack for a user.
+    pub users_buy_stack_lock_map: DashMap<(UserId, TaskId), bool>,
 
     /// `Sui` struct for handling Sui-related operations.
     ///

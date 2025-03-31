@@ -1196,6 +1196,7 @@ pub mod auth {
     /// # Arguments
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
     /// * `body_json` - The raw JSON request body as a serde_json Value
     /// * `endpoint` - The API endpoint being accessed
     ///
@@ -1221,6 +1222,7 @@ pub mod auth {
     async fn get_stack_if_locked(
         state: &ProxyState,
         user_id: i64,
+        task_small_id: i64,
         body_json: &Value,
         endpoint: &str,
     ) -> Result<SelectedNodeMetadata> {
@@ -1232,7 +1234,7 @@ pub mod auth {
                         endpoint: endpoint.to_string(),
                     }
                 })?;
-                get_stack_if_locked_with_request_model(state, user_id, request_model, endpoint)
+                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
                     .await
             }
             EMBEDDINGS_PATH => {
@@ -1242,7 +1244,7 @@ pub mod auth {
                         endpoint: endpoint.to_string(),
                     }
                 })?;
-                get_stack_if_locked_with_request_model(state, user_id, request_model, endpoint)
+                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
                     .await
             }
             IMAGE_GENERATIONS_PATH => {
@@ -1253,7 +1255,7 @@ pub mod auth {
                             endpoint: endpoint.to_string(),
                         }
                     })?;
-                get_stack_if_locked_with_request_model(state, user_id, request_model, endpoint)
+                get_stack_if_locked_with_request_model(state, user_id, task_small_id, request_model, endpoint)
                     .await
             }
             _ => {
@@ -1274,6 +1276,7 @@ pub mod auth {
     /// # Arguments
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
     /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
     ///
@@ -1294,13 +1297,14 @@ pub mod auth {
     async fn get_stack_if_locked_with_request_model(
         state: &ProxyState,
         user_id: i64,
+        task_small_id: i64,
         request_model: impl RequestModel + Send,
         endpoint: &str,
     ) -> Result<SelectedNodeMetadata> {
         let stack_is_locked = {
             state
                 .users_buy_stack_lock_map
-                .get(&user_id)
+                .get(&(user_id, task_small_id))
                 .is_some_and(|lock| *lock)
         };
         if stack_is_locked {
@@ -1453,11 +1457,11 @@ pub mod auth {
             }
         };
         let Some(_lock_guard) =
-            acquire_stack_lock::LockGuard::try_lock(&state.users_buy_stack_lock_map, user_id)
+            acquire_stack_lock::LockGuard::try_lock(&state.users_buy_stack_lock_map, (user_id, node.task_small_id))
         else {
             // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
             // so we try to get the stack from the state manager, and if it is not found, we return an error.
-            return get_stack_if_locked(state, user_id, body_json, endpoint).await;
+            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint).await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         let NewStackResult {
@@ -2035,15 +2039,17 @@ pub mod acquire_stack_lock {
     use dashmap::DashMap;
     use tracing::{info, instrument};
 
+    use crate::server::http_server::{TaskId, UserId};
+
     /// A guard that locks a stack for a user id.
     ///
     /// This struct is used to lock a stack for a user id, so that no other concurrent requests can try to acquire a new stack,
     /// to avoid buying multiple redundant stacks, at the same time (that is in a window of 300ms, following Sui's Mysticeti fast finality estimation times).
     pub struct LockGuard<'a> {
-        /// The map of user id to lock status.
-        map: &'a DashMap<i64, bool>,
-        /// The user id to lock.
-        key: i64,
+        /// The map of user id and task small id to lock status.
+        map: &'a DashMap<(UserId, TaskId), bool>,
+        /// The user id and task small id to lock.
+        key: (UserId, TaskId),
         /// Whether the lock is held.
         locked: bool,
     }
@@ -2061,7 +2067,7 @@ pub mod acquire_stack_lock {
         /// # Returns
         ///
         /// Returns a new `LockGuard` if the stack is not locked, otherwise `None`.
-        pub fn try_lock(map: &'a DashMap<i64, bool>, key: i64) -> Option<Self> {
+        pub fn try_lock(map: &'a DashMap<(UserId, TaskId), bool>, key: (UserId, TaskId)) -> Option<Self> {
             match map.entry(key) {
                 dashmap::mapref::entry::Entry::Occupied(_) => None, // Already locked
                 dashmap::mapref::entry::Entry::Vacant(entry) => {
@@ -2081,12 +2087,12 @@ pub mod acquire_stack_lock {
         ///
         /// This method removes the lock from the map when the lock guard goes out of scope.
         /// It logs a message indicating that the lock has been released for the user id.
-        #[instrument(level = "info", skip_all, fields(user_id = %self.key))]
+        #[instrument(level = "info", skip_all, fields(user_id = %self.key.0, task_small_id = %self.key.1))]
         fn drop(&mut self) {
             if self.locked {
                 let previous_lock = self.map.remove(&self.key);
                 if previous_lock.is_some() {
-                    info!("Held lock has been released for user id: {}", self.key);
+                    info!("Held lock has been released for user id: {}, task small id: {}", self.key.0, self.key.1);
                 }
             }
         }
