@@ -1983,7 +1983,7 @@ pub mod utils {
     /// # Arguments
     ///
     /// * `state_manager_sender` - Sender for the state manager channel
-    /// * `stack_small_id` - The unique identifier for the stack to lock
+    /// * `req_parts` - The request parts containing the headers
     /// * `endpoint` - The API endpoint path making the request (used for error context)
     ///
     /// # Returns
@@ -2000,7 +2000,7 @@ pub mod utils {
     /// async fn lock_stack(state: State<ProxyState>) -> Result<()> {
     ///     let (node_url, node_id) = get_node_address(
     ///         &state,
-    ///         stack_small_id: 123,
+    ///         req_parts: &mut Parts,
     ///         endpoint: "/v1/chat/completions"
     ///     ).await?;
     /// }
