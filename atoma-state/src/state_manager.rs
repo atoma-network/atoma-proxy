@@ -397,13 +397,13 @@ impl AtomaState {
     ///
     /// * `task_small_id` - The unique identifier for the task to be fetched.
     /// * `free_units` - The number of free units available.
-    /// * `user_id` - The user id of the stack to be fetched.
+    /// * `user_id` - The user id of the stacks to filter by.
     ///
     /// # Returns
     ///
-    /// - `Result<Option<Stack>>`: A result containing either:
-    ///   - `Ok(Stack)`: The stack with the specified `task_small_id`.
-    ///   - `Err(AtomaStateManagerError)`: An error if the stack is not found or other database operation fails.
+    /// - `Result<Option<Stack>>`: A result containing either:  
+    ///  - `Ok(Some(Stack))`: The stack with the specified `task_small_id`.
+    ///  - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
     ///
     /// # Errors
     ///
