@@ -2001,7 +2001,7 @@ pub mod utils {
     /// async fn lock_stack(state: State<ProxyState>) -> Result<()> {
     ///     let (node_url, node_id) = get_node_address(
     ///         &state,
-    ///         stack_small_id: 123,
+    ///         req_parts: &mut Parts,
     ///         endpoint: "/v1/chat/completions"
     ///     ).await?;
     /// }
