@@ -624,10 +624,7 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
-<<<<<<< HEAD
-=======
     /// Retrieves all stacks associated with a specific task
->>>>>>> openroute-integration
     GetStacksForTask {
         /// Unique small integer identifier for the task
         task_small_id: i64,
@@ -636,10 +633,7 @@ pub enum AtomaAtomaStateManagerEvent {
         /// The user id of the stacks to filter by
         user_id: i64,
         /// Channel to send back the list of matching stacks
-<<<<<<< HEAD
-=======
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
->>>>>>> openroute-integration
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
     /// Verifies if a stack is valid for confidential compute request
