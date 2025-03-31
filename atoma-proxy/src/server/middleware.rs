@@ -9,7 +9,10 @@ use axum::{
     response::Response,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
-use reqwest::{header::CONTENT_LENGTH, StatusCode};
+use reqwest::{
+    header::{AUTHORIZATION, CONTENT_LENGTH},
+    StatusCode,
+};
 use serde_json::Value;
 use tracing::instrument;
 use utils::is_confidential_compute_endpoint;
@@ -227,6 +230,7 @@ impl RequestMetadataExtension {
 /// ```
 #[instrument(
     level = "info",
+    name = "authenticate_middleware",
     skip_all,
     fields(endpoint = %req.uri().path()),
     err
@@ -393,6 +397,7 @@ pub async fn authenticate_middleware(
 /// ```
 #[instrument(
     level = "info",
+    name = "confidential_compute_middleware",
     skip_all,
     fields(endpoint = %req.uri().path()),
     err
@@ -500,7 +505,43 @@ pub async fn confidential_compute_middleware(
     Ok(next.run(req).await)
 }
 
-#[instrument(level = "info", skip_all, err)]
+/// Middleware that handles locked stack requests.
+///
+/// This middleware checks if the current request is for a locked stack and, if so,
+/// attempts to lock a new stack for the request. It then forwards the request to the
+/// next middleware in the chain.
+///
+/// # Arguments
+///
+/// * `state` - The state of the proxy server.
+/// * `req` - The incoming HTTP request.
+/// * `next` - The next middleware in the chain.
+///
+/// # Returns
+///
+/// Returns the processed response from downstream handlers, wrapped in a `Result`.
+///
+/// # Request Flow
+///
+/// 1. Extracts and validates request body (limited to 1MB)
+/// 2. Deserializes the body into a `ConfidentialComputeRequest`
+/// 3. Verifies stack eligibility for confidential compute
+/// 4. Locks the compute units for the stack
+/// 5. Forwards the request to the next middleware in the chain
+///
+/// # Errors
+///
+/// Returns `AtomaProxyError` in the following cases:
+/// * `InternalError`:
+///   - Failed to convert body to bytes
+///   - Failed to send LockStack event
+///   - Failed to convert stack small id to string
+///   - Failed to parse stack small id
+///   - Failed to parse stack small id
+///   - Failed to convert body to bytes
+///   - Failed to send LockStack event
+///   - Failed to convert stack small id to string
+#[instrument(level = "info", name = "handle_locked_stack_middleware", skip_all, err)]
 pub async fn handle_locked_stack_middleware(
     state: State<ProxyState>,
     req: Request<Body>,
@@ -508,6 +549,15 @@ pub async fn handle_locked_stack_middleware(
 ) -> Result<Response> {
     let endpoint = req.uri().path().to_string();
     let (mut req_parts, body) = req.into_parts();
+    // Remove the Authorization header from the request parts, before sending it to the node
+    let authorization_header =
+        req_parts
+            .headers
+            .remove(AUTHORIZATION)
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "Authorization header not found, this should never happen".to_string(),
+                endpoint: endpoint.to_string(),
+            })?;
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|e| {
@@ -529,34 +579,10 @@ pub async fn handle_locked_stack_middleware(
     let response = next.clone().run(original_req).await;
     if response.status() == StatusCode::LOCKED {
         // Lock the current stack, in the Proxy's internal state
-        let stack_small_id = req_parts
+        utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
+        req_parts
             .headers
-            .remove(constants::STACK_SMALL_ID)
-            .ok_or_else(|| AtomaProxyError::InternalError {
-                message: "Stack small id not found".to_string(),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let stack_small_id = stack_small_id
-            .to_str()
-            .map_err(|_| AtomaProxyError::RequestError {
-                message: "Stack small id not found".to_string(),
-                endpoint: endpoint.to_string(),
-            })?
-            .parse::<i64>()
-            .map_err(|_| AtomaProxyError::RequestError {
-                message: "handle_locked_stack_middleware: Could not parse stack small id"
-                    .to_string(),
-                endpoint: endpoint.to_string(),
-            })?;
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::LockStack { stack_small_id })
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send LockStack event: {e}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+            .insert(AUTHORIZATION, authorization_header);
         let req = Request::from_parts(req_parts, Body::from(body_bytes));
         if is_confidential_compute_endpoint(&endpoint) {
             confidential_compute_middleware(state, req, next).await
@@ -577,7 +603,6 @@ pub mod auth {
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
     use flume::Sender;
-    use reqwest::header::AUTHORIZATION;
     use serde_json::Value;
     use sui_sdk::types::digests::TransactionDigest;
     use tokio::sync::{oneshot, RwLock};
@@ -907,7 +932,6 @@ pub mod auth {
     #[instrument(level = "info", skip_all, err)]
     pub async fn process_selected_stack(
         state: &ProxyState,
-        headers: &mut HeaderMap,
         payload: &Value,
         selected_node_id: i64,
         endpoint: &str,
@@ -954,9 +978,6 @@ pub mod auth {
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
-
-        // Prepare headers
-        headers.remove(AUTHORIZATION);
 
         Ok(ProcessedRequest {
             node_address,
@@ -1206,6 +1227,7 @@ pub mod auth {
 }
 
 pub mod utils {
+    use flume::Sender;
     use sui_sdk::types::digests::TransactionDigest;
 
     use crate::server::{
@@ -1308,14 +1330,7 @@ pub mod utils {
         let ProcessedRequest {
             node_address,
             signature,
-        } = auth::process_selected_stack(
-            state,
-            &mut req_parts.headers,
-            body_json,
-            selected_node_id,
-            endpoint,
-        )
-        .await?;
+        } = auth::process_selected_stack(state, body_json, selected_node_id, endpoint).await?;
 
         let stack_small_id_header = HeaderValue::from_str(&selected_stack_small_id.to_string())
             .map_err(|e| AtomaProxyError::InternalError {
@@ -1655,8 +1670,8 @@ pub mod utils {
     ///
     /// # Arguments
     ///
-    /// * `state` - Server state containing the state manager channel and other shared resources
-    /// * `req_parts` - Request parts containing the headers
+    /// * `state_manager_sender` - Sender for the state manager channel
+    /// * `stack_small_id` - The unique identifier for the stack to lock
     /// * `endpoint` - The API endpoint path making the request (used for error context)
     ///
     /// # Returns
@@ -1686,7 +1701,11 @@ pub mod utils {
         ),
         err
     )]
-    fn lock_stack(state: &State<ProxyState>, req_parts: &mut Parts, endpoint: &str) -> Result<()> {
+    pub fn lock_stack(
+        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+        req_parts: &mut Parts,
+        endpoint: &str,
+    ) -> Result<()> {
         let stack_small_id = req_parts
             .headers
             .remove(constants::STACK_SMALL_ID)
@@ -1707,8 +1726,13 @@ pub mod utils {
                     .to_string(),
                 endpoint: endpoint.to_string(),
             })?;
-        state
-            .state_manager_sender
+        tracing::info!(
+            level = "info",
+            name = "handle_locked_stack_middleware",
+            stack_small_id = %stack_small_id,
+            "Stack is in locked state for the requested node, trying to acquire a new stack"
+        );
+        state_manager_sender
             .send(AtomaAtomaStateManagerEvent::LockStack { stack_small_id })
             .map_err(|e| AtomaProxyError::InternalError {
                 message: format!("Failed to send LockStack event: {e}"),
