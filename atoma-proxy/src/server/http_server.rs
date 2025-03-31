@@ -203,11 +203,11 @@ pub fn create_router(state: &ProxyState) -> Router {
                 ServiceBuilder::new()
                     .layer(from_fn_with_state(
                         state.clone(),
-                        handle_locked_stack_middleware,
+                        confidential_compute_middleware,
                     ))
                     .layer(from_fn_with_state(
                         state.clone(),
-                        confidential_compute_middleware,
+                        handle_locked_stack_middleware,
                     )),
             ),
         )
@@ -216,9 +216,9 @@ pub fn create_router(state: &ProxyState) -> Router {
                 ServiceBuilder::new()
                     .layer(from_fn_with_state(
                         state.clone(),
-                        handle_locked_stack_middleware,
+                        authenticate_middleware,
                     ))
-                    .layer(from_fn_with_state(state.clone(), authenticate_middleware)),
+                    .layer(from_fn_with_state(state.clone(), handle_locked_stack_middleware)),
             ),
         )
         .merge(node_routes)
