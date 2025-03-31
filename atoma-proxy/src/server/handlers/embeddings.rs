@@ -55,6 +55,7 @@ const INPUT: &str = "input";
 ///
 /// This struct encapsulates the necessary fields for processing an embeddings request
 /// following the OpenAI API format.
+#[derive(Debug, Clone)]
 pub struct RequestModelEmbeddings {
     /// The name of the model to use for generating embeddings (e.g., "text-embedding-ada-002")
     model: String,
