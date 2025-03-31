@@ -391,25 +391,12 @@ impl AtomaState {
 
     /// Get a stack by its unique identifier.
     ///
-<<<<<<< HEAD
-    /// This method fetches a stack from the database based on the provided `task_small_id`.
-=======
     /// This method fetches a stack from the database based on the provided `task_small_id` and `free_units`.
->>>>>>> openroute-integration
     ///
     /// # Arguments
     ///
     /// * `task_small_id` - The unique identifier for the task to be fetched.
     /// * `free_units` - The number of free units available.
-<<<<<<< HEAD
-    /// * `user_id` - The user id of the stacks to filter by.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Option<Stack>>`: A result containing either:  
-    ///  - `Ok(Some(Stack))`: The stack with the specified `task_small_id`.
-    ///  - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
-=======
     /// * `user_id` - The user id of the stack to be fetched.
     ///
     /// # Returns
@@ -417,14 +404,10 @@ impl AtomaState {
     /// - `Result<Option<Stack>>`: A result containing either:
     ///   - `Ok(Stack)`: The stack with the specified `task_small_id`.
     ///   - `Err(AtomaStateManagerError)`: An error if the stack is not found or other database operation fails.
->>>>>>> openroute-integration
     ///
     /// # Errors
     ///
     /// This function will return an error if the database query fails.
-<<<<<<< HEAD
-    #[instrument(level = "trace", skip_all, fields(%task_small_id, %free_units, %user_id))]
-=======
     ///
     /// # Example
     ///
@@ -437,7 +420,6 @@ impl AtomaState {
         skip_all,
         fields(%task_small_id, %free_units, %user_id)
     )]
->>>>>>> openroute-integration
     pub async fn get_stacks_for_task(
         &self,
         task_small_id: i64,
@@ -446,23 +428,14 @@ impl AtomaState {
     ) -> Result<Option<Stack>> {
         let stack = sqlx::query(
             "
-<<<<<<< HEAD
         SELECT * FROM stacks 
-=======
-            SELECT * FROM stacks 
->>>>>>> openroute-integration
             WHERE task_small_id = $1 
             AND num_compute_units - already_computed_units >= $2 
             AND user_id = $3 
             AND is_claimed = false 
             AND is_locked = false 
             AND in_settle_period = false
-<<<<<<< HEAD
-            LIMIT 1
-            ",
-=======
             LIMIT 1",
->>>>>>> openroute-integration
         )
         .bind(task_small_id)
         .bind(free_units)
