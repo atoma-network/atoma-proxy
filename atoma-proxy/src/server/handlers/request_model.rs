@@ -15,7 +15,7 @@ pub struct ComputeUnitsEstimate {
 /// A trait for parsing and handling AI model requests across different endpoints (chat, embeddings, images).
 /// This trait provides a common interface for processing various types of AI model requests
 /// and estimating their computational costs.
-pub trait RequestModel {
+pub trait RequestModel: Clone {
     /// Constructs a new request model instance by parsing the provided JSON request.
     ///
     /// # Arguments

@@ -624,6 +624,18 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
+    /// Retrieves all stacks associated with a specific task
+    GetStacksForTask {
+        /// Unique small integer identifier for the task
+        task_small_id: i64,
+        /// The minimum number of available compute units required
+        free_compute_units: i64,
+        /// The user id of the stacks to filter by
+        user_id: i64,
+        /// Channel to send back the list of matching stacks
+        /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
+        result_sender: oneshot::Sender<Result<Option<Stack>>>,
+    },
     /// Verifies if a stack is valid for confidential compute request
     VerifyStackForConfidentialComputeRequest {
         /// Unique small integer identifier for the stack
