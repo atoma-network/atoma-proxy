@@ -4690,6 +4690,34 @@ impl AtomaState {
         Ok(())
     }
 
+    /// Refunds a USDC payment.
+    ///
+    /// This method refunds a USDC payment to the user in the `balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `amount` - The amount to refund.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "trace", skip(self))]
+    pub async fn refund_usdc(&self, user_id: i64, amount: i64) -> Result<()> {
+        sqlx::query("UPDATE balance SET usdc_balance = usdc_balance + $2 WHERE user_id = $1")
+            .bind(user_id)
+            .bind(amount)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
     /// Insert a new usdc payment digest.
     ///
     /// This method inserts a new usdc payment digest into the `usdc_payment_digests` table. It fails if the digest already exists.

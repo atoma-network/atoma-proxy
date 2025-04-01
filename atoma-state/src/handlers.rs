@@ -1230,15 +1230,19 @@ pub async fn handle_state_manager_event(
             already_computed_units,
             transaction_timestamp,
             user_id,
+            result_sender,
         } => {
-            handle_stack_created_event(
+            let result = handle_stack_created_event(
                 state_manager,
                 event,
                 already_computed_units,
                 user_id,
                 transaction_timestamp,
             )
-            .await?;
+            .await;
+            result_sender
+                .send(result)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
             timestamp,
@@ -1449,6 +1453,16 @@ pub async fn handle_state_manager_event(
             result_sender,
         } => {
             let success = state_manager.state.deduct_from_usdc(user_id, amount).await;
+            result_sender
+                .send(success)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::RefundUsdc {
+            user_id,
+            amount,
+            result_sender,
+        } => {
+            let success = state_manager.state.refund_usdc(user_id, amount).await;
             result_sender
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
