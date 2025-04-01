@@ -1230,7 +1230,8 @@ pub mod auth {
                 match refund_usdc(
                     state_manager_sender,
                     user_id,
-                    price_per_million_compute_units as i64 * STACK_SIZE_TO_BUY / ONE_MILLION as i64,
+                    price_per_million_compute_units,
+                    STACK_SIZE_TO_BUY as u64,
                     endpoint,
                 )
                 .await
@@ -1414,14 +1415,16 @@ pub mod auth {
     async fn refund_usdc(
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         user_id: UserId,
-        amount: i64,
+        price_per_one_million_compute_units: u64,
+        stack_size_to_buy: u64,
         endpoint: String,
     ) -> Result<()> {
         let (result_sender, result_receiver) = oneshot::channel();
         state_manager_sender
             .send(AtomaAtomaStateManagerEvent::RefundUsdc {
                 user_id,
-                amount,
+                amount: (price_per_one_million_compute_units * stack_size_to_buy / ONE_MILLION)
+                    as i64,
                 result_sender,
             })
             .map_err(|err| AtomaProxyError::InternalError {
