@@ -234,6 +234,7 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
+        self.is_final_chunk_handled = true;
         Ok(())
     }
 }
