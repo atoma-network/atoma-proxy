@@ -934,7 +934,6 @@ pub mod auth {
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
-        let model = request_model.get_model();
         let (result_sender, result_receiver) = oneshot::channel();
 
         state
