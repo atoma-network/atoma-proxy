@@ -634,7 +634,7 @@ pub mod auth {
     const MAX_STACK_WAIT_TIME: Duration = Duration::from_millis(300);
 
     /// The maximum number of attempts to wait for a stack to be created.
-    const MAX_STACK_WAIT_ATTEMPTS: usize = 3;
+    const MAX_STACK_WAIT_ATTEMPTS: usize = 10;
 
     /// Metadata about the stack that was selected for the request.
     /// This is used to update the stack's num_tokens after the request is processed.  
@@ -931,34 +931,16 @@ pub mod auth {
         task_small_id: i64,
         request_model: impl RequestModel + Send,
         endpoint: &str,
+        total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
         let model = request_model.get_model();
-        let ComputeUnitsEstimate {
-            max_total_compute_units,
-            ..
-        } = if [IMAGE_GENERATIONS_PATH, CONFIDENTIAL_IMAGE_GENERATIONS_PATH].contains(&endpoint) {
-            request_model.get_compute_units_estimate(None)?
-        } else {
-            let tokenizer_index =
-                state
-                    .models
-                    .iter()
-                    .position(|m| m == &model)
-                    .ok_or_else(|| AtomaProxyError::RequestError {
-                        message: "Model not supported".to_string(),
-                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
-                    })?;
-            let tokenizer = state.tokenizers[tokenizer_index].clone();
-            request_model.get_compute_units_estimate(Some(&tokenizer))?
-        };
-
         let (result_sender, result_receiver) = oneshot::channel();
 
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetStacksForTask {
                 task_small_id,
-                free_compute_units: max_total_compute_units as i64,
+                free_compute_units: total_tokens as i64,
                 user_id,
                 result_sender,
             })
@@ -1484,6 +1466,7 @@ pub mod auth {
         task_small_id: i64,
         body_json: &Value,
         endpoint: &str,
+        total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
             CHAT_COMPLETIONS_PATH => {
@@ -1499,6 +1482,7 @@ pub mod auth {
                     task_small_id,
                     request_model,
                     endpoint,
+                    total_tokens,
                 )
                 .await
             }
@@ -1515,6 +1499,7 @@ pub mod auth {
                     task_small_id,
                     request_model,
                     endpoint,
+                    total_tokens,
                 )
                 .await
             }
@@ -1532,6 +1517,7 @@ pub mod auth {
                     task_small_id,
                     request_model,
                     endpoint,
+                    total_tokens,
                 )
                 .await
             }
@@ -1578,6 +1564,7 @@ pub mod auth {
         task_small_id: i64,
         request_model: impl RequestModel + Send,
         endpoint: &str,
+        total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         let stack_is_locked = {
             state
@@ -1599,6 +1586,7 @@ pub mod auth {
                     task_small_id,
                     request_model.clone(),
                     endpoint,
+                    total_tokens,
                 )
                 .await?;
                 if let Some(stack_metadata) = stack_metadata {
@@ -1745,8 +1733,15 @@ pub mod auth {
         ) else {
             // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
             // so we try to get the stack from the state manager, and if it is not found, we return an error.
-            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint)
-                .await;
+            return get_stack_if_locked(
+                state,
+                user_id,
+                node.task_small_id,
+                body_json,
+                endpoint,
+                total_tokens,
+            )
+            .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         let NewStackResult {
