@@ -301,7 +301,6 @@ pub async fn authenticate_middleware(
     } = auth::get_selected_node(GetSelectedNodeArgs {
         model: &model,
         state: &state,
-        body_json: &body_json,
         sui: &state.sui,
         optional_stack,
         total_tokens: max_total_compute_units,
@@ -929,11 +928,9 @@ pub mod auth {
         state: &ProxyState,
         user_id: UserId,
         task_small_id: i64,
-        request_model: impl RequestModel + Send,
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
-        let model = request_model.get_model();
         let (result_sender, result_receiver) = oneshot::channel();
 
         state
@@ -1464,58 +1461,15 @@ pub mod auth {
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
-        body_json: &Value,
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
-            CHAT_COMPLETIONS_PATH => {
-                let request_model = RequestModelChatCompletions::new(body_json).map_err(|err| {
-                    AtomaProxyError::RequestError {
-                        message: format!("Failed to parse chat completions request: {err:?}"),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
+            CHAT_COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
                     task_small_id,
-                    request_model,
-                    endpoint,
-                    total_tokens,
-                )
-                .await
-            }
-            EMBEDDINGS_PATH => {
-                let request_model = RequestModelEmbeddings::new(body_json).map_err(|err| {
-                    AtomaProxyError::RequestError {
-                        message: format!("Failed to parse embeddings request: {err:?}"),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
-                get_stack_if_locked_with_request_model(
-                    state,
-                    user_id,
-                    task_small_id,
-                    request_model,
-                    endpoint,
-                    total_tokens,
-                )
-                .await
-            }
-            IMAGE_GENERATIONS_PATH => {
-                let request_model =
-                    RequestModelImageGenerations::new(body_json).map_err(|err| {
-                        AtomaProxyError::RequestError {
-                            message: format!("Failed to parse image generations request: {err:?}"),
-                            endpoint: endpoint.to_string(),
-                        }
-                    })?;
-                get_stack_if_locked_with_request_model(
-                    state,
-                    user_id,
-                    task_small_id,
-                    request_model,
                     endpoint,
                     total_tokens,
                 )
@@ -1562,7 +1516,6 @@ pub mod auth {
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
-        request_model: impl RequestModel + Send,
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
@@ -1584,7 +1537,6 @@ pub mod auth {
                     state,
                     user_id,
                     task_small_id,
-                    request_model.clone(),
                     endpoint,
                     total_tokens,
                 )
@@ -1607,8 +1559,6 @@ pub mod auth {
         pub model: &'a str,
         /// The state of the proxy
         pub state: &'a ProxyState,
-        /// The raw JSON request body as a serde_json Value
-        pub body_json: &'a Value,
         /// The Sui interface for blockchain operations
         pub sui: &'a Arc<RwLock<Sui>>,
         /// The optional stack to use for the request
@@ -1669,7 +1619,6 @@ pub mod auth {
         let GetSelectedNodeArgs {
             model,
             state,
-            body_json,
             sui,
             optional_stack,
             total_tokens,
@@ -1733,15 +1682,8 @@ pub mod auth {
         ) else {
             // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
             // so we try to get the stack from the state manager, and if it is not found, we return an error.
-            return get_stack_if_locked(
-                state,
-                user_id,
-                node.task_small_id,
-                body_json,
-                endpoint,
-                total_tokens,
-            )
-            .await;
+            return get_stack_if_locked(state, user_id, node.task_small_id, endpoint, total_tokens)
+                .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         let NewStackResult {
