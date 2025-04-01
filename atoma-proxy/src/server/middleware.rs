@@ -913,8 +913,8 @@ pub mod auth {
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
     /// * `task_small_id` - The small ID of the task to be fetched
-    /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
+    /// * `total_tokens` - The estimated total number of tokens for the request
     ///
     /// # Returns
     /// * `Result<Option<SelectedNodeMetadata>>` - Stack metadata if successful
@@ -1436,7 +1436,6 @@ pub mod auth {
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
     /// * `task_small_id` - The small ID of the task that the user is requesting
-    /// * `body_json` - The raw JSON request body as a serde_json Value
     /// * `endpoint` - The API endpoint being accessed
     ///
     /// # Returns
@@ -1495,8 +1494,8 @@ pub mod auth {
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
     /// * `task_small_id` - The small ID of the task that the user is requesting
-    /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
+    /// * `total_tokens` - The estimated total number of tokens for the request
     ///
     /// # Returns
     /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
