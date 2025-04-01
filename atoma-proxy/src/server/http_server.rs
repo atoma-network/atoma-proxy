@@ -77,7 +77,7 @@ pub struct ProxyState {
     ///
     /// This map is used to prevent race conditions when multiple requests
     /// try to acquire the same stack for a user.
-    pub users_buy_stack_lock_map: DashMap<(UserId, TaskId), bool>,
+    pub users_buy_stack_lock_map: Arc<DashMap<(UserId, TaskId), bool>>,
 
     /// `Sui` struct for handling Sui-related operations.
     ///
@@ -254,7 +254,7 @@ pub async fn start_server(
 
     let proxy_state = ProxyState {
         state_manager_sender,
-        users_buy_stack_lock_map: DashMap::new(),
+        users_buy_stack_lock_map: Arc::new(DashMap::new()),
         sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),

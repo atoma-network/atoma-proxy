@@ -735,6 +735,9 @@ pub enum AtomaAtomaStateManagerEvent {
         transaction_timestamp: DateTime<Utc>,
         /// User id of the stack owner (referencing local user table)
         user_id: i64,
+        /// Channel to send back the result
+        /// Returns Ok(()) if the stack is valid or an error if it is not
+        result_sender: oneshot::Sender<Result<()>>,
     },
     /// Records statistics about a node's throughput performance
     UpdateNodeThroughputPerformance {
@@ -907,6 +910,15 @@ pub enum AtomaAtomaStateManagerEvent {
         /// The user ID
         user_id: i64,
         /// The amount to deduct
+        amount: i64,
+        /// The result sender to send back the result
+        result_sender: oneshot::Sender<Result<()>>,
+    },
+    /// Refunds a USDC payment.
+    RefundUsdc {
+        /// The user ID
+        user_id: i64,
+        /// The amount to refund
         amount: i64,
         /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
