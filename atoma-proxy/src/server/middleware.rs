@@ -930,7 +930,6 @@ pub mod auth {
         state: &ProxyState,
         user_id: UserId,
         task_small_id: i64,
-        request_model: impl RequestModel + Send,
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
@@ -1470,52 +1469,30 @@ pub mod auth {
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
             CHAT_COMPLETIONS_PATH => {
-                let request_model = RequestModelChatCompletions::new(body_json).map_err(|err| {
-                    AtomaProxyError::RequestError {
-                        message: format!("Failed to parse chat completions request: {err:?}"),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
                     task_small_id,
-                    request_model,
                     endpoint,
                     total_tokens,
                 )
                 .await
             }
             EMBEDDINGS_PATH => {
-                let request_model = RequestModelEmbeddings::new(body_json).map_err(|err| {
-                    AtomaProxyError::RequestError {
-                        message: format!("Failed to parse embeddings request: {err:?}"),
-                        endpoint: endpoint.to_string(),
-                    }
-                })?;
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
                     task_small_id,
-                    request_model,
                     endpoint,
                     total_tokens,
                 )
                 .await
             }
             IMAGE_GENERATIONS_PATH => {
-                let request_model =
-                    RequestModelImageGenerations::new(body_json).map_err(|err| {
-                        AtomaProxyError::RequestError {
-                            message: format!("Failed to parse image generations request: {err:?}"),
-                            endpoint: endpoint.to_string(),
-                        }
-                    })?;
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
                     task_small_id,
-                    request_model,
                     endpoint,
                     total_tokens,
                 )
@@ -1562,7 +1539,6 @@ pub mod auth {
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
-        request_model: impl RequestModel + Send,
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
@@ -1584,7 +1560,6 @@ pub mod auth {
                     state,
                     user_id,
                     task_small_id,
-                    request_model.clone(),
                     endpoint,
                     total_tokens,
                 )
