@@ -1,9 +1,7 @@
-use axum::http::HeaderMap;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
-use crate::server::check_auth;
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
 
@@ -40,7 +38,6 @@ pub struct ModelsOpenApi;
 )]
 pub async fn models_list(
     State(state): State<ProxyState>,
-    headers: HeaderMap,
 ) -> std::result::Result<Json<ModelList>, AtomaProxyError> {
     let models = state
         .models
