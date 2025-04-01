@@ -428,14 +428,22 @@ impl AtomaState {
     ) -> Result<Option<Stack>> {
         let stack = sqlx::query(
             "
-        SELECT * FROM stacks 
-            WHERE task_small_id = $1 
-            AND num_compute_units - already_computed_units >= $2 
-            AND user_id = $3 
-            AND is_claimed = false 
-            AND is_locked = false 
-            AND in_settle_period = false
-            LIMIT 1",
+            WITH selected_stack AS (
+                SELECT stack_small_id 
+                FROM stacks
+                WHERE task_small_id = $1 
+                AND num_compute_units - already_computed_units >= $2 
+                AND user_id = $3 
+                AND is_claimed = false 
+                AND is_locked = false 
+                AND in_settle_period = false
+                LIMIT 1
+                FOR UPDATE
+            )
+            UPDATE stacks
+            SET already_computed_units = already_computed_units + $2
+            WHERE stack_small_id IN (SELECT stack_small_id FROM selected_stack)
+            RETURNING *",
         )
         .bind(task_small_id)
         .bind(free_units)
