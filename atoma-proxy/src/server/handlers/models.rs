@@ -42,15 +42,6 @@ pub async fn models_list(
     State(state): State<ProxyState>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ModelList>, AtomaProxyError> {
-    if check_auth(&state.state_manager_sender, &headers, MODELS_PATH)
-        .await
-        .is_err()
-    {
-        return Err(AtomaProxyError::AuthError {
-            auth_error: "Unauthorized, client did not provide a valid API key".to_string(),
-            endpoint: MODELS_PATH.to_string(),
-        });
-    }
     let models = state
         .models
         .iter()
