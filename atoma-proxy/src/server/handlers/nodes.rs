@@ -17,6 +17,8 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
+use crate::server::middleware::acquire_stack_lock;
+use crate::server::middleware::auth::{acquire_new_stack, get_stack_if_locked, SelectedNodeMetadata};
 use crate::server::{check_auth, middleware::STACK_SIZE_TO_BUY, ONE_MILLION};
 
 pub const NODES_PATH: &str = "/v1/nodes";
@@ -337,6 +339,45 @@ pub async fn nodes_create_lock(
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         if let Some(node) = node {
+            let task_small_id = node.task_small_id;
+            let SelectedNodeMetadata {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+                &state.users_buy_stack_lock_map,
+                (user_id, task_small_id),
+            ) {
+                let sui = state.sui.clone();
+                // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+                acquire_new_stack(
+                    state.state_manager_sender.clone(),
+                    user_id,
+                    lock_guard,
+                    NODES_CREATE_LOCK_PATH.to_string(),
+                    MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
+                    sui,
+                    node,
+                )
+                .await?
+            } else {
+                // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+                // so we try to get the stack from the state manager, and if it is not found, we return an error.
+                get_stack_if_locked(
+                    &state,
+                    user_id,
+                    task_small_id,
+                    &payload,
+                    NODES_CREATE_LOCK_PATH,
+                )
+                .await?
+            };
+            // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+            // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
+            // lock guard release will see the new stack.
+            // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
+            // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
+
             let price_per_one_million_compute_units = node.price_per_one_million_compute_units;
             // NOTE: We need to deduct the cost of the stack entry from the user's balance, first.
             // This will fail if the balance is not enough.
