@@ -1,6 +1,9 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
-use auth::{GetSelectedNodeArgs, ProcessedRequest, SelectedNodeMetadata, StackMetadata};
+use auth::{
+    get_cheapest_node_and_acquire_new_stack, GetSelectedNodeArgs, ProcessedRequest,
+    SelectedNodeMetadata, StackMetadata,
+};
 use axum::{
     body::Body,
     extract::{rejection::LengthLimitError, Request, State},
@@ -62,7 +65,10 @@ pub struct RequestMetadataExtension {
 
     /// Estimated compute units required for this request.
     /// This represents the total computational resources needed for both input and output processing.
-    pub num_compute_units: u64,
+    pub max_total_num_compute_units: u64,
+
+    /// The user id for this request.
+    pub user_id: i64,
 
     /// Selected stack small id for this request.
     pub selected_stack_small_id: i64,
@@ -118,8 +124,27 @@ impl RequestMetadataExtension {
     /// # Returns
     ///
     /// Returns self with the num compute units field populated, enabling method chaining
-    pub const fn with_num_compute_units(mut self, num_compute_units: u64) -> Self {
-        self.num_compute_units = num_compute_units;
+    pub const fn with_max_total_num_compute_units(
+        mut self,
+        max_total_num_compute_units: u64,
+    ) -> Self {
+        self.max_total_num_compute_units = max_total_num_compute_units;
+        self
+    }
+
+    /// Adds a user id to the request metadata.
+    ///
+    /// This method is used to set the user id that will be used for the request.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The user id to set
+    ///
+    /// # Returns
+    ///
+    /// Returns self with the user id field populated, enabling method chaining
+    pub const fn with_user_id(mut self, user_id: i64) -> Self {
+        self.user_id = user_id;
         self
     }
 
@@ -304,7 +329,6 @@ pub async fn authenticate_middleware(
         } = auth::get_selected_node(GetSelectedNodeArgs {
             model: &model,
             state: &state,
-            sui: &state.sui,
             optional_stack,
             total_tokens: max_total_compute_units,
             user_id,
@@ -419,6 +443,7 @@ pub async fn confidential_compute_middleware(
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
+    let user_id = check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|e| {
@@ -507,7 +532,8 @@ pub async fn confidential_compute_middleware(
         .with_node_address(node_address)
         .with_node_small_id(node_small_id)
         .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
-        .with_num_compute_units(num_compute_units as u64)
+        .with_max_total_num_compute_units(num_compute_units as u64)
+        .with_user_id(user_id)
         .with_model_name(confidential_compute_request.model_name)
         .with_endpoint(endpoint);
     req_parts.extensions.insert(request_metadata);
@@ -587,20 +613,103 @@ pub async fn handle_locked_stack_middleware(
         })?;
     let original_req = Request::from_parts(req_parts.clone(), Body::from(body_bytes.clone()));
     let response = next.clone().run(original_req).await;
-    if response.status() == StatusCode::LOCKED {
-        // Lock the current stack, in the Proxy's internal state
-        utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
-        req_parts
-            .headers
-            .insert(AUTHORIZATION, authorization_header);
-        let req = Request::from_parts(req_parts, Body::from(body_bytes));
-        if is_confidential_compute_endpoint(&endpoint) {
-            confidential_compute_middleware(state, req, next).await
-        } else {
+    match response.status() {
+        StatusCode::LOCKED => {
+            // Lock the current stack, in the Proxy's internal state
+            utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
+            req_parts
+                .headers
+                .insert(AUTHORIZATION, authorization_header);
+            let req = Request::from_parts(req_parts, Body::from(body_bytes));
+            if is_confidential_compute_endpoint(&endpoint) {
+                // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
+                // Acquiring a new stack in this case might simply select a new node, which means that the client will have to re-encrypt the request,
+                // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
+                // a couple of times, through Atoma's native SDKs.
+                return Err(AtomaProxyError::Locked {
+                    message: "Confidential compute requests should be retried".to_string(),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+            // NOTE: For non-confidential requests, we can acquire a new stack directly from the proxy, and therefore we require a new authentication
+            // for the request.
             authenticate_middleware(state, req, next).await
         }
-    } else {
-        Ok(response)
+        StatusCode::TOO_EARLY => {
+            // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
+            if is_confidential_compute_endpoint(&endpoint) {
+                // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
+                // Acquiring a new stack in this case might simply select a new node, which means that the client will have to re-encrypt the request,
+                // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
+                // a couple of times, through Atoma's native SDKs.
+                return Err(AtomaProxyError::UnavailableStack {
+                    message: "Confidential compute requests should be retried".to_string(),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+            // We need to acquire a new stack for the request, to be able to retry
+            let request_metadata = req_parts
+                .extensions
+                .get::<RequestMetadataExtension>()
+                .cloned()
+                .ok_or_else(|| AtomaProxyError::InternalError {
+                    message: "Request metadata not found, this should never happen".to_string(),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            let user_id = request_metadata.user_id;
+            let max_total_num_compute_units = request_metadata.max_total_num_compute_units;
+            // 1. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
+            let selected_node_metadata = get_cheapest_node_and_acquire_new_stack(
+                &state,
+                user_id,
+                &request_metadata.model_name,
+                &request_metadata.endpoint,
+                max_total_num_compute_units,
+            )
+            .await?;
+            // 2. Update the request headers with the new acquired stack's information
+            req_parts
+                .headers
+                .insert(AUTHORIZATION, authorization_header);
+            req_parts.headers.insert(
+                constants::STACK_SMALL_ID,
+                HeaderValue::from_str(&selected_node_metadata.stack_small_id.to_string()).unwrap(),
+            );
+            let body_json =
+                serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
+                    message: format!("Failed to parse body as JSON: {e}"),
+                    endpoint: endpoint.to_string(),
+                })?;
+            let req = match utils::try_validate_stack_for_request(
+                &state,
+                &body_json,
+                &mut req_parts,
+                selected_node_metadata.selected_node_id,
+                selected_node_metadata.stack_small_id,
+                request_metadata.num_input_tokens.unwrap_or_default(),
+                max_total_num_compute_units,
+                selected_node_metadata.tx_digest,
+                user_id,
+                &endpoint,
+            )
+            .await
+            {
+                Ok(req) => req,
+                Err(e) => {
+                    update_state_manager(
+                        &state.state_manager_sender,
+                        selected_node_metadata.stack_small_id,
+                        max_total_num_compute_units as i64,
+                        0,
+                        &endpoint,
+                    )?;
+                    return Err(e);
+                }
+            };
+            Ok(next.run(req).await)
+        }
+        _ => Ok(response),
     }
 }
 
@@ -1548,7 +1657,7 @@ pub mod auth {
             }
         }
         Err(AtomaProxyError::RequestError {
-            message: format!("User {user_id} has already bought a stack"),
+            message: "Many concurrent requests, a stack is being bought, but its internal state is not yet updated. Please retry.".to_string(),
             endpoint: endpoint.to_string(),
         })
     }
@@ -1559,8 +1668,6 @@ pub mod auth {
         pub model: &'a str,
         /// The state of the proxy
         pub state: &'a ProxyState,
-        /// The Sui interface for blockchain operations
-        pub sui: &'a Arc<RwLock<Sui>>,
         /// The optional stack to use for the request
         pub optional_stack: Option<Stack>,
         /// The total number of compute units (tokens) needed for the request
@@ -1570,6 +1677,8 @@ pub mod auth {
         /// The endpoint of the request
         pub endpoint: &'a str,
     }
+
+    /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
 
     /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
     ///
@@ -1612,7 +1721,6 @@ pub mod auth {
         let GetSelectedNodeArgs {
             model,
             state,
-            sui,
             optional_stack,
             total_tokens,
             user_id,
@@ -1635,6 +1743,54 @@ pub mod auth {
                     endpoint: endpoint.to_string(),
                 });
         }
+        get_cheapest_node_and_acquire_new_stack(state, user_id, model, endpoint, total_tokens).await
+    }
+
+    /// Gets the cheapest node for a model and acquires a new stack for the request.
+    ///
+    /// This function follows a two-step process:
+    /// 1. First, it attempts to find existing stacks that can handle the requested model and compute units
+    /// 2. If no suitable stacks exist, it acquires a new stack entry by:
+    ///    - Finding available tasks for the model
+    ///    - Creating a new stack entry with predefined compute units and price
+    ///    - Registering the new stack with the state manager
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The name/identifier of the AI model being requested
+    /// * `endpoint` - The API endpoint being accessed
+    /// * `user_id` - The ID of the user making the request
+    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    ///
+    /// # Returns
+    ///
+    /// Returns a `SelectedNodeMetadata` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    /// * `tx_digest` - Optional transaction digest if a new stack was created
+    ///
+    /// # Errors
+    ///
+    /// Returns a `AtomaProxyError` error in the following cases:
+    /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager or Sui interface
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            model =%model,
+            endpoint =%endpoint,
+            user_id =%user_id,
+            total_tokens =%total_tokens,
+        ),
+        err
+    )]
+    pub async fn get_cheapest_node_and_acquire_new_stack(
+        state: &ProxyState,
+        user_id: i64,
+        model: &str,
+        endpoint: &str,
+        total_tokens: u64,
+    ) -> Result<SelectedNodeMetadata> {
         let (result_sender, result_receiver) = oneshot::channel();
         state
             .state_manager_sender
@@ -1679,31 +1835,21 @@ pub mod auth {
                 .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-        let SelectedNodeMetadata {
-            stack_small_id,
-            selected_node_id,
-            tx_digest,
-        } = acquire_new_stack(
+        acquire_new_stack(
             state.state_manager_sender.clone(),
             user_id,
             lock_guard,
             endpoint.to_string(),
             total_tokens,
-            Arc::clone(sui),
+            Arc::clone(&state.sui),
             node,
         )
-        .await?;
+        .await
         // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
         // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
         // lock guard release will see the new stack.
         // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
         // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
-
-        Ok(SelectedNodeMetadata {
-            stack_small_id,
-            selected_node_id,
-            tx_digest,
-        })
     }
 }
 
@@ -1865,7 +2011,8 @@ pub mod utils {
             node_address,
             node_id: selected_node_id,
             num_input_tokens: Some(num_input_tokens),
-            num_compute_units: total_compute_units,
+            max_total_num_compute_units: total_compute_units,
+            user_id,
             selected_stack_small_id,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
