@@ -1244,64 +1244,6 @@ pub async fn handle_state_manager_event(
                 .send(result)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-            timestamp,
-            model_name,
-            node_small_id,
-            input_tokens,
-            output_tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .update_node_throughput_performance(
-                    node_small_id,
-                    input_tokens,
-                    output_tokens,
-                    time,
-                )
-                .await?;
-            state_manager
-                .state
-                .add_compute_units_processed(
-                    timestamp,
-                    model_name,
-                    input_tokens + output_tokens,
-                    time,
-                )
-                .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodePrefillPerformance {
-            node_small_id,
-            tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .update_node_prefill_performance(node_small_id, tokens, time)
-                .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodeDecodePerformance {
-            node_small_id,
-            tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .update_node_decode_performance(node_small_id, tokens, time)
-                .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {
-            timestamp,
-            node_small_id,
-            latency,
-        } => {
-            state_manager
-                .state
-                .update_node_latency_performance(node_small_id, latency)
-                .await?;
-            state_manager.state.add_latency(timestamp, latency).await?;
-        }
         AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
             email,
             password,
