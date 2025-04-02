@@ -285,20 +285,8 @@ pub async fn authenticate_middleware(
     //
     // NOTE: If this method succeeds and the `optional_stack` is Some, this means that the proxy has locked
     // enough compute units for the request, within the state manager. Otherwise, this has not been the case.
-    let StackMetadata {
-        optional_stack,
-        num_input_compute_units,
-        max_total_compute_units,
-        model,
-        user_id,
-    } = auth::handle_authenticate_and_lock_compute_units(
-        &state,
-        &req_parts.headers,
-        &body_json,
-        &endpoint,
-    )
-    .await?;
 
+<<<<<<< HEAD
     // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
     //
     // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
@@ -318,40 +306,83 @@ pub async fn authenticate_middleware(
         total_tokens: max_total_compute_units,
         user_id,
         endpoint: &endpoint,
-    })
-    .await?;
+=======
+    let endpoint_clone = endpoint.clone();
+    tokio::spawn(async move {
+        let StackMetadata {
+            optional_stack,
+            num_input_compute_units,
+            max_total_compute_units,
+            model,
+            user_id,
+        } = auth::handle_authenticate_and_lock_compute_units(
+            &state,
+            &req_parts.headers,
+            &body_json,
+            &endpoint,
+        )
+        .await?;
 
-    // Validates the stack for the request.
-    //
-    // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
-    // the proxy will be in an inconsistent state for the current stack.
-    let req = match utils::try_validate_stack_for_request(
-        &state,
-        &body_json,
-        &mut req_parts,
-        selected_node_id,
-        stack_small_id,
-        num_input_compute_units,
-        max_total_compute_units,
-        tx_digest,
-        user_id,
-        &endpoint,
-    )
+        // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
+        //
+        // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
+        // In this case, this method cannot error (as it just returns the underlying stack data). Otherwise, it will try to buy a new stack.
+        // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager.
+        // Otherwise, we are safe to assume that the proxy has not locked enough compute units for the request, within the state manager, and we will not be able to process the request.
+        let SelectedNodeMetadata {
+            stack_small_id,
+            selected_node_id,
+            tx_digest,
+        } = auth::get_selected_node(GetSelectedNodeArgs {
+            model: &model,
+            state: &state,
+            sui: &state.sui,
+            optional_stack,
+            total_tokens: max_total_compute_units,
+            user_id,
+            endpoint: &endpoint,
+        })
+        .await?;
+
+        // Validates the stack for the request.
+        //
+        // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
+        // the proxy will be in an inconsistent state for the current stack.
+        let req = match utils::try_validate_stack_for_request(
+            &state,
+            &body_json,
+            &mut req_parts,
+            selected_node_id,
+            stack_small_id,
+            num_input_compute_units,
+            max_total_compute_units,
+            tx_digest,
+            user_id,
+            &endpoint,
+        )
+        .await
+        {
+            Ok(req) => req,
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    stack_small_id,
+                    max_total_compute_units as i64,
+                    0,
+                    &endpoint,
+                )?;
+                return Err(e);
+            }
+        };
+        Ok(next.run(req).await)
+>>>>>>> main
+    })
     .await
-    {
-        Ok(req) => req,
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                stack_small_id,
-                max_total_compute_units as i64,
-                0,
-                &endpoint,
-            )?;
-            return Err(e);
-        }
-    };
-    Ok(next.run(req).await)
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn task: {e}"),
+        client_message: None,
+        endpoint: endpoint_clone,
+    })?
 }
 
 /// Middleware that handles routing and setup for confidential compute requests.
@@ -1130,17 +1161,6 @@ pub mod auth {
         pub tx_digest: Option<TransactionDigest>,
     }
 
-    /// The result of acquiring a new stack entry.
-    #[derive(Debug)]
-    pub struct NewStackResult {
-        /// The small ID of the stack
-        pub stack_small_id: i64,
-        /// The small ID of the selected node
-        pub selected_node_id: i64,
-        /// The transaction digest of the stack entry creation transaction
-        pub tx_digest: TransactionDigest,
-    }
-
     /// Acquires a new stack entry for the cheapest node.
     ///
     /// This function acquires for the given node.
@@ -1158,7 +1178,7 @@ pub mod auth {
     /// * `stack_small_id` - The identifier for the selected/created stack
     /// * `selected_node_id` - The identifier for the node that will process the request
     #[instrument(level = "info", skip_all, err)]
-    async fn acquire_new_stack(
+    pub async fn acquire_new_stack(
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         user_id: i64,
         lock_guard: LockGuard,
@@ -1166,7 +1186,7 @@ pub mod auth {
         total_tokens: u64,
         sui: Arc<RwLock<Sui>>,
         node: atoma_state::types::CheapestNode,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         // NOTE: This method is called only if there was no prior lock to an already existing stack
         // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
@@ -1252,7 +1272,7 @@ pub mod auth {
     #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
     async fn acquire_new_stack_on_usdc_deduction_wrapper(
         args: AcquireNewStackArgs,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         let endpoint = args.endpoint.clone();
         let user_id = args.user_id;
         let state_manager_sender = args.state_manager_sender.clone();
@@ -1301,7 +1321,7 @@ pub mod auth {
     #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
     async fn acquire_new_stack_on_usdc_deduction(
         args: AcquireNewStackArgs,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         let AcquireNewStackArgs {
             state_manager_sender,
             sui,
@@ -1357,10 +1377,10 @@ pub mod auth {
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
-        Ok(NewStackResult {
+        Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest,
+            tx_digest: Some(tx_digest),
         })
     }
 
@@ -1512,7 +1532,7 @@ pub mod auth {
     /// * Parses the request body into the corresponding model type
     /// * Delegates to get_stack_if_locked_with_request_model for actual stack retrieval
     #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
-    async fn get_stack_if_locked(
+    pub async fn get_stack_if_locked(
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
@@ -1776,7 +1796,7 @@ pub mod auth {
                 .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-        let NewStackResult {
+        let SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
             tx_digest,
@@ -1799,7 +1819,7 @@ pub mod auth {
         Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest: Some(tx_digest),
+            tx_digest,
         })
     }
 
