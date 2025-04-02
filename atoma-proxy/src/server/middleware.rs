@@ -1860,7 +1860,7 @@ pub mod auth {
             lock_guard,
             endpoint.to_string(),
             max_total_num_compute_units,
-            Arc::clone(state.sui),
+            Arc::clone(&state.sui),
             node,
         )
         .await
@@ -2027,6 +2027,7 @@ pub mod utils {
             num_input_tokens: Some(num_input_tokens),
             num_compute_units: total_compute_units,
             selected_stack_small_id,
+            user_id,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
