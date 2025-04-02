@@ -41,6 +41,9 @@ const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 /// This is to prevent DoS attacks by limiting the size of the request body.
 const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
 
+/// Header key for indicating that a new stack should be bought for the request.
+pub const BUY_NEW_STACK: &str = "X-Buy-New-Stack";
+
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
 /// This extension is attached to requests during authentication middleware processing
@@ -301,6 +304,7 @@ pub async fn authenticate_middleware(
     } = auth::get_selected_node(GetSelectedNodeArgs {
         model: &model,
         state: &state,
+        body_json: &body_json,
         sui: &state.sui,
         optional_stack,
         total_tokens: max_total_compute_units,
@@ -577,20 +581,34 @@ pub async fn handle_locked_stack_middleware(
         })?;
     let original_req = Request::from_parts(req_parts.clone(), Body::from(body_bytes.clone()));
     let response = next.clone().run(original_req).await;
-    if response.status() == StatusCode::LOCKED {
-        // Lock the current stack, in the Proxy's internal state
-        utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
-        req_parts
-            .headers
-            .insert(AUTHORIZATION, authorization_header);
-        let req = Request::from_parts(req_parts, Body::from(body_bytes));
-        if is_confidential_compute_endpoint(&endpoint) {
-            confidential_compute_middleware(state, req, next).await
-        } else {
-            authenticate_middleware(state, req, next).await
+    match response.status() {
+        StatusCode::LOCKED => {
+            // Lock the current stack, in the Proxy's internal state
+            utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
+            req_parts
+                .headers
+                .insert(AUTHORIZATION, authorization_header);
+            let req = Request::from_parts(req_parts, Body::from(body_bytes));
+            if is_confidential_compute_endpoint(&endpoint) {
+                confidential_compute_middleware(state, req, next).await
+            } else {
+                authenticate_middleware(state, req, next).await
+            }
         }
-    } else {
-        Ok(response)
+        StatusCode::TOO_EARLY => {
+            // In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
+            // We need to acquire a new stack for the request
+            req_parts
+                .headers
+                .insert(BUY_NEW_STACK, HeaderValue::from_static("true"));
+            let req = Request::from_parts(req_parts, Body::from(body_bytes));
+            if is_confidential_compute_endpoint(&endpoint) {
+                confidential_compute_middleware(state, req, next).await
+            } else {
+                authenticate_middleware(state, req, next).await
+            }
+        }
+        _ => Ok(response),
     }
 }
 
@@ -633,7 +651,7 @@ pub mod auth {
     const MAX_STACK_WAIT_TIME: Duration = Duration::from_millis(300);
 
     /// The maximum number of attempts to wait for a stack to be created.
-    const MAX_STACK_WAIT_ATTEMPTS: usize = 10;
+    const MAX_STACK_WAIT_ATTEMPTS: usize = 3;
 
     /// Metadata about the stack that was selected for the request.
     /// This is used to update the stack's num_tokens after the request is processed.  
@@ -912,8 +930,9 @@ pub mod auth {
     /// # Arguments
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task to be fetched
+    /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
-    /// * `total_tokens` - The total number of tokens for the request
     ///
     /// # Returns
     /// * `Result<Option<SelectedNodeMetadata>>` - Stack metadata if successful
@@ -928,16 +947,36 @@ pub mod auth {
         state: &ProxyState,
         user_id: UserId,
         task_small_id: i64,
+        request_model: impl RequestModel + Send,
         endpoint: &str,
-        total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
+        let model = request_model.get_model();
+        let ComputeUnitsEstimate {
+            max_total_compute_units,
+            ..
+        } = if [IMAGE_GENERATIONS_PATH, CONFIDENTIAL_IMAGE_GENERATIONS_PATH].contains(&endpoint) {
+            request_model.get_compute_units_estimate(None)?
+        } else {
+            let tokenizer_index =
+                state
+                    .models
+                    .iter()
+                    .position(|m| m == &model)
+                    .ok_or_else(|| AtomaProxyError::RequestError {
+                        message: "Model not supported".to_string(),
+                        endpoint: CHAT_COMPLETIONS_PATH.to_string(),
+                    })?;
+            let tokenizer = state.tokenizers[tokenizer_index].clone();
+            request_model.get_compute_units_estimate(Some(&tokenizer))?
+        };
+
         let (result_sender, result_receiver) = oneshot::channel();
 
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetStacksForTask {
                 task_small_id,
-                free_compute_units: total_tokens as i64,
+                free_compute_units: max_total_compute_units as i64,
                 user_id,
                 result_sender,
             })
@@ -1435,8 +1474,8 @@ pub mod auth {
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
     /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `body_json` - The raw JSON request body as a serde_json Value
     /// * `endpoint` - The API endpoint being accessed
-    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
     ///
     /// # Returns
     /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
@@ -1461,17 +1500,56 @@ pub mod auth {
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
+        body_json: &Value,
         endpoint: &str,
-        total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
-            CHAT_COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
+            CHAT_COMPLETIONS_PATH => {
+                let request_model = RequestModelChatCompletions::new(body_json).map_err(|err| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse chat completions request: {err:?}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
                     task_small_id,
+                    request_model,
                     endpoint,
-                    total_tokens,
+                )
+                .await
+            }
+            EMBEDDINGS_PATH => {
+                let request_model = RequestModelEmbeddings::new(body_json).map_err(|err| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse embeddings request: {err:?}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
+                )
+                .await
+            }
+            IMAGE_GENERATIONS_PATH => {
+                let request_model =
+                    RequestModelImageGenerations::new(body_json).map_err(|err| {
+                        AtomaProxyError::RequestError {
+                            message: format!("Failed to parse image generations request: {err:?}"),
+                            endpoint: endpoint.to_string(),
+                        }
+                    })?;
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    request_model,
+                    endpoint,
                 )
                 .await
             }
@@ -1494,8 +1572,8 @@ pub mod auth {
     /// * `state` - Reference to the ProxyState containing application state
     /// * `user_id` - The ID of the user requesting the stack
     /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `request_model` - Implementation of RequestModel trait containing request details
     /// * `endpoint` - The API endpoint being accessed
-    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
     ///
     /// # Returns
     /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
@@ -1516,8 +1594,8 @@ pub mod auth {
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
+        request_model: impl RequestModel + Send,
         endpoint: &str,
-        total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         let stack_is_locked = {
             state
@@ -1537,8 +1615,8 @@ pub mod auth {
                     state,
                     user_id,
                     task_small_id,
+                    request_model.clone(),
                     endpoint,
-                    total_tokens,
                 )
                 .await?;
                 if let Some(stack_metadata) = stack_metadata {
@@ -1559,6 +1637,8 @@ pub mod auth {
         pub model: &'a str,
         /// The state of the proxy
         pub state: &'a ProxyState,
+        /// The raw JSON request body as a serde_json Value
+        pub body_json: &'a Value,
         /// The Sui interface for blockchain operations
         pub sui: &'a Arc<RwLock<Sui>>,
         /// The optional stack to use for the request
@@ -1573,23 +1653,16 @@ pub mod auth {
 
     /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
     ///
-    /// This function follows a two-step process:
-    /// 1. First, it attempts to find existing stacks that can handle the requested model and compute units
-    /// 2. If no suitable stacks exist, it acquires a new stack entry by:
-    ///    - Finding available tasks for the model
-    ///    - Creating a new stack entry with predefined compute units and price
-    ///    - Registering the new stack with the state manager
+    /// This function acquires for the given node.
+    /// We spawn a tokio thread to make sure that the function finishes in case the thread is killed.
     ///
-    /// # Arguments
+    /// #Arguments
     ///
-    /// * `model` - The name/identifier of the AI model being requested
-    /// * `state_manager_sender` - Channel for sending events to the state manager
-    /// * `sui` - Reference to the Sui interface for blockchain operations
-    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    /// * `node` - The cheapest node to acquire a stack for
     ///
-    /// # Returns
+    /// #Returns
     ///
-    /// Returns a `SelectedNodeMetadata` containing:
+    /// Returns a `NewStackResult` containing:
     /// * `stack_small_id` - The identifier for the selected/created stack
     /// * `selected_node_id` - The identifier for the node that will process the request
     /// * `tx_digest` - Optional transaction digest if a new stack was created
@@ -1619,6 +1692,7 @@ pub mod auth {
         let GetSelectedNodeArgs {
             model,
             state,
+            body_json,
             sui,
             optional_stack,
             total_tokens,
@@ -1682,7 +1756,7 @@ pub mod auth {
         ) else {
             // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
             // so we try to get the stack from the state manager, and if it is not found, we return an error.
-            return get_stack_if_locked(state, user_id, node.task_small_id, endpoint, total_tokens)
+            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint)
                 .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
