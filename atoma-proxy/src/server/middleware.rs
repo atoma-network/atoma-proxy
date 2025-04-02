@@ -1085,17 +1085,6 @@ pub mod auth {
         pub tx_digest: Option<TransactionDigest>,
     }
 
-    /// The result of acquiring a new stack entry.
-    #[derive(Debug)]
-    pub struct NewStackResult {
-        /// The small ID of the stack
-        pub stack_small_id: i64,
-        /// The small ID of the selected node
-        pub selected_node_id: i64,
-        /// The transaction digest of the stack entry creation transaction
-        pub tx_digest: TransactionDigest,
-    }
-
     /// Acquires a new stack entry for the cheapest node.
     ///
     /// This function acquires for the given node.
@@ -1113,7 +1102,7 @@ pub mod auth {
     /// * `stack_small_id` - The identifier for the selected/created stack
     /// * `selected_node_id` - The identifier for the node that will process the request
     #[instrument(level = "info", skip_all, err)]
-    async fn acquire_new_stack(
+    pub async fn acquire_new_stack(
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         user_id: i64,
         lock_guard: LockGuard,
@@ -1121,7 +1110,7 @@ pub mod auth {
         total_tokens: u64,
         sui: Arc<RwLock<Sui>>,
         node: atoma_state::types::CheapestNode,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         // NOTE: This method is called only if there was no prior lock to an already existing stack
         // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
@@ -1207,7 +1196,7 @@ pub mod auth {
     #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
     async fn acquire_new_stack_on_usdc_deduction_wrapper(
         args: AcquireNewStackArgs,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         let endpoint = args.endpoint.clone();
         let user_id = args.user_id;
         let state_manager_sender = args.state_manager_sender.clone();
@@ -1256,7 +1245,7 @@ pub mod auth {
     #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
     async fn acquire_new_stack_on_usdc_deduction(
         args: AcquireNewStackArgs,
-    ) -> Result<NewStackResult> {
+    ) -> Result<SelectedNodeMetadata> {
         let AcquireNewStackArgs {
             state_manager_sender,
             sui,
@@ -1312,10 +1301,10 @@ pub mod auth {
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
-        Ok(NewStackResult {
+        Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest,
+            tx_digest: Some(tx_digest),
         })
     }
 
@@ -1467,7 +1456,7 @@ pub mod auth {
     /// * Parses the request body into the corresponding model type
     /// * Delegates to get_stack_if_locked_with_request_model for actual stack retrieval
     #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
-    async fn get_stack_if_locked(
+    pub async fn get_stack_if_locked(
         state: &ProxyState,
         user_id: i64,
         task_small_id: i64,
@@ -1696,7 +1685,7 @@ pub mod auth {
                 .await;
         };
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-        let NewStackResult {
+        let SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
             tx_digest,
@@ -1719,7 +1708,7 @@ pub mod auth {
         Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest: Some(tx_digest),
+            tx_digest,
         })
     }
 }

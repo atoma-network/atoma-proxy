@@ -15,9 +15,13 @@ use tokio::sync::oneshot;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
+use crate::server::check_auth;
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
-use crate::server::{check_auth, middleware::STACK_SIZE_TO_BUY, ONE_MILLION};
+use crate::server::middleware::acquire_stack_lock;
+use crate::server::middleware::auth::{
+    acquire_new_stack, get_stack_if_locked, SelectedNodeMetadata,
+};
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
@@ -337,62 +341,56 @@ pub async fn nodes_create_lock(
                 endpoint: NODES_CREATE_LOCK_PATH.to_string(),
             })?;
         if let Some(node) = node {
-            let price_per_one_million_compute_units = node.price_per_one_million_compute_units;
-            // NOTE: We need to deduct the cost of the stack entry from the user's balance, first.
-            // This will fail if the balance is not enough.
-            let (result_sender, result_receiver) = oneshot::channel();
-            state
-                .state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
+            let task_small_id = node.task_small_id;
+            let SelectedNodeMetadata {
+                stack_small_id,
+                selected_node_id,
+                tx_digest,
+            } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+                &state.users_buy_stack_lock_map,
+                (user_id, task_small_id),
+            ) {
+                let sui = state.sui.clone();
+                // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+                acquire_new_stack(
+                    state.state_manager_sender.clone(),
                     user_id,
-                    amount: price_per_one_million_compute_units * STACK_SIZE_TO_BUY
-                        / (ONE_MILLION as i64),
-                    result_sender,
-                })
-                .map_err(|err| AtomaProxyError::InternalError {
-                    message: format!("Failed to send DeductFromUsdc event: {err:?}"),
-                    client_message: None,
-                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-                })?;
-            result_receiver
-                .await
-                .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to receive DeductFromUsdc result: {e:?}"),
-                    client_message: None,
-                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-                })?
-                .map_err(|e| AtomaProxyError::BalanceError {
-                    message: format!("Balance error : {e:?}"),
-                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-                })?;
-
-            let stack_entry_resp = state
-                .sui
-                .write()
-                .await
-                .acquire_new_stack_entry(
-                    node.task_small_id as u64,
-                    STACK_SIZE_TO_BUY as u64,
-                    price_per_one_million_compute_units as u64,
+                    lock_guard,
+                    NODES_CREATE_LOCK_PATH.to_string(),
+                    MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
+                    sui,
+                    node,
                 )
-                .await
-                .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to acquire new stack entry: {e:?}"),
-                    client_message: Some("Sui contract error".to_string()),
-                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-                })?;
+                .await?
+                // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+                // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
+                // lock guard release will see the new stack.
+                // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
+                // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
+            } else {
+                // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+                // so we try to get the stack from the state manager, and if it is not found, we return an error.
+                get_stack_if_locked(
+                    &state,
+                    user_id,
+                    task_small_id,
+                    NODES_CREATE_LOCK_PATH,
+                    MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
+                )
+                .await?
+            };
+
             // NOTE: The contract might select a different node than the one we used to extract
             // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
             // to be the one selected by the contract, that we can query from the `StackCreatedEvent`.
-            let node_small_id = stack_entry_resp.stack_created_event.selected_node_id.inner;
-            let stack_small_id = stack_entry_resp.stack_created_event.stack_small_id.inner;
+            let node_small_id = selected_node_id;
             // NOTE: We need to get the public key for the selected node for the acquired stack.
             let (sender, receiver) = oneshot::channel();
             state
                 .state_manager_sender
                 .send(
                     AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryptionForNode {
-                        node_small_id: node_small_id as i64,
+                        node_small_id,
                         result_sender: sender,
                     },
                 )
@@ -411,12 +409,12 @@ pub async fn nodes_create_lock(
                 Ok(Json(NodesCreateLockResponse {
                     public_key,
                     node_small_id: node_public_key.node_small_id as u64,
-                    stack_entry_digest: Some(stack_entry_resp.transaction_digest.to_string()),
-                    stack_small_id,
+                    stack_entry_digest: tx_digest.map(|tx| tx.to_string()),
+                    stack_small_id: stack_small_id as u64,
                 }))
             } else {
                 Err(AtomaProxyError::InternalError {
-                    message: format!("No node public key found for node {0}", node.node_small_id),
+                    message: format!("No node public key found for node {node_small_id}"),
                     client_message: Some("Node public key not found".to_string()),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })
