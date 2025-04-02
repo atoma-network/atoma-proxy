@@ -411,7 +411,7 @@ impl AtomaState {
     /// # Errors
     ///
     /// This function will return an error if the database query fails.
-    
+
     #[instrument(level = "trace", skip_all, fields(%task_small_id, %free_units, %user_id))]
     pub async fn get_stacks_for_task(
         &self,
