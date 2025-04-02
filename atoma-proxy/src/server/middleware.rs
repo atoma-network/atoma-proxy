@@ -12,6 +12,7 @@ use axum::{
     response::Response,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use reqwest::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     StatusCode,
@@ -24,8 +25,7 @@ use super::{
     check_auth,
     error::AtomaProxyError,
     handlers::{
-        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, models::MODELS_PATH,
-        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager,
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, metrics::{STACK_LOCKED_COUNTER, STACK_UNAVAILABLE_COUNTER}, models::MODELS_PATH, nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager
     },
     http_server::ProxyState,
 };
@@ -615,6 +615,16 @@ pub async fn handle_locked_stack_middleware(
     let response = next.clone().run(original_req).await;
     match response.status() {
         StatusCode::LOCKED => {
+            let request_metadata = req_parts
+                .extensions
+                .get::<RequestMetadataExtension>()
+                .cloned()
+                .ok_or_else(|| AtomaProxyError::InternalError {
+                    message: "Request metadata not found, this should never happen".to_string(),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            STACK_LOCKED_COUNTER.add(1, &[KeyValue::new("model", request_metadata.model_name)]);
             // Lock the current stack, in the Proxy's internal state
             utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
             req_parts
@@ -636,6 +646,19 @@ pub async fn handle_locked_stack_middleware(
             authenticate_middleware(state, req, next).await
         }
         StatusCode::TOO_EARLY => {
+            let request_metadata = req_parts
+                .extensions
+                .get::<RequestMetadataExtension>()
+                .cloned()
+                .ok_or_else(|| AtomaProxyError::InternalError {
+                    message: "Request metadata not found, this should never happen".to_string(),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            STACK_UNAVAILABLE_COUNTER.add(
+                1,
+                &[KeyValue::new("model", request_metadata.model_name.clone())],
+            );
             // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
             if is_confidential_compute_endpoint(&endpoint) {
                 // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
@@ -1677,8 +1700,6 @@ pub mod auth {
         /// The endpoint of the request
         pub endpoint: &'a str,
     }
-
-    /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
 
     /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
     ///

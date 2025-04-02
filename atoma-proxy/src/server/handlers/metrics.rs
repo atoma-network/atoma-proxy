@@ -325,3 +325,33 @@ pub static TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS: Lazy<Counter<u64>> = Lazy::new(
         .with_unit("requests")
         .build()
 });
+
+/// Counter metric that tracks the total number of stack unavailable errors.
+///
+/// # Metric Details
+/// - Name: `atoma_stack_unavailable_counter`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static STACK_UNAVAILABLE_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_stack_unavailable_counter")
+        .with_description("Total number of stack unavailable errors")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of stack locked errors.
+///
+/// # Metric Details
+/// - Name: `atoma_stack_locked_counter`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static STACK_LOCKED_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_stack_locked_counter")
+        .with_description("Total number of stack locked errors")
+        .with_unit("requests")
+        .build()
+});
