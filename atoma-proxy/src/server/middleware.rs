@@ -63,6 +63,9 @@ pub struct RequestMetadataExtension {
     /// the input tokens are not known, so we don't count it.
     pub num_input_tokens: Option<u64>,
 
+    /// The user id for this request.
+    pub user_id: i64,
+
     /// Estimated compute units required for this request.
     /// This represents the total computational resources needed for both input and output processing.
     pub num_compute_units: u64,
@@ -123,6 +126,11 @@ impl RequestMetadataExtension {
     /// Returns self with the num compute units field populated, enabling method chaining
     pub const fn with_num_compute_units(mut self, num_compute_units: u64) -> Self {
         self.num_compute_units = num_compute_units;
+        self
+    }
+
+    pub const fn with_user_id(mut self, user_id: i64) -> Self {
+        self.user_id = user_id;
         self
     }
 
@@ -413,6 +421,7 @@ pub async fn confidential_compute_middleware(
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
+    let user_id = check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
     let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|e| {
@@ -502,6 +511,7 @@ pub async fn confidential_compute_middleware(
         .with_node_small_id(node_small_id)
         .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
         .with_num_compute_units(num_compute_units as u64)
+        .with_user_id(user_id)
         .with_model_name(confidential_compute_request.model_name)
         .with_endpoint(endpoint);
     req_parts.extensions.insert(request_metadata);
@@ -598,9 +608,15 @@ pub async fn handle_locked_stack_middleware(
         StatusCode::TOO_EARLY => {
             // In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
             // We need to acquire a new stack for the request
-            req_parts
-                .headers
-                .insert(BUY_NEW_STACK, HeaderValue::from_static("true"));
+            let request_metadata = req_parts.extensions.get::<RequestMetadataExtension>().ok_or_else(|| AtomaProxyError::InternalError {
+                message: "Request metadata not found, on `handle_locked_stack_middleware`, it should be present".to_string(),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+            let stack_small_id = request_metadata.selected_stack_small_id;
+            let max_total_num_compute_units = request_metadata.num_compute_units;
+            let user_id = request_metadata.user_id;
+            let cheapest_node = get_cheapest_node(state, stack_small_id, max_total_num_compute_units, &endpoint).await?;
             let req = Request::from_parts(req_parts, Body::from(body_bytes));
             if is_confidential_compute_endpoint(&endpoint) {
                 confidential_compute_middleware(state, req, next).await
@@ -1785,6 +1801,69 @@ pub mod auth {
             selected_node_id,
             tx_digest: Some(tx_digest),
         })
+    }
+
+    pub async fn lock_cheapest_node(
+        state: &ProxyState,
+        model: &str,
+        endpoint: &str,
+        max_total_num_compute_units: u64,
+        user_id: i64,
+        is_confidential: bool,
+    ) -> Result<SelectedNodeMetadata> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                model: model.to_string(),
+                is_confidential,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let node = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let node: atoma_state::types::CheapestNode = match node {
+            Some(node) => node,
+            None => {
+                return Err(AtomaProxyError::RequestError {
+                    message: format!("No node found for model {model}"),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+        };
+        let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+            &state.users_buy_stack_lock_map,
+            (user_id, node.task_small_id),
+        ) else {
+            // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+            // so we try to get the stack from the state manager, and if it is not found, we return an error.
+            return get_stack_if_locked(state, user_id, node.task_small_id, body_json, endpoint)
+                .await;
+        };
+        acquire_new_stack(
+            state.state_manager_sender.clone(),
+            user_id,
+            lock_guard,
+            endpoint.to_string(),
+            max_total_num_compute_units,
+            Arc::clone(state.sui),
+            node,
+        )
+        .await
     }
 }
 
