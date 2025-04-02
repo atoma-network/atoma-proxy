@@ -177,7 +177,7 @@ pub async fn chat_completions_create(
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
-                    metadata.num_compute_units as i64,
+                    metadata.max_total_num_compute_units as i64,
                     0,
                     &metadata.endpoint,
                 )?;
@@ -262,7 +262,7 @@ async fn handle_chat_completions_request(
             headers,
             &payload,
             metadata.num_input_tokens.map(|v| v as i64),
-            metadata.num_compute_units as i64,
+            metadata.max_total_num_compute_units as i64,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -275,7 +275,7 @@ async fn handle_chat_completions_request(
             metadata.node_id,
             headers,
             &payload,
-            metadata.num_compute_units as i64,
+            metadata.max_total_num_compute_units as i64,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -428,7 +428,7 @@ pub async fn confidential_chat_completions_create(
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
-                    metadata.num_compute_units as i64,
+                    metadata.max_total_num_compute_units as i64,
                     0,
                     &metadata.endpoint,
                 )?;

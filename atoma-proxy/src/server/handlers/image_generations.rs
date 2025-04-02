@@ -172,7 +172,7 @@ pub async fn image_generations_create(
             metadata.node_id,
             headers,
             payload,
-            metadata.num_compute_units as i64,
+            metadata.max_total_num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -195,7 +195,7 @@ pub async fn image_generations_create(
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
-                    metadata.num_compute_units as i64,
+                    metadata.max_total_num_compute_units as i64,
                     0,
                     &metadata.endpoint,
                 )?;
@@ -265,7 +265,7 @@ pub async fn confidential_image_generations_create(
             metadata.node_id,
             headers,
             payload,
-            metadata.num_compute_units as i64,
+            metadata.max_total_num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
             metadata.selected_stack_small_id,
@@ -289,7 +289,7 @@ pub async fn confidential_image_generations_create(
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
-                    metadata.num_compute_units as i64,
+                    metadata.max_total_num_compute_units as i64,
                     0,
                     &metadata.endpoint,
                 )?;
