@@ -1656,7 +1656,7 @@ pub mod auth {
             }
         }
         Err(AtomaProxyError::RequestError {
-            message: format!("User {user_id} has already bought a stack"),
+            message: "Many concurrent requests, a stack is being bought, but its internal state is not yet updated. Please retry.".to_string(),
             endpoint: endpoint.to_string(),
         })
     }
