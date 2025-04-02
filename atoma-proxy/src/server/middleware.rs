@@ -12,6 +12,7 @@ use axum::{
     response::Response,
 };
 use base64::engine::{general_purpose::STANDARD, Engine};
+use opentelemetry::KeyValue;
 use reqwest::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     StatusCode,
@@ -24,8 +25,11 @@ use super::{
     check_auth,
     error::AtomaProxyError,
     handlers::{
-        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, models::MODELS_PATH,
-        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager,
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+        metrics::{STACK_LOCKED_COUNTER, STACK_UNAVAILABLE_COUNTER},
+        models::MODELS_PATH,
+        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+        update_state_manager,
     },
     http_server::ProxyState,
 };
@@ -615,6 +619,16 @@ pub async fn handle_locked_stack_middleware(
     let response = next.clone().run(original_req).await;
     match response.status() {
         StatusCode::LOCKED => {
+            let request_metadata = req_parts
+                .extensions
+                .get::<RequestMetadataExtension>()
+                .cloned()
+                .ok_or_else(|| AtomaProxyError::InternalError {
+                    message: "Request metadata not found, this should never happen".to_string(),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                })?;
+            STACK_LOCKED_COUNTER.add(1, &[KeyValue::new("model", request_metadata.model_name)]);
             // Lock the current stack, in the Proxy's internal state
             utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
             req_parts
@@ -627,7 +641,7 @@ pub async fn handle_locked_stack_middleware(
                 // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
                 // a couple of times, through Atoma's native SDKs.
                 return Err(AtomaProxyError::Locked {
-                    message: "Confidential compute requests should be retried".to_string(),
+                    message: "Current stack is locked, for this reason the confidential compute request should be retried".to_string(),
                     endpoint: endpoint.to_string(),
                 });
             }
@@ -636,18 +650,6 @@ pub async fn handle_locked_stack_middleware(
             authenticate_middleware(state, req, next).await
         }
         StatusCode::TOO_EARLY => {
-            // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
-            if is_confidential_compute_endpoint(&endpoint) {
-                // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
-                // Acquiring a new stack in this case might simply select a new node, which means that the client will have to re-encrypt the request,
-                // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
-                // a couple of times, through Atoma's native SDKs.
-                return Err(AtomaProxyError::UnavailableStack {
-                    message: "Confidential compute requests should be retried".to_string(),
-                    endpoint: endpoint.to_string(),
-                });
-            }
-            // We need to acquire a new stack for the request, to be able to retry
             let request_metadata = req_parts
                 .extensions
                 .get::<RequestMetadataExtension>()
@@ -657,6 +659,22 @@ pub async fn handle_locked_stack_middleware(
                     client_message: None,
                     endpoint: endpoint.to_string(),
                 })?;
+            STACK_UNAVAILABLE_COUNTER.add(
+                1,
+                &[KeyValue::new("model", request_metadata.model_name.clone())],
+            );
+            // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
+            if is_confidential_compute_endpoint(&endpoint) {
+                // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
+                // Acquiring a new stack in this case might simply select a new node, which means that the client will have to re-encrypt the request,
+                // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
+                // a couple of times, through Atoma's native SDKs.
+                return Err(AtomaProxyError::UnavailableStack {
+                    message: "Current stack is currently unavailable, confidential compute request should be retried".to_string(),
+                    endpoint: endpoint.to_string(),
+                });
+            }
+            // We need to acquire a new stack for the request, to be able to retry
             let user_id = request_metadata.user_id;
             let max_total_num_compute_units = request_metadata.max_total_num_compute_units;
             // 1. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
