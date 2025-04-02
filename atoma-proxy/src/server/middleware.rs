@@ -25,7 +25,11 @@ use super::{
     check_auth,
     error::AtomaProxyError,
     handlers::{
-        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, metrics::{STACK_LOCKED_COUNTER, STACK_UNAVAILABLE_COUNTER}, models::MODELS_PATH, nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, update_state_manager
+        image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+        metrics::{STACK_LOCKED_COUNTER, STACK_UNAVAILABLE_COUNTER},
+        models::MODELS_PATH,
+        nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+        update_state_manager,
     },
     http_server::ProxyState,
 };
