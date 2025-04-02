@@ -274,72 +274,82 @@ pub async fn authenticate_middleware(
     //
     // NOTE: If this method succeeds and the `optional_stack` is Some, this means that the proxy has locked
     // enough compute units for the request, within the state manager. Otherwise, this has not been the case.
-    let StackMetadata {
-        optional_stack,
-        num_input_compute_units,
-        max_total_compute_units,
-        model,
-        user_id,
-    } = auth::handle_authenticate_and_lock_compute_units(
-        &state,
-        &req_parts.headers,
-        &body_json,
-        &endpoint,
-    )
-    .await?;
 
-    // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
-    //
-    // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
-    // In this case, this method cannot error (as it just returns the underlying stack data). Otherwise, it will try to buy a new stack.
-    // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager.
-    // Otherwise, we are safe to assume that the proxy has not locked enough compute units for the request, within the state manager, and we will not be able to process the request.
-    let SelectedNodeMetadata {
-        stack_small_id,
-        selected_node_id,
-        tx_digest,
-    } = auth::get_selected_node(GetSelectedNodeArgs {
-        model: &model,
-        state: &state,
-        sui: &state.sui,
-        optional_stack,
-        total_tokens: max_total_compute_units,
-        user_id,
-        endpoint: &endpoint,
+    let endpoint_clone = endpoint.clone();
+    tokio::spawn(async move {
+        let StackMetadata {
+            optional_stack,
+            num_input_compute_units,
+            max_total_compute_units,
+            model,
+            user_id,
+        } = auth::handle_authenticate_and_lock_compute_units(
+            &state,
+            &req_parts.headers,
+            &body_json,
+            &endpoint,
+        )
+        .await?;
+
+        // Selects an appropriate node to process the request (if there is no available node for the stacks the proxy holds, it buys a new stack)
+        //
+        // NOTE: IF `optional_stack` is Some, this means that the proxy has locked enough compute units for the request, within the state manager, already.
+        // In this case, this method cannot error (as it just returns the underlying stack data). Otherwise, it will try to buy a new stack.
+        // If this method succeeds, this means that the proxy has locked enough compute units for the request, within the state manager.
+        // Otherwise, we are safe to assume that the proxy has not locked enough compute units for the request, within the state manager, and we will not be able to process the request.
+        let SelectedNodeMetadata {
+            stack_small_id,
+            selected_node_id,
+            tx_digest,
+        } = auth::get_selected_node(GetSelectedNodeArgs {
+            model: &model,
+            state: &state,
+            sui: &state.sui,
+            optional_stack,
+            total_tokens: max_total_compute_units,
+            user_id,
+            endpoint: &endpoint,
+        })
+        .await?;
+
+        // Validates the stack for the request.
+        //
+        // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
+        // the proxy will be in an inconsistent state for the current stack.
+        let req = match utils::try_validate_stack_for_request(
+            &state,
+            &body_json,
+            &mut req_parts,
+            selected_node_id,
+            stack_small_id,
+            num_input_compute_units,
+            max_total_compute_units,
+            tx_digest,
+            user_id,
+            &endpoint,
+        )
+        .await
+        {
+            Ok(req) => req,
+            Err(e) => {
+                update_state_manager(
+                    &state.state_manager_sender,
+                    stack_small_id,
+                    max_total_compute_units as i64,
+                    0,
+                    &endpoint,
+                )?;
+                return Err(e);
+            }
+        };
+        Ok(next.run(req).await)
     })
-    .await?;
-
-    // Validates the stack for the request.
-    //
-    // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
-    // the proxy will be in an inconsistent state for the current stack.
-    let req = match utils::try_validate_stack_for_request(
-        &state,
-        &body_json,
-        &mut req_parts,
-        selected_node_id,
-        stack_small_id,
-        num_input_compute_units,
-        max_total_compute_units,
-        tx_digest,
-        user_id,
-        &endpoint,
-    )
     .await
-    {
-        Ok(req) => req,
-        Err(e) => {
-            update_state_manager(
-                &state.state_manager_sender,
-                stack_small_id,
-                max_total_compute_units as i64,
-                0,
-                &endpoint,
-            )?;
-            return Err(e);
-        }
-    };
-    Ok(next.run(req).await)
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn task: {e}"),
+        client_message: None,
+        endpoint: endpoint_clone,
+    })?
 }
 
 /// Middleware that handles routing and setup for confidential compute requests.
