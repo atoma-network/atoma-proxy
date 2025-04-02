@@ -389,25 +389,29 @@ impl AtomaState {
         Ok(stack)
     }
 
-    /// Get a stack by its unique identifier.
+    /// Selects and updates an available stack for a specific task and user, reserving compute units.
     ///
-    /// This method fetches a stack from the database based on the provided `task_small_id`.
+    /// This method finds a suitable stack associated with the given `task_small_id` and `user_id`
+    /// that has enough available compute units (`free_units`). It then atomically updates
+    /// the selected stack by increasing its `already_computed_units` by the requested amount.
     ///
     /// # Arguments
     ///
-    /// * `task_small_id` - The unique identifier for the task to be fetched.
-    /// * `free_units` - The number of free units available.
-    /// * `user_id` - The user id of the stacks to filter by.
+    /// * `task_small_id` - The unique identifier of the task.
+    /// * `free_units` - The number of compute units required and to be reserved.
+    /// * `user_id` - The ID of the user requesting the stack.
     ///
     /// # Returns
     ///
-    /// - `Result<Option<Stack>>`: A result containing either:  
-    ///  - `Ok(Some(Stack))`: The stack with the specified `task_small_id`.
+    /// - `Result<Option<Stack>>`: A result containing either:
+    ///  - `Ok(Some(Stack))`: The updated `Stack` object after reserving the compute units.
+    ///  - `Ok(None)`: If no suitable stack (matching task, user, sufficient units, not claimed/locked/in settle period) is found.
     ///  - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
     ///
     /// # Errors
     ///
     /// This function will return an error if the database query fails.
+
     #[instrument(level = "trace", skip_all, fields(%task_small_id, %free_units, %user_id))]
     pub async fn get_stacks_for_task(
         &self,
