@@ -430,6 +430,9 @@ pub struct Stack {
     /// Number of compute units already processed
     pub already_computed_units: i64,
 
+    /// Number of compute units already processed
+    pub locked_compute_units: i64,
+
     /// Indicates whether the stack is currently in the settle period
     pub in_settle_period: bool,
 
@@ -452,6 +455,7 @@ impl From<StackCreatedEvent> for Stack {
             num_compute_units: event.num_compute_units as i64,
             price_per_one_million_compute_units: event.price_per_one_million_compute_units as i64,
             already_computed_units: 0,
+            locked_compute_units: 0,
             in_settle_period: false,
             total_hash: vec![],
             num_total_messages: 0,
@@ -729,8 +733,8 @@ pub enum AtomaAtomaStateManagerEvent {
     NewStackAcquired {
         /// The event that triggered the stack creation
         event: StackCreatedEvent,
-        /// Number of compute units already processed
-        already_computed_units: i64,
+        /// Number of locked compute units for processing
+        locked_compute_units: i64,
         /// Timestamp of the transaction that created the stack
         transaction_timestamp: DateTime<Utc>,
         /// User id of the stack owner (referencing local user table)

@@ -1411,7 +1411,7 @@ pub mod auth {
         state_manager_sender
             .send(AtomaAtomaStateManagerEvent::NewStackAcquired {
                 event,
-                already_computed_units: total_tokens as i64,
+                locked_compute_units: total_tokens as i64,
                 transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
                 user_id,
                 result_sender,
