@@ -641,7 +641,7 @@ pub async fn handle_locked_stack_middleware(
                 // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
                 // a couple of times, through Atoma's native SDKs.
                 return Err(AtomaProxyError::Locked {
-                    message: "Confidential compute requests should be retried".to_string(),
+                    message: "Current stack is locked, for this reason the confidential compute request should be retried".to_string(),
                     endpoint: endpoint.to_string(),
                 });
             }
@@ -670,20 +670,11 @@ pub async fn handle_locked_stack_middleware(
                 // with the new node's public key. For this reason, instead of being the proxy retrying to acquire a new stack, we let the client retry
                 // a couple of times, through Atoma's native SDKs.
                 return Err(AtomaProxyError::UnavailableStack {
-                    message: "Confidential compute requests should be retried".to_string(),
+                    message: "Current stack is currently unavailable, confidential compute request should be retried".to_string(),
                     endpoint: endpoint.to_string(),
                 });
             }
             // We need to acquire a new stack for the request, to be able to retry
-            let request_metadata = req_parts
-                .extensions
-                .get::<RequestMetadataExtension>()
-                .cloned()
-                .ok_or_else(|| AtomaProxyError::InternalError {
-                    message: "Request metadata not found, this should never happen".to_string(),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                })?;
             let user_id = request_metadata.user_id;
             let max_total_num_compute_units = request_metadata.max_total_num_compute_units;
             // 1. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
