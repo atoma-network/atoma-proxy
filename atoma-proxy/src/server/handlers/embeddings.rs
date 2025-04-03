@@ -173,7 +173,7 @@ pub async fn embeddings_create(
         let RequestMetadataExtension {
             node_address,
             node_id,
-            num_compute_units: num_input_compute_units,
+            max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
         match handle_embeddings_response(
@@ -269,7 +269,7 @@ pub async fn confidential_embeddings_create(
         let RequestMetadataExtension {
             node_address,
             node_id,
-            num_compute_units: num_input_compute_units,
+            max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
         match handle_embeddings_response(
