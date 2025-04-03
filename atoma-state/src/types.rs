@@ -430,7 +430,7 @@ pub struct Stack {
     /// Number of compute units already processed
     pub already_computed_units: i64,
 
-    /// Number of compute units already processed
+    /// Number of locked compute units for processing
     pub locked_compute_units: i64,
 
     /// Indicates whether the stack is currently in the settle period
