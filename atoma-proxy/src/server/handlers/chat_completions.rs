@@ -833,11 +833,7 @@ async fn handle_streaming_response(
     // 1. The node is running in confidential compute mode, so we can trust the real usage information by node
     //    (say when claiming stacks from the blockchain).
     // 2. It only affects requests whose connection is dropped before the final chunk is processed, by the client.
-    let stream = Sse::new(ClientStreamer {
-        chunk_receiver: event_receiver,
-        kill_signal: kill_signal_sender,
-    })
-    .keep_alive(
+    let stream = Sse::new(ClientStreamer::new(event_receiver, kill_signal_sender)).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_millis(STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS))
             .text("keep-alive"),

@@ -4,8 +4,8 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
-use flume::Sender;
-use futures::Stream;
+use flume::{RecvError, Sender};
+use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
@@ -537,32 +537,55 @@ impl Drop for Streamer {
     }
 }
 
+/// A structure for streaming chat completion chunks from the client.
 pub struct ClientStreamer {
+    /// The receiver for the event chunks
     pub chunk_receiver: flume::Receiver<Event>,
+    /// The sender for the kill signal
     pub kill_signal: mpsc::Sender<()>,
+    /// If the streamer has reached done state
+    pub done: bool,
+}
+
+impl ClientStreamer {
+    /// Creates a new client streamer
+    pub const fn new(
+        chunk_receiver: flume::Receiver<Event>,
+        kill_signal: mpsc::Sender<()>,
+    ) -> Self {
+        Self {
+            chunk_receiver,
+            kill_signal,
+            done: false,
+        }
+    }
 }
 
 impl Stream for ClientStreamer {
     type Item = Result<Event, Error>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.chunk_receiver.try_recv() {
-            Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-            Err(e) => {
-                error!(
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let mut future = this.chunk_receiver.recv_async();
+        match future.poll_unpin(cx) {
+            Poll::Ready(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Err(RecvError::Disconnected)) => {
+                info!(
                     target = "atoma-service-streamer",
-                    level = "error",
-                    "Error receiving chunk: {}",
-                    e
+                    "ClientStreamer received disconnect signal, marking as done."
                 );
+                this.done = true;
                 Poll::Ready(None)
             }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
 
 impl Drop for ClientStreamer {
     fn drop(&mut self) {
-        let _ = self.kill_signal.blocking_send(());
+        if !self.done {
+            let _ = self.kill_signal.blocking_send(());
+        }
     }
 }
