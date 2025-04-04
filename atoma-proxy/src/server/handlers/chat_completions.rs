@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::server::streamer::ClientStreamer;
 use crate::server::types::{ConfidentialComputeResponse, ConfidentialComputeStreamResponse};
 use crate::server::{
     error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
@@ -7,10 +8,12 @@ use crate::server::{
 };
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Body;
+use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
 use base64::engine::{general_purpose::STANDARD, Engine};
+use futures::StreamExt;
 use openai_api::message::Role;
 use openai_api::tools::ToolFunction;
 use openai_api::{
@@ -34,13 +37,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
+use tokio::sync::mpsc;
 use tracing::instrument;
 use utoipa::OpenApi;
 
 use super::metrics::{
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
-    CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS,
-    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -730,7 +733,7 @@ async fn handle_streaming_response(
     state: &ProxyState,
     node_address: &String,
     node_id: i64,
-    headers: HeaderMap,
+    mut headers: HeaderMap,
     payload: &Value,
     num_input_tokens: Option<i64>,
     estimated_total_tokens: i64,
@@ -741,8 +744,8 @@ async fn handle_streaming_response(
     let client = reqwest::Client::new();
     let start = Instant::now();
 
-    let model_label: String = model_name.clone();
-
+    let request_id = uuid::Uuid::new_v4().to_string();
+    headers.insert("X-Request-ID", HeaderValue::from_str(&request_id).unwrap());
     let response = client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
@@ -765,6 +768,62 @@ async fn handle_streaming_response(
 
     let stream = response.bytes_stream();
 
+    let (event_sender, event_receiver) = flume::unbounded();
+    let (kill_signal_sender, mut kill_signal_receiver) = mpsc::channel(1);
+    let state_manager_sender = state.state_manager_sender.clone();
+    let node_address_clone = node_address.clone();
+    let request_id_clone = request_id.clone();
+    let client_clone = client.clone();
+    tokio::spawn(async move {
+        let mut streamer = Streamer::new(
+            stream,
+            state_manager_sender,
+            selected_stack_small_id,
+            num_input_tokens.unwrap_or(0),
+            estimated_total_tokens,
+            start,
+            node_id,
+            model_name,
+            endpoint,
+        );
+        loop {
+            tokio::select! {
+                chunk = streamer.next() => {
+                    match chunk {
+                        Some(Ok(chunk)) => {
+                            event_sender.send(chunk).unwrap();
+                        }
+                        Some(Err(e)) => {
+                            tracing::error!(target = "atoma-service-streamer", level = "error", "Error sending chunk: {}", e);
+                            continue;
+                        }
+                        None => {
+                            continue;
+                        }
+                    }
+                }
+                _ = kill_signal_receiver.recv() => {
+                    tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
+                    let stop_response = client_clone
+                        .post(format!("{node_address_clone}/v1/stop_generation"))
+                        .header("X-Request-ID", request_id_clone)
+                        .send()
+                        .await;
+
+                    if let Err(e) = stop_response {
+                        tracing::error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Failed to notify node of client disconnect: {}",
+                            e
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    });
+
     // Create the SSE stream
     // NOTE: The number of input tokens is only available for non-confidential requests,
     // for confidential requests, the input message is encrypted. In that case, we set it to `0`,
@@ -774,27 +833,14 @@ async fn handle_streaming_response(
     // 1. The node is running in confidential compute mode, so we can trust the real usage information by node
     //    (say when claiming stacks from the blockchain).
     // 2. It only affects requests whose connection is dropped before the final chunk is processed, by the client.
-    let stream = Sse::new(Streamer::new(
-        stream,
-        state.state_manager_sender.clone(),
-        selected_stack_small_id,
-        num_input_tokens.unwrap_or(0),
-        estimated_total_tokens,
-        start,
-        node_id,
-        model_name,
-        endpoint,
-    ))
+    let stream = Sse::new(ClientStreamer {
+        chunk_receiver: event_receiver,
+        kill_signal: kill_signal_sender,
+    })
     .keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_millis(STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS))
             .text("keep-alive"),
-    );
-
-    // Record the request in the chat completions num requests metric
-    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
-        start.elapsed().as_secs_f64(),
-        &[KeyValue::new("model", model_label)],
     );
 
     Ok(stream.into_response())

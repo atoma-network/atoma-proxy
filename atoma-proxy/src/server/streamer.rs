@@ -15,6 +15,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
+use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
@@ -22,8 +23,8 @@ use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_st
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
-    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
-    CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
+    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS,
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -234,6 +235,11 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
+        // Record the request in the chat completions num requests metric
+        CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+            self.start.elapsed().as_secs_f64(),
+            &[KeyValue::new("model", self.model_name.clone())],
+        );
         self.is_final_chunk_handled = true;
         Ok(())
     }
@@ -528,5 +534,35 @@ impl Drop for Streamer {
             );
         }
         self.status = StreamStatus::Completed;
+    }
+}
+
+pub struct ClientStreamer {
+    pub chunk_receiver: flume::Receiver<Event>,
+    pub kill_signal: mpsc::Sender<()>,
+}
+
+impl Stream for ClientStreamer {
+    type Item = Result<Event, Error>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.chunk_receiver.try_recv() {
+            Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+            Err(e) => {
+                error!(
+                    target = "atoma-service-streamer",
+                    level = "error",
+                    "Error receiving chunk: {}",
+                    e
+                );
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
+impl Drop for ClientStreamer {
+    fn drop(&mut self) {
+        let _ = self.kill_signal.blocking_send(());
     }
 }
