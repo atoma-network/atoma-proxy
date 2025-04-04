@@ -7,6 +7,7 @@ use crate::server::{
     streamer::Streamer, types::ConfidentialComputeRequest,
 };
 use atoma_state::types::AtomaAtomaStateManagerEvent;
+use atoma_utils::constants::REQUEST_ID;
 use axum::body::Body;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response, Sse};
@@ -64,8 +65,6 @@ pub const CONFIDENTIAL_CHAT_COMPLETIONS_PATH: &str = "/v1/confidential/chat/comp
 /// This is used to represent the content of a message in the chat completion request.
 /// It can be either a text or an array of content parts.
 pub const CONTENT_KEY: &str = "content";
-
-// TODO: Create a new endpoint for the confidential chat completions
 
 /// Path for the chat completions endpoint.
 ///
@@ -745,7 +744,7 @@ async fn handle_streaming_response(
     let start = Instant::now();
 
     let request_id = uuid::Uuid::new_v4().to_string();
-    headers.insert("X-Request-ID", HeaderValue::from_str(&request_id).unwrap());
+    headers.insert(REQUEST_ID_KEY, HeaderValue::from_str(&request_id).unwrap());
     let response = client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)

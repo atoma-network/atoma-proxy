@@ -865,7 +865,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#3057699a04bddc8213cd1f645052ed207bce66a3"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=ja-synchronize-proxy-and-node-streamers#f811d023ea5a90242f62edf64a64a4e103ccea65"
 dependencies = [
  "aes-gcm",
  "anyhow",

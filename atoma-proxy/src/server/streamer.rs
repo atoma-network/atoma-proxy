@@ -457,6 +457,14 @@ impl Stream for Streamer {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage)?;
                         }
+                    } else if let Some(usage) = chunk.get(USAGE) {
+                        info!(
+                            target = "atoma-service-streamer",
+                            level = "info",
+                            "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
+                        );
+                        self.status = StreamStatus::Completed;
+                        self.handle_final_chunk(usage)?;
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;

@@ -15,7 +15,7 @@ atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git
 atoma-proxy-service   = { path = "./atoma-proxy-service" }
 atoma-state           = { path = "./atoma-state" }
 atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
-atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
+atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "ja-synchronize-proxy-and-node-streamers" }
 axum                  = "0.7.7"
 base64                = "0.22.1"
 bcs                   = "0.1.6"
