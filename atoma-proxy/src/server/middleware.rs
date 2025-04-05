@@ -26,7 +26,7 @@ use super::{
     error::AtomaProxyError,
     handlers::{
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-        metrics::{STACK_LOCKED_COUNTER, STACK_UNAVAILABLE_COUNTER},
+        metrics::{STACK_LOCKED_COUNTER, STACK_NUM_REQUESTS_COUNTER, STACK_UNAVAILABLE_COUNTER},
         models::MODELS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
         update_state_manager,
@@ -340,6 +340,8 @@ pub async fn authenticate_middleware(
         })
         .await?;
 
+        STACK_NUM_REQUESTS_COUNTER.add(1, &[KeyValue::new("stack_small_id", stack_small_id)]);
+
         // Validates the stack for the request.
         //
         // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
@@ -524,6 +526,14 @@ pub async fn confidential_compute_middleware(
         &endpoint,
     )
     .await?;
+
+    STACK_NUM_REQUESTS_COUNTER.add(
+        1,
+        &[KeyValue::new(
+            "stack_small_id",
+            confidential_compute_request.stack_small_id as i64,
+        )],
+    );
 
     req_parts
         .headers
