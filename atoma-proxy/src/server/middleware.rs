@@ -1432,8 +1432,13 @@ pub mod auth {
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
-        let _ = result_receiver
+        result_receiver
             .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive NewStackAcquired result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
             .map_err(|err| AtomaProxyError::InternalError {
                 message: format!("Failed to receive NewStackAcquired result: {err:?}"),
                 client_message: None,
