@@ -570,7 +570,7 @@ pub async fn handle_node_task_unsubscription_event(
 pub async fn handle_stack_created_event(
     state_manager: &AtomaStateManager,
     event: StackCreatedEvent,
-    already_computed_units: i64,
+    locked_compute_units: i64,
     user_id: i64,
     acquired_timestamp: DateTime<Utc>,
 ) -> Result<()> {
@@ -581,7 +581,7 @@ pub async fn handle_stack_created_event(
         "Stack selected current node, with id {node_small_id}, inserting new stack"
     );
     let mut stack: Stack = event.into();
-    stack.already_computed_units = already_computed_units;
+    stack.locked_compute_units = locked_compute_units;
     state_manager
         .state
         .insert_new_stack(stack, user_id, acquired_timestamp)
@@ -1227,7 +1227,7 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::NewStackAcquired {
             event,
-            already_computed_units,
+            locked_compute_units,
             transaction_timestamp,
             user_id,
             result_sender,
@@ -1235,7 +1235,7 @@ pub async fn handle_state_manager_event(
             let result = handle_stack_created_event(
                 state_manager,
                 event,
-                already_computed_units,
+                locked_compute_units,
                 user_id,
                 transaction_timestamp,
             )
