@@ -1268,6 +1268,12 @@ pub mod auth {
         sui: Arc<RwLock<Sui>>,
         node: atoma_state::types::CheapestNode,
     ) -> Result<SelectedNodeMetadata> {
+        tracing::info!(
+            "Attempting to acquire new stack for user {} with task small id {} and max compute units {}",
+            user_id,
+            node.task_small_id,
+            total_tokens
+        );
         // NOTE: This method is called only if there was no prior lock to an already existing stack
         // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
@@ -1875,6 +1881,12 @@ pub mod auth {
                 });
             }
         };
+        tracing::info!(
+            "Attempting to acquire lock guard to buy a new stack for user {} with model {} and max compute units {}",
+            user_id,
+            model,
+            total_tokens
+        );
         let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
             &state.users_buy_stack_lock_map,
             (user_id, node.task_small_id),
@@ -1884,6 +1896,7 @@ pub mod auth {
             return get_stack_if_locked(state, user_id, node.task_small_id, endpoint, total_tokens)
                 .await;
         };
+
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         acquire_new_stack(
             state.state_manager_sender.clone(),
