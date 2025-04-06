@@ -655,8 +655,8 @@ pub async fn handle_locked_stack_middleware(
                     endpoint: endpoint.to_string(),
                 });
             }
-            // NOTE: For non-confidential requests, we can acquire a new stack directly from the proxy, and therefore we require a new authentication
-            // for the request.
+            // NOTE: For non-confidential requests, we can either get one available stack from the state manager (if it exists)
+            // or acquire a new stack directly. Therefore a new authentication middleware is required for processing the request.
             authenticate_middleware(state, req, next).await
         }
         StatusCode::TOO_EARLY => {
