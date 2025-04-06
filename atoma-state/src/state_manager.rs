@@ -353,7 +353,7 @@ impl AtomaState {
         query.push_str(
             r"
                 WHERE tasks.model_name = $1
-                AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND stacks.num_compute_units - stacks.already_computed_units - stacks.locked_compute_units >= $2
                 AND stacks.user_id = $3
                 AND stacks.is_claimed = false
                 AND stacks.is_locked = false
@@ -373,7 +373,7 @@ impl AtomaState {
                 LIMIT 1
             )
             UPDATE stacks
-            SET already_computed_units = already_computed_units + $2
+            SET locked_compute_units = locked_compute_units + $2
             WHERE stack_small_id IN (SELECT stack_small_id FROM selected_stack)
             RETURNING stacks.*",
         );
@@ -389,37 +389,30 @@ impl AtomaState {
         Ok(stack)
     }
 
-    /// Get a stack by its unique identifier.
+    /// Selects and updates an available stack for a specific task and user, reserving compute units.
     ///
-    /// This method fetches a stack from the database based on the provided `task_small_id` and `free_units`.
+    /// This method finds a suitable stack associated with the given `task_small_id` and `user_id`
+    /// that has enough available compute units (`free_units`). It then atomically updates
+    /// the selected stack by increasing its `already_computed_units` by the requested amount.
     ///
     /// # Arguments
     ///
-    /// * `task_small_id` - The unique identifier for the task to be fetched.
-    /// * `free_units` - The number of free units available.
-    /// * `user_id` - The user id of the stacks to filter by.
+    /// * `task_small_id` - The unique identifier of the task.
+    /// * `free_units` - The number of compute units required and to be reserved.
+    /// * `user_id` - The ID of the user requesting the stack.
     ///
     /// # Returns
     ///
-    /// - `Result<Option<Stack>>`: A result containing either:  
-    ///  - `Ok(Some(Stack))`: The stack with the specified `task_small_id`.
+    /// - `Result<Option<Stack>>`: A result containing either:
+    ///  - `Ok(Some(Stack))`: The updated `Stack` object after reserving the compute units.
+    ///  - `Ok(None)`: If no suitable stack (matching task, user, sufficient units, not claimed/locked/in settle period) is found.
     ///  - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
     ///
     /// # Errors
     ///
     /// This function will return an error if the database query fails.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let state = AtomaState::new(db);
-    /// let stack = state.get_stacks_for_task(1, 1000, 1).await?;
-    /// ```
-    #[instrument(
-        level = "trace",
-        skip_all,
-        fields(%task_small_id, %free_units, %user_id)
-    )]
+
+    #[instrument(level = "trace", skip_all, fields(%task_small_id, %free_units, %user_id))]
     pub async fn get_stacks_for_task(
         &self,
         task_small_id: i64,
@@ -432,7 +425,7 @@ impl AtomaState {
                 SELECT stack_small_id 
                 FROM stacks
                 WHERE task_small_id = $1 
-                AND num_compute_units - already_computed_units >= $2 
+                AND num_compute_units - already_computed_units - locked_compute_units >= $2 
                 AND user_id = $3 
                 AND is_claimed = false 
                 AND is_locked = false 
@@ -441,7 +434,7 @@ impl AtomaState {
                 FOR UPDATE
             )
             UPDATE stacks
-            SET already_computed_units = already_computed_units + $2
+            SET locked_compute_units = locked_compute_units + $2
             WHERE stack_small_id IN (SELECT stack_small_id FROM selected_stack)
             RETURNING *",
         )
@@ -708,7 +701,7 @@ impl AtomaState {
             WHERE tasks.model_name = $1
             AND tasks.security_level = 1
             AND tasks.is_deprecated = false
-            AND stacks.num_compute_units - stacks.already_computed_units >= $2
+            AND stacks.num_compute_units - stacks.already_computed_units - stacks.locked_compute_units >= $2
             AND stacks.is_claimed = false
             AND stacks.is_locked = false
             AND stacks.user_id = $3
@@ -769,7 +762,7 @@ impl AtomaState {
                 INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
                 INNER JOIN valid_nodes ON valid_nodes.node_small_id = stacks.selected_node_id
                 WHERE stacks.stack_small_id = $1
-                AND stacks.num_compute_units - stacks.already_computed_units >= $2
+                AND stacks.num_compute_units - stacks.already_computed_units - stacks.locked_compute_units >= $2
                 AND tasks.security_level = 1
                 AND tasks.is_deprecated = false
                 AND stacks.in_settle_period = false
@@ -1941,10 +1934,10 @@ impl AtomaState {
         let maybe_stack = sqlx::query_as::<_, Stack>(
             r"
             UPDATE stacks
-            SET already_computed_units = already_computed_units + $1
+            SET locked_compute_units = locked_compute_units + $1
             WHERE stack_small_id = $2
             AND owner = $3
-            AND num_compute_units - already_computed_units >= $1
+            AND num_compute_units - already_computed_units - locked_compute_units>= $1
             AND in_settle_period = false
             RETURNING *
             ",
@@ -2007,9 +2000,9 @@ impl AtomaState {
     ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE stacks
-            SET already_computed_units = already_computed_units + $1
+            SET locked_compute_units = locked_compute_units + $1
             WHERE stack_small_id = $2
-            AND already_computed_units + $1 <= num_compute_units",
+            AND already_computed_units + locked_compute_units + $1 <= num_compute_units",
         )
         .bind(available_compute_units)
         .bind(stack_small_id)
@@ -2066,8 +2059,8 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
@@ -2077,6 +2070,7 @@ impl AtomaState {
             .bind(stack.num_compute_units)
             .bind(stack.price_per_one_million_compute_units)
             .bind(stack.already_computed_units)
+            .bind(stack.locked_compute_units)
             .bind(stack.in_settle_period)
             .bind(stack.total_hash)
             .bind(stack.num_total_messages)
@@ -2087,15 +2081,13 @@ impl AtomaState {
         Ok(())
     }
 
-    /// Updates the number of compute units already computed for a stack.
+    /// Locks a stack
     ///
-    /// This method updates the `already_computed_units` field in the `stacks` table
-    /// for the specified `stack_small_id`.
+    /// This method locks a stack by setting the `is_locked` field to true for the specified `stack_small_id`.
     ///
     /// # Arguments
     ///
-    /// * `stack_small_id` - The unique small identifier of the stack to update.
-    /// * `already_computed_units` - The number of compute units already computed.
+    /// * `stack_small_id` - The unique small identifier of the stack to lock.
     ///
     /// # Returns
     ///
@@ -2105,29 +2097,23 @@ impl AtomaState {
     ///
     /// This function will return an error if:
     /// - The database query fails to execute.
-    /// - There's an issue converting the database rows into a `Stack` object.
     ///
     /// # Example
     ///
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn update_computed_units(state_manager: &AtomaStateManager, stack_small_id: i64, already_computed_units: i64) -> Result<(), AtomaStateManagerError> {
-    ///     state_manager.update_computed_units_for_stack(stack_small_id, already_computed_units).await
+    /// async fn lock_stack(state_manager: &AtomaStateManager, stack_small_id: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.lock_stack(stack_small_id).await
     /// }
     /// ```
     #[instrument(
         level = "trace",
         skip_all,
-        fields(%stack_small_id, %already_computed_units)
+        fields(%stack_small_id)
     )]
-    pub async fn update_computed_units_for_stack(
-        &self,
-        stack_small_id: i64,
-        already_computed_units: i64,
-    ) -> Result<()> {
-        sqlx::query("UPDATE stacks SET already_computed_units = $1 WHERE stack_small_id = $2")
-            .bind(already_computed_units)
+    pub async fn lock_stack(&self, stack_small_id: i64) -> Result<()> {
+        sqlx::query("UPDATE stacks SET is_locked = true WHERE stack_small_id = $1")
             .bind(stack_small_id)
             .execute(&self.db)
             .await?;
@@ -2215,7 +2201,8 @@ impl AtomaState {
     ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE stacks
-                SET already_computed_units = already_computed_units - ($1 - $2)
+                SET already_computed_units = already_computed_units + $2,
+                    locked_compute_units = locked_compute_units - $1
                 WHERE stack_small_id = $3
            ",
         )

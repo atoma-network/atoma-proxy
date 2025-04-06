@@ -1224,6 +1224,497 @@ pub mod auth {
     }
 
     /// Acquires a new stack entry for the cheapest node.
+<<<<<<< HEAD
+=======
+    ///
+    /// This function acquires for the given node.
+    /// We spawn a tokio task to make sure that the function finishes in case the main task is killed.
+    /// The new tokio task also captures the lock_guard, so it will be released when the task finishes,
+    /// and the new stack acquisition operation has been completed.
+    ///
+    /// #Arguments
+    ///
+    /// * `node` - The cheapest node to acquire a stack for
+    ///
+    /// #Returns
+    ///
+    /// Returns a `NewStackResult` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    #[instrument(level = "info", skip_all, err)]
+    pub async fn acquire_new_stack(
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        user_id: i64,
+        lock_guard: LockGuard,
+        endpoint: String,
+        total_tokens: u64,
+        sui: Arc<RwLock<Sui>>,
+        node: atoma_state::types::CheapestNode,
+    ) -> Result<SelectedNodeMetadata> {
+        // NOTE: This method is called only if there was no prior lock to an already existing stack
+        // for the user. For this reason, it is safe to try to modify the underlying `DashMap
+        let endpoint_clone = endpoint.clone();
+        tokio::spawn(async move {
+            // NOTE: Move the lock_guard into the spawned task.
+            // This ensures the lock is held for the entire duration of this background task,
+            // even if the original request handler that called `acquire_new_stack` is cancelled
+            // (e.g., due to client disconnection). The `LockGuard`'s `Drop` implementation
+            // will run only when this spawned task finishes, releasing the lock reliably
+            // and preventing race conditions where multiple requests might try to acquire
+            // a stack concurrently after premature lock release.
+            let _moved_lock_guard = lock_guard;
+            // 1. Deduct USDC from the user's balance. This will fail if the balance is not enough.
+            deduct_usdc(
+                state_manager_sender.clone(),
+                user_id,
+                node.price_per_one_million_compute_units as u64,
+                STACK_SIZE_TO_BUY as u64,
+                endpoint_clone.clone(),
+            )
+            .await?;
+            // 2. Acquire a new stack on USDC deduction and send the NewStackAcquired event to the state manager.
+            // NOTE: If acquiring a new stack fails, we will refund the USDC to the user's balance.
+            acquire_new_stack_on_usdc_deduction_wrapper(AcquireNewStackArgs {
+                state_manager_sender,
+                sui,
+                user_id,
+                task_small_id: node.task_small_id as u64,
+                stack_size_to_buy: STACK_SIZE_TO_BUY as u64,
+                price_per_million_compute_units: node.price_per_one_million_compute_units as u64,
+                endpoint: endpoint_clone.clone(),
+                total_tokens,
+            })
+            .await
+        })
+        .await
+        .map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Failed to acquire new stack: {e}"),
+            client_message: None,
+            endpoint,
+        })?
+    }
+
+    /// Arguments for acquiring a new stack on USDC deduction.
+    struct AcquireNewStackArgs {
+        /// The sender for the state manager event.
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        /// The Sui interface for blockchain operations.
+        sui: Arc<RwLock<Sui>>,
+        /// The user ID of the request.
+        user_id: UserId,
+        /// The small ID of the task that the user is requesting.
+        task_small_id: u64,
+        /// The size of the stack to buy.
+        stack_size_to_buy: u64,
+        /// The price per million compute units for the stack.
+        price_per_million_compute_units: u64,
+        /// The endpoint of the request.
+        endpoint: String,
+        /// The total number of tokens for the request.
+        total_tokens: u64,
+    }
+
+    /// Wrapper for acquiring a new stack on USDC deduction.
+    ///
+    /// This function acquires a new stack on USDC deduction.
+    /// If the stack is not acquired, it refunds the USDC to the user.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - The arguments for acquiring a new stack on USDC deduction.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `NewStackResult` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    /// * `tx_digest` - The transaction digest of the stack entry creation transaction
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stack is not acquired or if the state manager event fails to store the stack creation event.
+    #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
+    async fn acquire_new_stack_on_usdc_deduction_wrapper(
+        args: AcquireNewStackArgs,
+    ) -> Result<SelectedNodeMetadata> {
+        let endpoint = args.endpoint.clone();
+        let user_id = args.user_id;
+        let state_manager_sender = args.state_manager_sender.clone();
+        let price_per_million_compute_units = args.price_per_million_compute_units;
+        match acquire_new_stack_on_usdc_deduction(args).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                tracing::error!("Failed to acquire new stack: {e}");
+                match refund_usdc(
+                    state_manager_sender,
+                    user_id,
+                    price_per_million_compute_units,
+                    STACK_SIZE_TO_BUY as u64,
+                    endpoint,
+                )
+                .await
+                {
+                    Ok(()) => (),
+                    Err(e) => {
+                        tracing::error!("Failed to refund USDC: {e}");
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Acquires a new stack on USDC deduction.
+    ///
+    /// This function acquires a new stack on USDC deduction.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - The arguments for acquiring a new stack on USDC deduction.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `NewStackResult` containing:
+    /// * `stack_small_id` - The identifier for the selected/created stack
+    /// * `selected_node_id` - The identifier for the node that will process the request
+    /// * `tx_digest` - The transaction digest of the stack entry creation transaction
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stack is not acquired or if the state manager event fails to store the stack creation event.
+    #[instrument(level = "info", skip_all, fields(user_id = %args.user_id, endpoint = %args.endpoint), err)]
+    async fn acquire_new_stack_on_usdc_deduction(
+        args: AcquireNewStackArgs,
+    ) -> Result<SelectedNodeMetadata> {
+        let AcquireNewStackArgs {
+            state_manager_sender,
+            sui,
+            user_id,
+            task_small_id,
+            stack_size_to_buy,
+            price_per_million_compute_units,
+            endpoint,
+            total_tokens,
+        } = args;
+
+        let StackEntryResponse {
+            transaction_digest: tx_digest,
+            stack_created_event: event,
+            timestamp_ms,
+        } = sui
+            .write()
+            .await
+            .acquire_new_stack_entry(
+                task_small_id,
+                stack_size_to_buy,
+                price_per_million_compute_units,
+            )
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to acquire new stack entry: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        let stack_small_id = event.stack_small_id.inner as i64;
+        let selected_node_id = event.selected_node_id.inner as i64;
+
+        // Send the NewStackAcquired event to the state manager, so we have it in the DB.
+        let (result_sender, result_receiver) = oneshot::channel();
+        state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::NewStackAcquired {
+                event,
+                locked_compute_units: total_tokens as i64,
+                transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
+                user_id,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send NewStackAcquired event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive NewStackAcquired result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive NewStackAcquired result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        Ok(SelectedNodeMetadata {
+            stack_small_id,
+            selected_node_id,
+            tx_digest: Some(tx_digest),
+        })
+    }
+
+    /// Deducts USDC from the user's balance.
+    ///
+    /// This function deducts USDC from the user's balance.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_manager_sender` - The sender for the state manager event.
+    /// * `user_id` - The user ID of the request.
+    /// * `amount` - The amount to deduct.
+    /// * `price_per_one_million_compute_units` - The price per one million compute units for the stack.
+    /// * `stack_size_to_buy` - The size of the stack to buy.
+    /// * `endpoint` - The endpoint of the request.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<()>` indicating success or failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deduct fails.
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn deduct_usdc(
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        user_id: UserId,
+        price_per_one_million_compute_units: u64,
+        stack_size_to_buy: u64,
+        endpoint: String,
+    ) -> Result<()> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
+                user_id,
+                amount: (price_per_one_million_compute_units * stack_size_to_buy / ONE_MILLION)
+                    as i64,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send DeductFromUsdc event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.clone(),
+            })?;
+        result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.clone(),
+            })?
+            .map_err(|err| AtomaProxyError::BalanceError {
+                message: format!("Balance error : {err:?}"),
+                endpoint,
+            })?;
+        Ok(())
+    }
+
+    /// Refunds a USDC payment.
+    ///
+    /// This function refunds a USDC payment to the user in the `balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_manager_sender` - The sender for the state manager event.
+    /// * `user_id` - The user ID of the request.
+    /// * `amount` - The amount to refund.
+    /// * `endpoint` - The endpoint of the request.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<()>` indicating success or failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the refund fails.
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn refund_usdc(
+        state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
+        user_id: UserId,
+        price_per_one_million_compute_units: u64,
+        stack_size_to_buy: u64,
+        endpoint: String,
+    ) -> Result<()> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::RefundUsdc {
+                user_id,
+                amount: (price_per_one_million_compute_units * stack_size_to_buy / ONE_MILLION)
+                    as i64,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send RefundUsdc event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive RefundUsdc result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to refund USDC: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })
+    }
+
+    /// Retrieves stack metadata for a locked user stack based on the endpoint type
+    ///
+    /// This function serves as a routing layer that handles different API endpoints
+    /// (chat completions, embeddings, and image generations) by parsing their specific
+    /// request models and delegating to a common stack retrieval implementation.
+    ///
+    /// # Arguments
+    /// * `state` - Reference to the ProxyState containing application state
+    /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `endpoint` - The API endpoint being accessed
+    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    ///
+    /// # Returns
+    /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
+    ///
+    /// # Error Conditions
+    /// * Returns `AtomaProxyError::RequestError` if:
+    ///   - The endpoint is not supported
+    ///   - Request body parsing fails for any endpoint type
+    ///   - Underlying stack retrieval fails
+    ///
+    /// # Supported Endpoints
+    /// * `CHAT_COMPLETIONS_PATH` - Handles chat completion requests
+    /// * `EMBEDDINGS_PATH` - Handles embedding generation requests
+    /// * `IMAGE_GENERATIONS_PATH` - Handles image generation requests
+    ///
+    /// # Implementation Details
+    /// * Matches on the endpoint type to determine the appropriate request model
+    /// * Parses the request body into the corresponding model type
+    /// * Delegates to get_stack_if_locked_with_request_model for actual stack retrieval
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    pub async fn get_stack_if_locked(
+        state: &ProxyState,
+        user_id: i64,
+        task_small_id: i64,
+        endpoint: &str,
+        total_tokens: u64,
+    ) -> Result<SelectedNodeMetadata> {
+        match endpoint {
+            CHAT_COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
+                get_stack_if_locked_with_request_model(
+                    state,
+                    user_id,
+                    task_small_id,
+                    endpoint,
+                    total_tokens,
+                )
+                .await
+            }
+            _ => {
+                return Err(AtomaProxyError::RequestError {
+                    message: format!("Unsupported endpoint: {endpoint}"),
+                    endpoint: endpoint.to_string(),
+                })
+            }
+        }
+    }
+
+    /// Attempts to retrieve stack metadata if a user's stack is currently locked during purchase
+    ///
+    /// This function handles concurrent stack purchase requests by implementing a retry mechanism
+    /// when a user's stack is locked. It's designed to wait for an ongoing stack purchase
+    /// transaction to complete on the Sui blockchain.
+    ///
+    /// # Arguments
+    /// * `state` - Reference to the ProxyState containing application state
+    /// * `user_id` - The ID of the user requesting the stack
+    /// * `task_small_id` - The small ID of the task that the user is requesting
+    /// * `endpoint` - The API endpoint being accessed
+    /// * `total_tokens` - The total number of compute units (tokens) needed for the request
+    ///
+    /// # Returns
+    /// * `Result<SelectedNodeMetadata>` - Stack metadata if successful
+    ///
+    /// # Error Conditions
+    /// * Returns `AtomaProxyError::RequestError` if the maximum number of retry attempts is
+    ///   exceeded and the stack is still not available
+    ///
+    /// # Implementation Details
+    /// * Checks if the user's stack is locked using the users_buy_stack_lock_map
+    /// * If locked, retries up to MAX_STACK_WAIT_ATTEMPTS times with MAX_STACK_WAIT_TIME delay
+    /// * Each retry attempts to fetch the stack metadata via try_get_stack_for_user_id
+    /// * We don't wait for the Sui blockchain to finalize the stack creation, as we store the stack creation event
+    ///   right after the call to the Sui blockchain, and we don't wait to catch the event from the Sui blockchain,
+    ///   as this can take extra time (roughly 300ms following Sui's Mysticeti finality times).
+    #[instrument(level = "info", skip_all, fields(user_id = %user_id, endpoint = %endpoint), err)]
+    async fn get_stack_if_locked_with_request_model(
+        state: &ProxyState,
+        user_id: i64,
+        task_small_id: i64,
+        endpoint: &str,
+        total_tokens: u64,
+    ) -> Result<SelectedNodeMetadata> {
+        let stack_is_locked = {
+            state
+                .users_buy_stack_lock_map
+                .get(&(user_id, task_small_id))
+                .is_some_and(|lock| *lock)
+        };
+        if stack_is_locked {
+            // NOTE: This means a concurrent request is already buying a stack, so we wait for it to finish,
+            // and for the stack creation event to be stored on the AtomaStateManager's internal state, as
+            // we store it right after the call to the Sui blockchain and don't wait to catch the event
+            // from the Sui blockchain, as this can take extra time (roughly 300ms following Sui's Mysticeti
+            // finality times). We will try again, for a fixed number of times. If the stack is still not created,
+            // we return an error.
+            for _ in 0..MAX_STACK_WAIT_ATTEMPTS {
+                let stack_metadata = try_get_stack_for_user_id(
+                    state,
+                    user_id,
+                    task_small_id,
+                    endpoint,
+                    total_tokens,
+                )
+                .await?;
+                if let Some(stack_metadata) = stack_metadata {
+                    return Ok(stack_metadata);
+                }
+                tokio::time::sleep(MAX_STACK_WAIT_TIME).await;
+            }
+        }
+        Err(AtomaProxyError::RequestError {
+            message: "Many concurrent requests, a stack is being bought, but its internal state is not yet updated. Please retry.".to_string(),
+            endpoint: endpoint.to_string(),
+        })
+    }
+
+    /// Arguments for the get_selected_node function.
+    pub struct GetSelectedNodeArgs<'a> {
+        /// The name/identifier of the AI model being requested
+        pub model: &'a str,
+        /// The state of the proxy
+        pub state: &'a ProxyState,
+        /// The optional stack to use for the request
+        pub optional_stack: Option<Stack>,
+        /// The total number of compute units (tokens) needed for the request
+        pub total_tokens: u64,
+        /// The user ID of the request
+        pub user_id: i64,
+        /// The endpoint of the request
+        pub endpoint: &'a str,
+    }
+
+    /// Selects a node for processing a model request by either finding an existing stack or acquiring a new one.
+>>>>>>> main
     ///
     /// This function acquires for the given node.
     /// We spawn a tokio task to make sure that the function finishes in case the main task is killed.
