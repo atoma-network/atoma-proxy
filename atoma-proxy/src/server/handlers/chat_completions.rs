@@ -816,7 +816,7 @@ async fn handle_streaming_response(
                                 level = "error",
                                 "Error sending chunk for the inner streamer with error: {e}"
                             );
-                            break;
+                            continue;
                         }
                         None => {
                             break;
