@@ -767,6 +767,10 @@ async fn handle_streaming_response(
         handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
+    tracing::info!(
+        target = "atoma-service-chat-completions",
+        "Streaming response received"
+    );
     let stream = response.bytes_stream();
 
     let (event_sender, event_receiver) = flume::unbounded();
@@ -776,6 +780,10 @@ async fn handle_streaming_response(
     let request_id_clone = request_id.clone();
     let client_clone = client.clone();
     tokio::spawn(async move {
+        tracing::info!(
+            target = "atoma-service-chat-completions",
+            "Starting streamer"
+        );
         let mut streamer = Streamer::new(
             stream,
             state_manager_sender,
@@ -790,8 +798,10 @@ async fn handle_streaming_response(
         loop {
             tokio::select! {
                 chunk = streamer.next() => {
+                    tracing::info!(target = "atoma-service-chat-completions", "Received chunk");
                     match chunk {
                         Some(Ok(chunk)) => {
+                            tracing::info!(target = "atoma-service-chat-completions", "Sending chunk to event sender");
                             event_sender.send(chunk).unwrap();
                         }
                         Some(Err(e)) => {
@@ -799,6 +809,7 @@ async fn handle_streaming_response(
                             continue;
                         }
                         None => {
+                            tracing::info!(target = "atoma-service-chat-completions", "Streamer finished");
                             continue;
                         }
                     }
