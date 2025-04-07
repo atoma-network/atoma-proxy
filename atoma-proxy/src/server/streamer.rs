@@ -4,8 +4,8 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
-use flume::Sender;
-use futures::Stream;
+use flume::{RecvError, Sender};
+use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
@@ -15,6 +15,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
+use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
@@ -22,8 +23,8 @@ use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_st
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
-    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
-    CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
+    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS,
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -234,6 +235,11 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
+        // Record the request in the chat completions num requests metric
+        CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+            self.start.elapsed().as_secs_f64(),
+            &[KeyValue::new("model", self.model_name.clone())],
+        );
         self.is_final_chunk_handled = true;
         Ok(())
     }
@@ -451,6 +457,14 @@ impl Stream for Streamer {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage)?;
                         }
+                    } else if let Some(usage) = chunk.get(USAGE) {
+                        info!(
+                            target = "atoma-service-streamer",
+                            level = "info",
+                            "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
+                        );
+                        self.status = StreamStatus::Completed;
+                        self.handle_final_chunk(usage)?;
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;
@@ -528,5 +542,58 @@ impl Drop for Streamer {
             );
         }
         self.status = StreamStatus::Completed;
+    }
+}
+
+/// A structure for streaming chat completion chunks from the client.
+pub struct ClientStreamer {
+    /// The receiver for the event chunks
+    pub chunk_receiver: flume::Receiver<Event>,
+    /// The sender for the kill signal
+    pub kill_signal: mpsc::Sender<()>,
+    /// If the streamer has reached done state
+    pub done: bool,
+}
+
+impl ClientStreamer {
+    /// Creates a new client streamer
+    pub const fn new(
+        chunk_receiver: flume::Receiver<Event>,
+        kill_signal: mpsc::Sender<()>,
+    ) -> Self {
+        Self {
+            chunk_receiver,
+            kill_signal,
+            done: false,
+        }
+    }
+}
+
+impl Stream for ClientStreamer {
+    type Item = Result<Event, Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let mut future = this.chunk_receiver.recv_async();
+        match future.poll_unpin(cx) {
+            Poll::Ready(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Err(RecvError::Disconnected)) => {
+                info!(
+                    target = "atoma-service-streamer",
+                    "ClientStreamer received disconnect signal, marking as done."
+                );
+                this.done = true;
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for ClientStreamer {
+    fn drop(&mut self) {
+        if !self.done {
+            let _ = self.kill_signal.blocking_send(());
+        }
     }
 }
