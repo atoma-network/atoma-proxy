@@ -1312,7 +1312,7 @@ pub mod auth {
         .await
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to acquire new stack: {e}"),
-            client_message: None,
+            client_message: Some(format!("Failed to acquire new stack: {e}")),
             endpoint,
         })?
     }
