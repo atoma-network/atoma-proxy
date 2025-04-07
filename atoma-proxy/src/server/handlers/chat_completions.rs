@@ -810,7 +810,7 @@ async fn handle_streaming_response(
                         }
                         None => {
                             tracing::info!(target = "atoma-service-chat-completions", "Streamer finished");
-                            continue;
+                            break;
                         }
                     }
                 }
