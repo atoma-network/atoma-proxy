@@ -744,7 +744,7 @@ async fn handle_streaming_response(
     let start = Instant::now();
 
     let request_id = uuid::Uuid::new_v4().to_string();
-    headers.insert(REQUEST_ID_KEY, HeaderValue::from_str(&request_id).unwrap());
+    headers.insert(REQUEST_ID, HeaderValue::from_str(&request_id).unwrap());
     let response = client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
