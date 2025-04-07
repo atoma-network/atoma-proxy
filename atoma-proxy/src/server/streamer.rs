@@ -259,7 +259,7 @@ impl Stream for Streamer {
                 }
 
                 if chunk.as_ref() == KEEP_ALIVE_CHUNK {
-                    cx.waker().clone().wake();
+                    cx.waker().wake_by_ref();
                     return Poll::Pending;
                 }
 
@@ -294,7 +294,7 @@ impl Stream for Streamer {
                                 "Full keep-alive received, resetting position"
                             );
                         }
-                        cx.waker().clone().wake();
+                        cx.waker().wake_by_ref();
                         return Poll::Pending;
                     } else if self.keep_alive_pos > 0 {
                         // Reset position if we had partial match but current chunk doesn't continue it
@@ -358,7 +358,7 @@ impl Stream for Streamer {
                                 chunk_str
                             );
                             self.chunk_buffer.push_str(chunk_str);
-                            cx.waker().clone().wake();
+                            cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
 
@@ -389,7 +389,7 @@ impl Stream for Streamer {
                             Err(e) => {
                                 if e.is_eof() {
                                     // NOTE: We don't need to push the chunk to the buffer, as it was pushed already
-                                    cx.waker().clone().wake();
+                                    cx.waker().wake_by_ref();
                                     return Poll::Pending;
                                 }
                                 error!(

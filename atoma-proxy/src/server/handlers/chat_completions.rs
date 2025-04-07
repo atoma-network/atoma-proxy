@@ -797,19 +797,28 @@ async fn handle_streaming_response(
         );
         loop {
             tokio::select! {
-                chunk = streamer.next() => {
-                    tracing::info!(target = "atoma-service-chat-completions", "Received chunk");
-                    match chunk {
-                        Some(Ok(chunk)) => {
+                event = streamer.next() => {
+                    match event {
+                        Some(Ok(maybe_chunk)) => {
                             tracing::info!(target = "atoma-service-chat-completions", "Sending chunk to event sender");
-                            event_sender.send(chunk).unwrap();
+                            if let Err(e) = event_sender.send(maybe_chunk) {
+                                tracing::error!(
+                                    target = "atoma-service-chat-completions",
+                                    level = "error",
+                                    "Error sending chunk: {e}"
+                                );
+                                break;
+                            }
                         }
                         Some(Err(e)) => {
-                            tracing::error!(target = "atoma-service-streamer", level = "error", "Error sending chunk: {}", e);
-                            continue;
+                            tracing::error!(
+                                target = "atoma-service-chat-completions",
+                                level = "error",
+                                "Error sending chunk for the inner streamer with error: {e}"
+                            );
+                            break;
                         }
                         None => {
-                            tracing::info!(target = "atoma-service-chat-completions", "Streamer finished");
                             break;
                         }
                     }
