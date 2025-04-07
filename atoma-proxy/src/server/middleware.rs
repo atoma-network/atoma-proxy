@@ -1868,7 +1868,7 @@ pub mod auth {
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                message: format!("Failed to get retrieve `CheapestNode` from the state manager with result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
