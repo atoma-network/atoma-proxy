@@ -807,7 +807,8 @@ async fn handle_streaming_response(
                                     level = "error",
                                     "Error sending chunk: {e}"
                                 );
-                                break;
+                                // We continue the loop, to allow the streamer to finish with updated usage from the node
+                                continue;
                             }
                         }
                         Some(Err(e)) => {
@@ -844,6 +845,10 @@ async fn handle_streaming_response(
                 }
             }
         }
+        tracing::info!(
+            target = "atoma-service-chat-completions",
+            "Streamer finished for request id: {request_id}"
+        );
     });
 
     // Create the SSE stream
