@@ -1,8 +1,8 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
 use auth::{
-    get_cheapest_node_and_acquire_new_stack, GetSelectedNodeArgs, ProcessedRequest,
-    SelectedNodeMetadata, StackMetadata,
+    get_cheapest_node_and_acquire_new_stack, get_node_metadata_from_state_manager,
+    GetSelectedNodeArgs, ProcessedRequest, SelectedNodeMetadata, StackMetadata,
 };
 use axum::{
     body::Body,
@@ -655,8 +655,8 @@ pub async fn handle_locked_stack_middleware(
                     endpoint: endpoint.to_string(),
                 });
             }
-            // NOTE: For non-confidential requests, we can acquire a new stack directly from the proxy, and therefore we require a new authentication
-            // for the request.
+            // NOTE: For non-confidential requests, we can either get one available stack from the state manager (if it exists)
+            // or acquire a new stack directly. Therefore a new authentication middleware is required for processing the request.
             authenticate_middleware(state, req, next).await
         }
         StatusCode::TOO_EARLY => {
@@ -687,16 +687,35 @@ pub async fn handle_locked_stack_middleware(
             // We need to acquire a new stack for the request, to be able to retry
             let user_id = request_metadata.user_id;
             let max_total_num_compute_units = request_metadata.max_total_num_compute_units;
-            // 1. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
-            let selected_node_metadata = get_cheapest_node_and_acquire_new_stack(
+            // 1. Try to get a Stack from the state manager
+            let maybe_stack = get_node_metadata_from_state_manager(
                 &state,
-                user_id,
                 &request_metadata.model_name,
-                &request_metadata.endpoint,
-                max_total_num_compute_units,
+                user_id,
+                max_total_num_compute_units as i64,
+                is_confidential_compute_endpoint(&endpoint),
+                &endpoint,
             )
             .await?;
-            // 2. Update the request headers with the new acquired stack's information
+            let selected_node_metadata = match maybe_stack {
+                Some(stack) => SelectedNodeMetadata {
+                    selected_node_id: stack.selected_node_id,
+                    stack_small_id: stack.stack_small_id,
+                    tx_digest: None,
+                },
+                None => {
+                    // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
+                    get_cheapest_node_and_acquire_new_stack(
+                        &state,
+                        user_id,
+                        &request_metadata.model_name,
+                        &request_metadata.endpoint,
+                        max_total_num_compute_units,
+                    )
+                    .await?
+                }
+            };
+            // 3. Update the request headers with the new acquired stack's information
             req_parts
                 .headers
                 .insert(AUTHORIZATION, authorization_header);
@@ -1249,6 +1268,12 @@ pub mod auth {
         sui: Arc<RwLock<Sui>>,
         node: atoma_state::types::CheapestNode,
     ) -> Result<SelectedNodeMetadata> {
+        tracing::info!(
+            "Attempting to acquire new stack for user {} with task small id {} and max compute units {}",
+            user_id,
+            node.task_small_id,
+            total_tokens
+        );
         // NOTE: This method is called only if there was no prior lock to an already existing stack
         // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
@@ -1287,7 +1312,7 @@ pub mod auth {
         .await
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Failed to acquire new stack: {e}"),
-            client_message: None,
+            client_message: Some(format!("Failed to acquire new stack: {e}")),
             endpoint,
         })?
     }
@@ -1843,7 +1868,7 @@ pub mod auth {
                 endpoint: endpoint.to_string(),
             })?
             .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetTasksForModel result: {err:?}"),
+                message: format!("Failed to get retrieve `CheapestNode` from the state manager with result: {err:?}"),
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
@@ -1856,6 +1881,12 @@ pub mod auth {
                 });
             }
         };
+        tracing::info!(
+            "Attempting to acquire lock guard to buy a new stack for user {} with model {} and max compute units {}",
+            user_id,
+            model,
+            total_tokens
+        );
         let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
             &state.users_buy_stack_lock_map,
             (user_id, node.task_small_id),
@@ -1865,6 +1896,7 @@ pub mod auth {
             return get_stack_if_locked(state, user_id, node.task_small_id, endpoint, total_tokens)
                 .await;
         };
+
         // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
         acquire_new_stack(
             state.state_manager_sender.clone(),
@@ -1881,6 +1913,72 @@ pub mod auth {
         // lock guard release will see the new stack.
         // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
         // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
+    }
+
+    /// Gets a stack from the state manager for a given model and user ID.
+    ///
+    /// This function sends a request to the state manager to retrieve a stack that can handle the
+    /// given model and user ID. It returns the stack if found, otherwise it returns None.
+    ///
+    /// # Arguments
+    /// * `state` - The state of the proxy
+    /// * `model` - The name/identifier of the AI model being requested
+    /// * `user_id` - The ID of the user making the request
+    /// * `free_compute_units` - The number of free compute units (tokens) needed for the request
+    /// * `is_confidential` - Whether the request is confidential
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// * `Result<Option<SelectedNodeMetadata>>` - The stack if found, otherwise None   
+    ///
+    /// # Errors
+    /// * `AtomaProxyError::InternalError` - Failed to send or receive message to the state manager
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(model =%model, user_id =%user_id, free_compute_units =%free_compute_units, is_confidential =%is_confidential, endpoint =%endpoint),
+        err
+    )]
+    pub async fn get_node_metadata_from_state_manager(
+        state: &ProxyState,
+        model: &str,
+        user_id: i64,
+        free_compute_units: i64,
+        is_confidential: bool,
+        endpoint: &str,
+    ) -> Result<Option<SelectedNodeMetadata>> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
+                model: model.to_string(),
+                user_id,
+                free_compute_units,
+                is_confidential,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetStacksForModel event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let maybe_stack = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetStacksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get GetStacksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        Ok(maybe_stack.map(|stack| SelectedNodeMetadata {
+            selected_node_id: stack.selected_node_id,
+            stack_small_id: stack.stack_small_id,
+            tx_digest: None,
+        }))
     }
 }
 
