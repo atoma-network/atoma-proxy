@@ -81,6 +81,9 @@ const MESSAGES: &str = "messages";
 /// The stream field in the request payload.
 const STREAM: &str = "stream";
 
+/// The path for the stop streamer endpoint.
+const STOP_STREAMER_PATH: &str = "/v1/stop-streamer";
+
 #[derive(OpenApi)]
 #[openapi(
     paths(chat_completions_create, chat_completions_create_stream),
@@ -804,7 +807,7 @@ async fn handle_streaming_response(
                 _ = kill_signal_receiver.recv() => {
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
-                        .post(format!("{node_address_clone}/v1/stop_generation"))
+                        .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
                         .header("X-Request-ID", request_id_clone)
                         .send()
                         .await;
