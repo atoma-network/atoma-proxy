@@ -259,6 +259,7 @@ impl Stream for Streamer {
                 }
 
                 if chunk.as_ref() == KEEP_ALIVE_CHUNK {
+                    cx.waker().clone().wake();
                     return Poll::Pending;
                 }
 
