@@ -15,7 +15,6 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
@@ -550,7 +549,7 @@ pub struct ClientStreamer {
     /// The receiver for the event chunks
     pub chunk_receiver: flume::Receiver<Event>,
     /// The sender for the kill signal
-    pub kill_signal: mpsc::Sender<()>,
+    pub kill_signal: flume::Sender<()>,
     /// If the streamer has reached done state
     pub done: bool,
 }
@@ -559,7 +558,7 @@ impl ClientStreamer {
     /// Creates a new client streamer
     pub const fn new(
         chunk_receiver: flume::Receiver<Event>,
-        kill_signal: mpsc::Sender<()>,
+        kill_signal: flume::Sender<()>,
     ) -> Self {
         Self {
             chunk_receiver,
@@ -593,7 +592,7 @@ impl Stream for ClientStreamer {
 impl Drop for ClientStreamer {
     fn drop(&mut self) {
         if !self.done {
-            let _ = self.kill_signal.blocking_send(());
+            let _ = self.kill_signal.send(());
         }
     }
 }

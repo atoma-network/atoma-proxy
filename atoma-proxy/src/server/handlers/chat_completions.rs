@@ -38,7 +38,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
-use tokio::sync::mpsc;
 use tracing::instrument;
 use utoipa::OpenApi;
 
@@ -771,7 +770,7 @@ async fn handle_streaming_response(
     let stream = response.bytes_stream();
 
     let (event_sender, event_receiver) = flume::unbounded();
-    let (kill_signal_sender, mut kill_signal_receiver) = mpsc::channel(1);
+    let (kill_signal_sender, kill_signal_receiver) = flume::unbounded();
     let state_manager_sender = state.state_manager_sender.clone();
     let node_address_clone = node_address.clone();
     let request_id_clone = request_id.clone();
@@ -804,7 +803,7 @@ async fn handle_streaming_response(
                         }
                     }
                 }
-                _ = kill_signal_receiver.recv() => {
+                _ = kill_signal_receiver.recv_async() => {
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
