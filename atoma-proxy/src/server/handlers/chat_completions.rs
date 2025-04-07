@@ -827,7 +827,7 @@ async fn handle_streaming_response(
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
-                        .header("X-Request-ID", request_id_clone)
+                        .header("X-Request-ID", request_id_clone.clone())
                         .send()
                         .await;
 
@@ -839,7 +839,8 @@ async fn handle_streaming_response(
                             e
                         );
                     }
-                    break;
+                    // We continue the loop, to allow the streamer to finish with updated usage from the node
+                    continue;
                 }
             }
         }
