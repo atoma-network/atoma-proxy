@@ -725,66 +725,6 @@ impl AtomaState {
             .transpose()
     }
 
-    /// Verifies if a stack is valid for confidential compute requests.
-    ///
-    /// This method checks if:
-    /// 1. The stack exists and has enough available compute units
-    /// 2. The associated node has a valid public key for confidential computing
-    ///
-    /// # Arguments
-    ///
-    /// * `stack_small_id` - The unique identifier of the stack to verify
-    /// * `available_compute_units` - The number of compute units needed
-    ///
-    /// # Returns
-    ///
-    /// - `Result<bool>`: A result containing either:
-    ///   - `Ok(true)` if the stack is valid for confidential computing
-    ///   - `Ok(false)` if the stack is invalid or has insufficient compute units
-    ///   - `Err(AtomaStateManagerError)` if there's a database error
-    #[instrument(level = "trace", skip_all, fields(%stack_small_id, %available_compute_units))]
-    pub async fn verify_stack_for_confidential_compute_request(
-        &self,
-        stack_small_id: i64,
-        available_compute_units: i64,
-    ) -> Result<bool> {
-        // NOTE: We don't inner join with stack_settlement_tickets because we want to allow,
-        // as this method is dedicated for confidential compute requests/tasks.
-        let result = sqlx::query_scalar::<_, bool>(
-            r"
-            WITH latest_rotation AS (
-                SELECT MAX(key_rotation_counter) as key_rotation_counter
-                FROM key_rotations
-            ),
-            valid_nodes AS (
-                SELECT npk.node_small_id
-                FROM node_public_keys npk
-                INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
-                GROUP BY npk.node_small_id
-                HAVING bool_and(npk.is_valid) = true
-            )
-            SELECT EXISTS (
-                SELECT 1
-                FROM stacks
-                INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
-                INNER JOIN valid_nodes ON valid_nodes.node_small_id = stacks.selected_node_id
-                WHERE stacks.stack_small_id = $1
-                AND stacks.num_compute_units - stacks.already_computed_units - stacks.locked_compute_units >= $2
-                AND tasks.security_level = 1
-                AND tasks.is_deprecated = false
-                AND stacks.in_settle_period = false
-                AND stacks.is_claimed = false
-                AND stacks.is_locked = false
-            )",
-        )
-        .bind(stack_small_id)
-        .bind(available_compute_units)
-        .fetch_one(&self.db)
-        .await?;
-
-        Ok(result)
-    }
-
     /// Retrieves a node's public key for encryption by its node ID.
     ///
     /// This method queries the database to find the public key associated with a specific node.
