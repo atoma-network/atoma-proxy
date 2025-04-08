@@ -449,109 +449,121 @@ pub async fn confidential_compute_middleware(
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
-    let user_id = check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
-    let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
-        .await
-        .map_err(|e| {
-            if let Some(source) = std::error::Error::source(&e) {
-                if source.is::<LengthLimitError>() {
-                    return AtomaProxyError::RequestError {
-                        message: format!("The body is too big: {e}"),
-                        endpoint: req_parts.uri.path().to_string(),
-                    };
+    let endpoint_clone = endpoint.clone();
+    // NOTE: We spawn a new task to avoid the executor cleaning up the
+    // execution state, without the full updates being applied.
+    tokio::spawn(async move {
+        let user_id =
+            check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
+        let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
+            .await
+            .map_err(|e| {
+                if let Some(source) = std::error::Error::source(&e) {
+                    if source.is::<LengthLimitError>() {
+                        return AtomaProxyError::RequestError {
+                            message: format!("The body is too big: {e}"),
+                            endpoint: req_parts.uri.path().to_string(),
+                        };
+                    }
                 }
-            }
-            AtomaProxyError::InternalError {
-                message: format!("Failed to convert body to bytes: {e}"),
-                client_message: None,
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to convert body to bytes: {e}"),
+                    client_message: None,
+                    endpoint: req_parts.uri.path().to_string(),
+                }
+            })?;
+        let confidential_compute_request: ConfidentialComputeRequest =
+            serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
+                message: format!("Failed to parse body as JSON: {e}"),
                 endpoint: req_parts.uri.path().to_string(),
+            })?;
+
+        let num_compute_units = if endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH {
+            confidential_compute_request
+                .num_compute_units
+                .unwrap_or(DEFAULT_IMAGE_RESOLUTION) as i64
+        } else {
+            confidential_compute_request.num_compute_units.map_or(
+                MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+                |num_compute_units| num_compute_units as i64,
+            )
+        };
+
+        let plaintext_body_hash = STANDARD
+            .decode(confidential_compute_request.plaintext_body_hash)
+            .map_err(|e| AtomaProxyError::RequestError {
+                message: format!("Hash is not base64: {e}"),
+                endpoint: endpoint.clone(),
+            })?;
+        let plaintext_body_signature = state
+            .sui
+            .write()
+            .await
+            .sign_hash(&plaintext_body_hash)
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to get Sui signature: {e}"),
+                client_message: None,
+                endpoint: endpoint.clone(),
+            })?;
+        let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
+            AtomaProxyError::RequestError {
+                message: format!("Signed hash is not present as header value: {e}"),
+                endpoint: endpoint.clone(),
             }
         })?;
-    let confidential_compute_request: ConfidentialComputeRequest =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
-            message: format!("Failed to parse body as JSON: {e}"),
-            endpoint: req_parts.uri.path().to_string(),
-        })?;
 
-    let num_compute_units = if endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH {
-        confidential_compute_request
-            .num_compute_units
-            .unwrap_or(DEFAULT_IMAGE_RESOLUTION) as i64
-    } else {
-        confidential_compute_request.num_compute_units.map_or(
-            MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-            |num_compute_units| num_compute_units as i64,
-        )
-    };
-
-    let plaintext_body_hash = STANDARD
-        .decode(confidential_compute_request.plaintext_body_hash)
-        .map_err(|e| AtomaProxyError::RequestError {
-            message: format!("Hash is not base64: {e}"),
-            endpoint: endpoint.clone(),
-        })?;
-    let plaintext_body_signature = state
-        .sui
-        .write()
-        .await
-        .sign_hash(&plaintext_body_hash)
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to get Sui signature: {e}"),
-            client_message: None,
-            endpoint: endpoint.clone(),
-        })?;
-    let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
-        AtomaProxyError::RequestError {
-            message: format!("Signed hash is not present as header value: {e}"),
-            endpoint: endpoint.clone(),
-        }
-    })?;
-
-    let (node_address, node_small_id) = utils::get_node_address(
-        &state,
-        confidential_compute_request.stack_small_id as i64,
-        &endpoint,
-    )
-    .await?;
-
-    if !utils::verify_stack_for_confidential_compute(
-        &state,
-        confidential_compute_request.stack_small_id as i64,
-        num_compute_units,
-        &endpoint,
-    )? {
-        return Err(AtomaProxyError::UnavailableStack {
-            message: "Stack is not available for confidential compute".to_string(),
-            endpoint: endpoint.clone(),
-        });
-    }
-
-    STACK_NUM_REQUESTS_COUNTER.add(
-        1,
-        &[KeyValue::new(
-            "stack_small_id",
+        let (node_address, node_small_id) = utils::get_node_address(
+            &state,
             confidential_compute_request.stack_small_id as i64,
-        )],
-    );
+            &endpoint,
+        )
+        .await?;
 
-    req_parts
-        .headers
-        .insert(constants::SIGNATURE, signature_header);
-    let request_metadata = req_parts
-        .extensions
-        .get::<RequestMetadataExtension>()
-        .cloned()
-        .unwrap_or_default()
-        .with_node_address(node_address)
-        .with_node_small_id(node_small_id)
-        .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
-        .with_max_total_num_compute_units(num_compute_units as u64)
-        .with_user_id(user_id)
-        .with_model_name(confidential_compute_request.model_name)
-        .with_endpoint(endpoint);
-    req_parts.extensions.insert(request_metadata);
-    let req = Request::from_parts(req_parts, Body::from(body_bytes));
-    Ok(next.run(req).await)
+        if !utils::verify_stack_for_confidential_compute(
+            &state,
+            confidential_compute_request.stack_small_id as i64,
+            num_compute_units,
+            &endpoint,
+        )? {
+            return Err(AtomaProxyError::UnavailableStack {
+                message: "Stack is not available for confidential compute".to_string(),
+                endpoint: endpoint.clone(),
+            });
+        }
+
+        STACK_NUM_REQUESTS_COUNTER.add(
+            1,
+            &[KeyValue::new(
+                "stack_small_id",
+                confidential_compute_request.stack_small_id as i64,
+            )],
+        );
+
+        req_parts
+            .headers
+            .insert(constants::SIGNATURE, signature_header);
+        let request_metadata = req_parts
+            .extensions
+            .get::<RequestMetadataExtension>()
+            .cloned()
+            .unwrap_or_default()
+            .with_node_address(node_address)
+            .with_node_small_id(node_small_id)
+            .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
+            .with_max_total_num_compute_units(num_compute_units as u64)
+            .with_user_id(user_id)
+            .with_model_name(confidential_compute_request.model_name)
+            .with_endpoint(endpoint);
+        req_parts.extensions.insert(request_metadata);
+        let req = Request::from_parts(req_parts, Body::from(body_bytes));
+        Ok(next.run(req).await)
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn task: {e}"),
+        client_message: None,
+        endpoint: endpoint_clone,
+    })?
 }
 
 /// Middleware that handles locked stack requests.
