@@ -1047,7 +1047,7 @@ async fn test_concurrent_access() -> Result<()> {
         .await
         .unwrap();
     let futures: Vec<_> = (0..5)
-        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 800, 1))
+        .map(|_| state.select_node_public_key_for_encryption("gpt-4", 200, 1))
         .collect();
 
     let results = futures::future::join_all(futures).await;
