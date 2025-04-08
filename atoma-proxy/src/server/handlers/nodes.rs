@@ -1,4 +1,7 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::str::FromStr;
+use std::time::Duration;
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::verify_signature;
@@ -17,7 +20,9 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::check_auth;
 use crate::server::error::AtomaProxyError;
-use crate::server::http_server::ProxyState;
+use crate::server::http_server::{
+    LockedComputeUnits, LockedDetails, ProxyState, StackSmallId, Timeout,
+};
 use crate::server::middleware::acquire_stack_lock;
 use crate::server::middleware::auth::{
     acquire_new_stack, get_stack_if_locked, SelectedNodeMetadata,
@@ -36,6 +41,9 @@ const BODY_HASH_SIZE: usize = 32;
 /// bound for the number of tokens for each request.
 /// TODO: In the future, this number can be dynamically adjusted based on the model.
 pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 8_192;
+
+/// The maximum timeout for the locked compute units, in seconds.
+pub const MAX_TIMEOUT_FOR_CONFIDENTIAL_COMPUTE: u64 = 5;
 
 #[derive(OpenApi)]
 #[openapi(paths(nodes_create, nodes_create_lock))]
@@ -228,6 +236,11 @@ pub struct NodesCreateLockResponse {
 pub struct NodesCreateLockRequest {
     /// The model to lock a node for
     pub model: String,
+    /// The number of tokens to be processed for confidential compute
+    /// (including input and output tokens)
+    pub max_num_tokens: Option<u64>,
+    /// An optional timeout period for the locked compute units, in seconds
+    pub timeout: Option<u64>,
 }
 
 /// Create a node lock for confidential compute
@@ -275,12 +288,21 @@ pub async fn nodes_create_lock(
         NODES_CREATE_LOCK_PATH,
     )
     .await?;
+
+    let max_num_tokens = payload
+        .max_num_tokens
+        .map_or(MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, |max_num_tokens| {
+            max_num_tokens as i64
+        });
+    let timeout = payload
+        .timeout
+        .unwrap_or(MAX_TIMEOUT_FOR_CONFIDENTIAL_COMPUTE);
     state
         .state_manager_sender
         .send(
             AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
                 model: payload.model.clone(),
-                max_num_tokens: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+                max_num_tokens,
                 user_id,
                 result_sender: sender,
             },
@@ -306,6 +328,7 @@ pub async fn nodes_create_lock(
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
         let public_key = STANDARD.encode(node_public_key.public_key);
+        lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
         Ok(Json(NodesCreateLockResponse {
             public_key,
             node_small_id: node_public_key.node_small_id as u64,
@@ -406,6 +429,7 @@ pub async fn nodes_create_lock(
             })?;
             if let Some(node_public_key) = node_public_key {
                 let public_key = STANDARD.encode(node_public_key.public_key);
+                lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
                 Ok(Json(NodesCreateLockResponse {
                     public_key,
                     node_small_id: node_public_key.node_small_id as u64,
@@ -429,4 +453,32 @@ pub async fn nodes_create_lock(
             })
         }
     }
+}
+
+/// Locks compute units in memory, so that the middleware can later handle it appropriately.
+///
+/// # Arguments
+///
+/// * `state` - The state of the proxy
+/// * `stack_small_id` - The small id of the stack
+/// * `timeout` - The timeout for the locked compute units
+/// * `max_num_tokens` - The maximum number of tokens for the locked compute units
+///
+/// # Note
+/// This function is not thread safe, and should only be called from the main thread.
+fn lock_compute_units_in_memory(
+    state: &ProxyState,
+    stack_small_id: StackSmallId,
+    timeout: Timeout,
+    max_num_tokens: LockedComputeUnits,
+) {
+    let start = std::time::Instant::now();
+    let mut entry = state
+        .stack_locked_compute_units
+        .entry(stack_small_id)
+        .or_insert_with(BinaryHeap::new);
+    entry.push(Reverse(LockedDetails {
+        expires_at: start + Duration::from_secs(timeout),
+        max_num_tokens,
+    }));
 }

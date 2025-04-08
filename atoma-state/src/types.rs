@@ -640,18 +640,6 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
-    /// Verifies if a stack is valid for confidential compute request
-    VerifyStackForConfidentialComputeRequest {
-        /// Unique small integer identifier for the stack
-        stack_small_id: i64,
-
-        /// Available compute units for the stack
-        available_compute_units: i64,
-
-        /// Channel to send back the result
-        /// Returns Ok(bool) with true if the stack is valid or false if it is not
-        result_sender: oneshot::Sender<Result<bool>>,
-    },
     /// Locks compute units for a stack
     LockComputeUnitsForStack {
         /// Unique small integer identifier for the stack

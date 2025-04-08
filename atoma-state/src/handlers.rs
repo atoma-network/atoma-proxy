@@ -1145,22 +1145,6 @@ pub async fn handle_state_manager_event(
                 .send(node)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::VerifyStackForConfidentialComputeRequest {
-            stack_small_id,
-            available_compute_units,
-            result_sender,
-        } => {
-            let is_valid = state_manager
-                .state
-                .verify_stack_for_confidential_compute_request(
-                    stack_small_id,
-                    available_compute_units,
-                )
-                .await;
-            result_sender
-                .send(is_valid)
-                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
-        }
         AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {
             node_small_id,
             public_address,

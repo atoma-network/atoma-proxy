@@ -449,110 +449,121 @@ pub async fn confidential_compute_middleware(
 ) -> Result<Response> {
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
-    let user_id = check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
-    let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
-        .await
-        .map_err(|e| {
-            if let Some(source) = std::error::Error::source(&e) {
-                if source.is::<LengthLimitError>() {
-                    return AtomaProxyError::RequestError {
-                        message: format!("The body is too big: {e}"),
-                        endpoint: req_parts.uri.path().to_string(),
-                    };
+    let endpoint_clone = endpoint.clone();
+    // NOTE: We spawn a new task to avoid the executor cleaning up the
+    // execution state, without the full updates being applied.
+    tokio::spawn(async move {
+        let user_id =
+            check_auth(&state.state_manager_sender, &req_parts.headers, &endpoint).await?;
+        let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
+            .await
+            .map_err(|e| {
+                if let Some(source) = std::error::Error::source(&e) {
+                    if source.is::<LengthLimitError>() {
+                        return AtomaProxyError::RequestError {
+                            message: format!("The body is too big: {e}"),
+                            endpoint: req_parts.uri.path().to_string(),
+                        };
+                    }
                 }
-            }
-            AtomaProxyError::InternalError {
-                message: format!("Failed to convert body to bytes: {e}"),
-                client_message: None,
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to convert body to bytes: {e}"),
+                    client_message: None,
+                    endpoint: req_parts.uri.path().to_string(),
+                }
+            })?;
+        let confidential_compute_request: ConfidentialComputeRequest =
+            serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
+                message: format!("Failed to parse body as JSON: {e}"),
                 endpoint: req_parts.uri.path().to_string(),
+            })?;
+
+        let num_compute_units = if endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH {
+            confidential_compute_request
+                .num_compute_units
+                .unwrap_or(DEFAULT_IMAGE_RESOLUTION) as i64
+        } else {
+            confidential_compute_request.num_compute_units.map_or(
+                MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+                |num_compute_units| num_compute_units as i64,
+            )
+        };
+
+        let plaintext_body_hash = STANDARD
+            .decode(confidential_compute_request.plaintext_body_hash)
+            .map_err(|e| AtomaProxyError::RequestError {
+                message: format!("Hash is not base64: {e}"),
+                endpoint: endpoint.clone(),
+            })?;
+        let plaintext_body_signature = state
+            .sui
+            .write()
+            .await
+            .sign_hash(&plaintext_body_hash)
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to get Sui signature: {e}"),
+                client_message: None,
+                endpoint: endpoint.clone(),
+            })?;
+        let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
+            AtomaProxyError::RequestError {
+                message: format!("Signed hash is not present as header value: {e}"),
+                endpoint: endpoint.clone(),
             }
         })?;
-    let confidential_compute_request: ConfidentialComputeRequest =
-        serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
-            message: format!("Failed to parse body as JSON: {e}"),
-            endpoint: req_parts.uri.path().to_string(),
-        })?;
 
-    utils::verify_stack_for_confidential_compute(
-        &state,
-        confidential_compute_request.stack_small_id as i64,
-        MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-        &endpoint,
-    )
-    .await?;
-
-    let plaintext_body_hash = STANDARD
-        .decode(confidential_compute_request.plaintext_body_hash)
-        .map_err(|e| AtomaProxyError::RequestError {
-            message: format!("Hash is not base64: {e}"),
-            endpoint: endpoint.clone(),
-        })?;
-    let plaintext_body_signature = state
-        .sui
-        .write()
-        .await
-        .sign_hash(&plaintext_body_hash)
-        .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Failed to get Sui signature: {e}"),
-            client_message: None,
-            endpoint: endpoint.clone(),
-        })?;
-    let signature_header = HeaderValue::from_str(&plaintext_body_signature).map_err(|e| {
-        AtomaProxyError::RequestError {
-            message: format!("Signed hash is not present as header value: {e}"),
-            endpoint: endpoint.clone(),
-        }
-    })?;
-
-    let (node_address, node_small_id) = utils::get_node_address(
-        &state,
-        confidential_compute_request.stack_small_id as i64,
-        &endpoint,
-    )
-    .await?;
-
-    let num_compute_units = if endpoint == CONFIDENTIAL_IMAGE_GENERATIONS_PATH {
-        confidential_compute_request
-            .num_compute_units
-            .unwrap_or(DEFAULT_IMAGE_RESOLUTION) as i64
-    } else {
-        MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE
-    };
-
-    utils::lock_compute_units_for_stack(
-        &state,
-        confidential_compute_request.stack_small_id as i64,
-        num_compute_units,
-        &endpoint,
-    )
-    .await?;
-
-    STACK_NUM_REQUESTS_COUNTER.add(
-        1,
-        &[KeyValue::new(
-            "stack_small_id",
+        let (node_address, node_small_id) = utils::get_node_address(
+            &state,
             confidential_compute_request.stack_small_id as i64,
-        )],
-    );
+            &endpoint,
+        )
+        .await?;
 
-    req_parts
-        .headers
-        .insert(constants::SIGNATURE, signature_header);
-    let request_metadata = req_parts
-        .extensions
-        .get::<RequestMetadataExtension>()
-        .cloned()
-        .unwrap_or_default()
-        .with_node_address(node_address)
-        .with_node_small_id(node_small_id)
-        .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
-        .with_max_total_num_compute_units(num_compute_units as u64)
-        .with_user_id(user_id)
-        .with_model_name(confidential_compute_request.model_name)
-        .with_endpoint(endpoint);
-    req_parts.extensions.insert(request_metadata);
-    let req = Request::from_parts(req_parts, Body::from(body_bytes));
-    Ok(next.run(req).await)
+        if !utils::verify_stack_for_confidential_compute(
+            &state,
+            confidential_compute_request.stack_small_id as i64,
+            num_compute_units,
+            &endpoint,
+        )? {
+            return Err(AtomaProxyError::UnavailableStack {
+                message: "Stack is not available for confidential compute".to_string(),
+                endpoint: endpoint.clone(),
+            });
+        }
+
+        STACK_NUM_REQUESTS_COUNTER.add(
+            1,
+            &[KeyValue::new(
+                "stack_small_id",
+                confidential_compute_request.stack_small_id as i64,
+            )],
+        );
+
+        req_parts
+            .headers
+            .insert(constants::SIGNATURE, signature_header);
+        let request_metadata = req_parts
+            .extensions
+            .get::<RequestMetadataExtension>()
+            .cloned()
+            .unwrap_or_default()
+            .with_node_address(node_address)
+            .with_node_small_id(node_small_id)
+            .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
+            .with_max_total_num_compute_units(num_compute_units as u64)
+            .with_user_id(user_id)
+            .with_model_name(confidential_compute_request.model_name)
+            .with_endpoint(endpoint);
+        req_parts.extensions.insert(request_metadata);
+        let req = Request::from_parts(req_parts, Body::from(body_bytes));
+        Ok(next.run(req).await)
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn task: {e}"),
+        client_message: None,
+        endpoint: endpoint_clone,
+    })?
 }
 
 /// Middleware that handles locked stack requests.
@@ -1983,6 +1994,9 @@ pub mod auth {
 }
 
 pub mod utils {
+    use std::{cmp::Reverse, time::Instant};
+
+    use dashmap::Entry;
     use flume::Sender;
     use sui_sdk::types::digests::TransactionDigest;
 
@@ -1990,15 +2004,16 @@ pub mod utils {
         handlers::{
             chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
-            image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+            image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, update_state_manager,
         },
+        http_server::{LockedComputeUnits, StackSmallId},
         MODEL,
     };
 
     use super::{
         auth, constants, instrument, AtomaAtomaStateManagerEvent, AtomaProxyError, Body,
         HeaderValue, Parts, ProcessedRequest, ProxyState, Request, RequestMetadataExtension,
-        Result, State, Value, CONTENT_LENGTH, MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
+        Result, State, Value, CONTENT_LENGTH,
     };
 
     /// Validates and prepares a request for processing by a specific stack and node.
@@ -2152,52 +2167,35 @@ pub mod utils {
         Ok(req)
     }
 
-    /// Verifies if a stack is valid for confidential compute operations.
+    /// Verifies if a stack is valid for confidential compute operations by checking for a recent lock.
     ///
-    /// This function checks whether a given stack has sufficient compute units available
-    /// and meets the requirements for confidential computing. It communicates with the
-    /// state manager to verify the stack's eligibility.
+    /// This function acts as a wrapper around `find_stacks_meeting_criteria_and_prune`.
+    /// It checks if there is a non-expired entry in the `stack_locked_compute_units` map
+    /// for the given `stack_small_id` that has at least `available_compute_units` locked.
+    /// If such an entry is found, it is consumed (removed from the map), signifying that
+    /// the lock has been verified and used for this confidential compute request.
+    ///
+    /// This verification step is crucial for confidential compute to ensure that the node
+    /// previously acknowledged and locked sufficient resources specifically for this request,
+    /// preventing potential mismatches or reuse of locks.
     ///
     /// # Arguments
     ///
-    /// * `state` - The proxy server state containing the state manager sender
-    /// * `stack_small_id` - The unique identifier for the stack to verify
-    /// * `available_compute_units` - The number of compute units required for the operation
-    /// * `endpoint` - The API endpoint path making the verification request
+    /// * `state` - The shared proxy state containing the `stack_locked_compute_units` map and the `state_manager_sender`.
+    /// * `stack_small_id` - The unique identifier for the stack to verify.
+    /// * `available_compute_units` - The minimum number of compute units that must have been locked for the stack.
+    /// * `endpoint` - The API endpoint path making the verification request (used for logging and error context).
     ///
     /// # Returns
     ///
-    /// Returns a `Result<bool>` where:
-    /// * `Ok(true)` - The stack is valid for confidential compute
-    /// * `Err(AtomaProxyError)` - If verification fails or the stack is invalid
+    /// * `Ok(true)` - If a valid, non-expired lock meeting the criteria was found and consumed.
+    /// * `Ok(false)` - If no suitable lock was found (either none existed, all were expired, or none met the compute unit requirement).
+    /// * `Err(AtomaProxyError)` - If an error occurred during the lock check, typically during communication with the state manager when pruning expired locks.
     ///
-    /// # Errors
+    /// # Side Effects
     ///
-    /// Returns `AtomaProxyError::InternalError` in the following cases:
-    /// * Failed to send verification request to state manager
-    /// * Failed to receive verification response
-    /// * Failed to process verification result
-    /// * Stack is not valid for confidential compute
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use axum::extract::State;
-    ///
-    /// async fn verify_stack(state: State<ProxyState>) -> Result<()> {
-    ///     let is_valid = verify_stack_for_confidential_compute(
-    ///         state,
-    ///         stack_small_id: 123,
-    ///         available_compute_units: 1000,
-    ///         endpoint: "/v1/confidential/chat/completions"
-    ///     ).await?;
-    ///
-    ///     if is_valid {
-    ///         println!("Stack is valid for confidential compute");
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
+    /// - If a valid lock is found, it is removed from the `state.stack_locked_compute_units` map.
+    /// - May prune expired locks from the map and update the state manager accordingly via the call to `find_stacks_meeting_criteria_and_prune`.
     #[instrument(
         level = "info",
         skip_all,
@@ -2205,134 +2203,110 @@ pub mod utils {
             %endpoint,
             %stack_small_id,
             %available_compute_units
-        ),
-        err
+        )
     )]
-    pub async fn verify_stack_for_confidential_compute(
+    pub fn verify_stack_for_confidential_compute(
         state: &State<ProxyState>,
         stack_small_id: i64,
         available_compute_units: i64,
         endpoint: &str,
     ) -> Result<bool> {
-        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
-        state
-            .state_manager_sender
-            .send(
-                AtomaAtomaStateManagerEvent::VerifyStackForConfidentialComputeRequest {
-                    stack_small_id,
-                    available_compute_units: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-                    result_sender,
-                },
-            )
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetNodePublicAddress event: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let is_valid = result_receiver
-            .await
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!(
-                    "Failed to receive VerifyStackForConfidentialComputeRequest result: {e:?}"
-                ),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|e| AtomaProxyError::RequestError {
-                message: format!("Failed to verify stack for confidential compute: {e:?}"),
-                endpoint: endpoint.to_string(),
-            })?;
-        if !is_valid {
-            return Err(AtomaProxyError::RequestError {
-                message: "Stack is not valid for confidential compute".to_string(),
-                endpoint: endpoint.to_string(),
-            });
-        }
-        Ok(true)
+        find_stacks_meeting_criteria_and_prune(
+            state,
+            stack_small_id,
+            available_compute_units,
+            Instant::now(),
+            endpoint,
+        )
     }
 
-    /// Locks a specified number of compute units for a given stack.
+    /// Finds a stack with locked compute units meeting specified criteria and prunes expired locks.
     ///
-    /// This function reserves compute units for a stack by sending a lock request to the state manager.
-    /// The lock ensures that the compute units are exclusively reserved for this stack's use and cannot
-    /// be allocated to other requests until released.
+    /// This function checks the `stack_locked_compute_units` map for a given `stack_small_id`.
+    /// It iterates through the associated priority queue (`BinaryHeap`) of locked compute unit details (`LockedDetails`).
+    ///
+    /// 1.  **Pruning:** It first removes any locks whose `expires_at` timestamp is older than the provided `now` timestamp.
+    ///     For each pruned lock, it sends an update to the state manager via `update_state_manager` to
+    ///     release the corresponding compute units (setting them back to 0).
+    /// 2.  **Criteria Check:** After pruning, it searches the remaining (non-expired) locks for the *first* one
+    ///     that meets the `min_units` requirement (`lock.max_num_tokens >= min_units`).
+    /// 3.  **Removal:** If such a lock is found, it is removed from the heap, and the function returns `Ok(true)`.
+    /// 4.  **Cleanup:** If the heap becomes empty after pruning or after removing the qualifying lock, the
+    ///     entire entry for `stack_small_id` is removed from the `stack_locked_compute_units` map.
+    /// 5.  **Not Found:** If no suitable lock is found (either the stack ID wasn't present, all locks expired,
+    ///     or no remaining lock met the `min_units` criteria), it returns `Ok(false)`.
     ///
     /// # Arguments
     ///
-    /// * `state` - The proxy server state containing the state manager channel
-    /// * `stack_small_id` - The unique identifier for the stack requiring compute units
-    /// * `available_compute_units` - The number of compute units to lock
-    /// * `endpoint` - The API endpoint path making the lock request
+    /// * `state` - The shared proxy state containing the `stack_locked_compute_units` map and the `state_manager_sender`.
+    /// * `stack_small_id` - The identifier of the stack to check for locked compute units.
+    /// * `min_units` - The minimum number of locked compute units required.
+    /// * `now` - The current time (`Instant`) used to determine if locks have expired.
+    /// * `endpoint` - The API endpoint string, used for context when calling `update_state_manager`.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the compute units were successfully locked, or an error if the operation failed.
+    /// * `Ok(true)` - If a non-expired lock meeting the `min_units` criteria was found and removed from the heap.
+    /// * `Ok(false)` - If no suitable lock was found for the given `stack_small_id`.
+    /// * `Err(AtomaProxyError)` - If there was an error communicating with the state manager while trying to
+    ///   release compute units for an expired lock.
     ///
-    /// # Errors
+    /// # Side Effects
     ///
-    /// Returns `AtomaProxyError::InternalError` in the following cases:
-    /// * Failed to send lock request to state manager
-    /// * Failed to receive lock response
-    /// * Failed to acquire lock (e.g., insufficient available units)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use axum::extract::State;
-    ///
-    /// async fn reserve_compute_units(state: State<ProxyState>) -> Result<()> {
-    ///     lock_compute_units_for_stack(
-    ///         &state,
-    ///         stack_small_id: 123,
-    ///         available_compute_units: 1000,
-    ///         endpoint: "/v1/chat/completions"
-    ///     ).await?;
-    ///
-    ///     // Compute units are now locked for this stack
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument(
-        level = "info",
-        skip_all,
-        fields(
-            %endpoint,
-            %stack_small_id,
-            %available_compute_units
-        ),
-        err
-    )]
-    pub async fn lock_compute_units_for_stack(
+    /// - Modifies the `state.stack_locked_compute_units` DashMap by potentially removing expired locks,
+    ///   removing a qualifying lock, or removing the entire entry for the `stack_small_id`.
+    /// - Sends `AtomaAtomaStateManagerEvent::UpdateLockedComputeUnits` events to the state manager for pruned locks.
+    fn find_stacks_meeting_criteria_and_prune(
         state: &State<ProxyState>,
-        stack_small_id: i64,
-        available_compute_units: i64,
+        stack_small_id: StackSmallId,
+        min_units: LockedComputeUnits,
+        now: Instant,
         endpoint: &str,
-    ) -> Result<()> {
-        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::LockComputeUnitsForStack {
-                stack_small_id,
-                available_compute_units,
-                result_sender,
-            })
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send LockComputeUnitsForStack event: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        result_receiver
-            .await
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to receive LockComputeUnitsForStack result: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to lock compute units for stack: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })
+    ) -> Result<bool> {
+        if let Entry::Occupied(mut entry) = state.stack_locked_compute_units.entry(stack_small_id) {
+            let details = entry.get_mut();
+
+            while let Some(Reverse(lock)) = details.peek() {
+                if lock.expires_at >= now {
+                    break;
+                }
+                // NOTE: Update the state manager to release the lock of compute units, that were previously locked on the `v1/nodes/lock` endpoint.
+                update_state_manager(
+                    &state.state_manager_sender,
+                    stack_small_id,
+                    lock.max_num_tokens,
+                    0,
+                    endpoint,
+                )?;
+                details.pop();
+            }
+            if details.is_empty() {
+                // NOTE: If pruning removed all locks, remove the stack small id entry from the map.
+                entry.remove();
+                return Ok(false);
+            }
+            let mut found_and_removed = false;
+            // NOTE: This is a O(n) operation, on the non-expired locked details.
+            details.retain(|Reverse(lock)| {
+                // NOTE: We need to find only one lock that meets the criteria, we remove
+                // that one alone, and we can return true.
+                if !found_and_removed && lock.max_num_tokens >= min_units {
+                    found_and_removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+            if found_and_removed {
+                // NOTE: If the stack has a lock that meets the criteria, we know it has been removed
+                // from the heap, and we can return true.
+                if details.is_empty() {
+                    entry.remove();
+                }
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Retrieves the public URL and small ID for a node associated with a given stack.
