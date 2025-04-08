@@ -1,4 +1,7 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use atoma_auth::Sui;
 use atoma_state::types::AtomaAtomaStateManagerEvent;
@@ -59,6 +62,25 @@ pub type UserId = i64;
 
 pub type TaskId = i64;
 
+pub type StackSmallId = i64;
+
+pub type Timeout = u64;
+
+pub type LockedComputeUnits = i64;
+
+/// Represents the details of a locked compute unit.
+///
+/// This struct holds the expiration time and the maximum number of tokens
+/// for a locked compute unit.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LockedDetails {
+    /// The expiration time of the locked compute unit.
+    pub expires_at: Instant,
+
+    /// The maximum number of tokens for the locked compute unit.
+    pub max_num_tokens: LockedComputeUnits,
+}
+
 /// Represents the shared state of the application.
 ///
 /// This struct holds various components and configurations that are shared
@@ -78,6 +100,12 @@ pub struct ProxyState {
     /// This map is used to prevent race conditions when multiple requests
     /// try to acquire the same stack for a user.
     pub users_buy_stack_lock_map: Arc<DashMap<(UserId, TaskId), bool>>,
+
+    /// Map of stack ids to their locked compute units for confidential compute mode.
+    ///
+    /// This map is used to prevent race conditions when multiple requests
+    /// try to acquire the same stack for a user.
+    pub stack_locked_compute_units: Arc<DashMap<StackSmallId, BinaryHeap<Reverse<LockedDetails>>>>,
 
     /// `Sui` struct for handling Sui-related operations.
     ///
@@ -255,6 +283,7 @@ pub async fn start_server(
     let proxy_state = ProxyState {
         state_manager_sender,
         users_buy_stack_lock_map: Arc::new(DashMap::new()),
+        stack_locked_compute_units: Arc::new(DashMap::new()),
         sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),

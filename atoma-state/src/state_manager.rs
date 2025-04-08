@@ -693,20 +693,27 @@ impl AtomaState {
                 INNER JOIN latest_rotation ON latest_rotation.key_rotation_counter = npk.key_rotation_counter
                 GROUP BY npk.node_small_id, npk.public_key
                 HAVING bool_and(npk.is_valid) = true
+            ),
+            selected_stack AS (
+                SELECT vn.public_key, vn.node_small_id, s.stack_small_id
+                FROM valid_nodes vn
+                INNER JOIN stacks s ON s.selected_node_id = vn.node_small_id
+                INNER JOIN tasks t ON t.task_small_id = s.task_small_id
+                WHERE t.model_name = $1
+                AND t.security_level = 1
+                AND t.is_deprecated = false
+                AND s.num_compute_units - s.already_computed_units - s.locked_compute_units >= $2
+                AND s.is_claimed = false
+                AND s.is_locked = false
+                AND s.user_id = $3
+                ORDER BY s.price_per_one_million_compute_units ASC
+                LIMIT 1
             )
-            SELECT vn.public_key as public_key, vn.node_small_id as node_small_id, stacks.stack_small_id as stack_small_id
-            FROM valid_nodes vn
-            INNER JOIN stacks ON stacks.selected_node_id = vn.node_small_id
-            INNER JOIN tasks ON tasks.task_small_id = stacks.task_small_id
-            WHERE tasks.model_name = $1
-            AND tasks.security_level = 1
-            AND tasks.is_deprecated = false
-            AND stacks.num_compute_units - stacks.already_computed_units - stacks.locked_compute_units >= $2
-            AND stacks.is_claimed = false
-            AND stacks.is_locked = false
-            AND stacks.user_id = $3
-            ORDER BY stacks.price_per_one_million_compute_units ASC
-            LIMIT 1
+            UPDATE stacks
+            SET locked_compute_units = stacks.locked_compute_units + $2
+            FROM selected_stack
+            WHERE stacks.stack_small_id = selected_stack.stack_small_id
+            RETURNING selected_stack.public_key, selected_stack.node_small_id, selected_stack.stack_small_id
             ",
         )
         .bind(model)
