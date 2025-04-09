@@ -45,6 +45,7 @@ use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_E
 use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
+use super::handlers::models::{open_router_models_list, OPEN_ROUTER_MODELS_PATH};
 use super::handlers::nodes::{
     nodes_create, nodes_create_lock, NODES_CREATE_LOCK_PATH, NODES_CREATE_PATH,
 };
@@ -128,6 +129,9 @@ pub struct ProxyState {
     /// application to dynamically select and switch between different
     /// models as needed.
     pub models: Arc<Vec<String>>,
+
+    /// Open router models file.
+    pub open_router_models_file: String,
 }
 
 #[derive(OpenApi)]
@@ -223,7 +227,9 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(NODES_CREATE_PATH, post(nodes_create))
         .route(NODES_CREATE_LOCK_PATH, post(nodes_create_lock));
 
-    let public_routes = Router::new().route(HEALTH_PATH, get(health));
+    let public_routes = Router::new()
+        .route(HEALTH_PATH, get(health))
+        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list));
 
     Router::new()
         .merge(
@@ -287,6 +293,7 @@ pub async fn start_server(
         sui,
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
+        open_router_models_file: config.open_router_models_file,
     };
     let router = create_router(&proxy_state);
     let server =
