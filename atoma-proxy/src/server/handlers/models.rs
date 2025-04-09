@@ -1,15 +1,20 @@
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
 use crate::server::http_server::ProxyState;
+use tokio::fs;
 
 /// Path for the models listing endpoint.
 ///
 /// This endpoint follows the OpenAI API format and returns a list
 /// of available AI models with their associated metadata and capabilities.
 pub const MODELS_PATH: &str = "/v1/models";
+
+/// Path for the OpenRouter models listing endpoint.
+pub const OPEN_ROUTER_MODELS_PATH: &str = "/v1/open_router/models";
 
 /// OpenAPI documentation for the models listing endpoint.
 ///
@@ -76,4 +81,25 @@ pub struct Model {
     pub created: i64,
     /// Organization that owns the model
     pub owned_by: String,
+}
+
+pub async fn open_router_models_list(
+    State(state): State<ProxyState>,
+) -> std::result::Result<Json<Value>, AtomaProxyError> {
+    let file_content = fs::read_to_string(state.open_router_models_file)
+        .await
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to read OpenRouter models file: {}", err),
+            client_message: None,
+            endpoint: OPEN_ROUTER_MODELS_PATH.to_string(),
+        })?;
+
+    let json_data: Value =
+        serde_json::from_str(&file_content).map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to parse OpenRouter models file: {}", err),
+            client_message: None,
+            endpoint: OPEN_ROUTER_MODELS_PATH.to_string(),
+        })?;
+
+    Ok(Json(json_data))
 }

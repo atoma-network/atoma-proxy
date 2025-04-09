@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "anthropic/claude-2.0",
+      "name": "Anthropic: Claude v2.0",
+      "created": 1690502400,
+      "description": "Anthropic's flagship model...",
+      "context_length": 100000,
+      "max_completion_tokens": 4096,
+      "quantization": "fp8",
+      "pricing": {
+        "prompt": "0.000008",
+        "completion": "0.000024",
+        "image": "0",
+        "request": "0"
+      }
+    }
+  ]
+}

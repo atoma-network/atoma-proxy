@@ -39,6 +39,9 @@ pub struct AtomaServiceConfig {
     /// This field contains the Hugging Face API token that is used to authenticate
     /// requests to the Hugging Face API.
     pub hf_token: String,
+
+    /// Path to open router json.
+    pub open_router_models_file: String,
 }
 
 impl AtomaServiceConfig {

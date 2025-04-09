@@ -40,6 +40,7 @@ models = [
 password = "password" # Authentication password for the service API
 revisions = [ "main", "main" ] # Model revision/version tags (must match models array length)
 service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
+open_router_json = "/app/open_router.json" # Path to the Open Router JSON file for model configuration
 
 [atoma_proxy_service]
 grafana_api_token     = ""             # Grafana API token (read-only permissions required)
