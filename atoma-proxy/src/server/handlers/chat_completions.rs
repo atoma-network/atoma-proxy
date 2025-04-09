@@ -169,11 +169,25 @@ pub async fn chat_completions_create(
             .and_then(serde_json::Value::as_bool)
             .unwrap_or_default();
 
+        let wallet_address = state
+            .sui
+            .write()
+            .await
+            .get_wallet_address()
+            .unwrap_or_default()
+            .to_string();
+
         match handle_chat_completions_request(&state, &metadata, headers, payload, is_streaming)
             .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                TOTAL_COMPLETED_REQUESTS.add(
+                    1,
+                    &[
+                        KeyValue::new("model", metadata.model_name),
+                        KeyValue::new("wallet_address", wallet_address),
+                    ],
+                );
                 Ok(response)
             }
             Err(e) => {
@@ -256,8 +270,22 @@ async fn handle_chat_completions_request(
     payload: Value,
     is_streaming: bool,
 ) -> Result<Response<Body>> {
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
+
     // Record the request in the chat completions num requests metric
-    CHAT_COMPLETIONS_NUM_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+    CHAT_COMPLETIONS_NUM_REQUESTS.add(
+        1,
+        &[
+            KeyValue::new("model", metadata.model_name.clone()),
+            KeyValue::new("wallet_address", wallet_address),
+        ],
+    );
 
     if is_streaming {
         handle_streaming_response(
@@ -597,18 +625,35 @@ async fn handle_non_streaming_response(
         .and_then(serde_json::Value::as_u64)
         .map_or(0, |n| n as i64);
 
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
+
     // Record the total tokens in the chat completions tokens metrics
     CHAT_COMPLETIONS_TOTAL_TOKENS.add(
         total_tokens as u64,
-        &[KeyValue::new("model", model_name.clone())],
+        &[
+            KeyValue::new("model", model_name.clone()),
+            KeyValue::new("wallet_address", wallet_address.clone()),
+        ],
     );
     CHAT_COMPLETIONS_INPUT_TOKENS.add(
         input_tokens as u64,
-        &[KeyValue::new("model", model_name.clone())],
+        &[
+            KeyValue::new("model", model_name.clone()),
+            KeyValue::new("wallet_address", wallet_address.clone()),
+        ],
     );
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS.add(
         output_tokens as u64,
-        &[KeyValue::new("model", model_name.clone())],
+        &[
+            KeyValue::new("model", model_name.clone()),
+            KeyValue::new("wallet_address", wallet_address),
+        ],
     );
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
@@ -776,6 +821,13 @@ async fn handle_streaming_response(
     let node_address_clone = node_address.clone();
     let request_id_clone = request_id.clone();
     let client_clone = client.clone();
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
     tokio::spawn(async move {
         let mut streamer = Streamer::new(
             stream,
@@ -787,6 +839,7 @@ async fn handle_streaming_response(
             node_id,
             model_name,
             endpoint,
+            wallet_address,
         );
         loop {
             tokio::select! {

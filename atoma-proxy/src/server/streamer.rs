@@ -68,6 +68,8 @@ pub struct Streamer {
     model_name: String,
     /// Endpoint
     endpoint: String,
+    /// Wallet address
+    wallet_address: String,
     /// A chunk buffer (needed as some chunks might be split into multiple parts)
     chunk_buffer: String,
     /// The position in the keep-alive chunk buffer
@@ -113,6 +115,7 @@ impl Streamer {
         node_id: i64,
         model_name: String,
         endpoint: String,
+        wallet_address: String,
     ) -> Self {
         Self {
             stream: Box::pin(stream),
@@ -125,6 +128,7 @@ impl Streamer {
             node_id,
             model_name,
             endpoint,
+            wallet_address,
             chunk_buffer: String::new(),
             keep_alive_pos: 0,
             first_token_generation_timer: Some(start),
@@ -208,15 +212,24 @@ impl Streamer {
             })?;
         CHAT_COMPLETIONS_TOTAL_TOKENS.add(
             total_tokens as u64,
-            &[KeyValue::new("model", self.model_name.clone())],
+            &[
+                KeyValue::new("model", self.model_name.clone()),
+                KeyValue::new("wallet_address", self.wallet_address.clone()),
+            ],
         );
         CHAT_COMPLETIONS_INPUT_TOKENS.add(
             input_tokens as u64,
-            &[KeyValue::new("model", self.model_name.clone())],
+            &[
+                KeyValue::new("model", self.model_name.clone()),
+                KeyValue::new("wallet_address", self.wallet_address.clone()),
+            ],
         );
         CHAT_COMPLETIONS_COMPLETIONS_TOKENS.add(
             output_tokens as u64,
-            &[KeyValue::new("model", self.model_name.clone())],
+            &[
+                KeyValue::new("model", self.model_name.clone()),
+                KeyValue::new("wallet_address", self.wallet_address.clone()),
+            ],
         );
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,

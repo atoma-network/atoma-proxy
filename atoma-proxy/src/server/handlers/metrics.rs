@@ -20,7 +20,9 @@ const LATENCY_HISTOGRAM_BUCKETS: [f64; 15] = [
 /// # Metric Details
 /// - Name: `atoma_chat_completions_num_requests`
 /// - Type: Counter
-/// - Labels: `model`
+/// - Labels:
+///   - `model`: The model used for completion
+///   - `wallet_address`: The wallet address of the user
 /// - Unit: requests (count)
 pub static CHAT_COMPLETIONS_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
@@ -162,6 +164,7 @@ pub static TEXT_EMBEDDINGS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| 
 /// - Type: Counter
 /// - Labels:
 ///   - `model`: The model used for completion
+///   - `wallet_address`: The wallet address of the user
 /// - Unit: tokens (count)
 pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
@@ -180,7 +183,9 @@ pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// # Metric Details
 /// - Name: `atoma_chat_completions_input_tokens`
 /// - Type: Counter
-/// - Labels: `model`
+/// - Labels:
+///   - `model`: The model used for completion
+///   - `wallet_address`: The wallet address of the user
 /// - Unit: tokens (count)
 pub static CHAT_COMPLETIONS_INPUT_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
@@ -193,13 +198,15 @@ pub static CHAT_COMPLETIONS_INPUT_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric that tracks the total number of completions tokens processed in chat completions.
 ///
 /// This metric counts the cumulative number of tokens in the completions,
-/// broken down by model type. This helps monitor token usage and costs
-/// across different models and client applications.
+/// broken down by model type and wallet address. This helps monitor token usage and costs
+/// across different models, client applications, and individual users.
 ///
 /// # Metric Details
 /// - Name: `atoma_chat_completions_completions_tokens`
 /// - Type: Counter
-/// - Labels: `model`
+/// - Labels:
+///   - `model`: The model used for completion
+///   - `wallet_address`: The wallet address of the user
 /// - Unit: tokens (count)
 pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
@@ -256,7 +263,9 @@ pub static CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME: Lazy<Histogram<f64>> = 
 /// # Metric Details
 /// - Name: `atoma_total_completed_requests`
 /// - Type: Counter
-/// - Labels: `model`
+/// - Labels:
+///   - `model`: The model used for completion
+///   - `wallet_address`: The wallet address of the user
 /// - Unit: requests (count)
 pub static TOTAL_COMPLETED_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER

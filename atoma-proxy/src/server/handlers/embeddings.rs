@@ -168,6 +168,15 @@ pub async fn embeddings_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let endpoint = metadata.endpoint.clone();
+
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
+
     tokio::spawn(async move {
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
@@ -190,7 +199,13 @@ pub async fn embeddings_create(
         .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                TOTAL_COMPLETED_REQUESTS.add(
+                    1,
+                    &[
+                        KeyValue::new("model", metadata.model_name),
+                        KeyValue::new("wallet_address", wallet_address),
+                    ],
+                );
                 Ok(Json(response).into_response())
             }
             Err(e) => {
@@ -264,6 +279,13 @@ pub async fn confidential_embeddings_create(
     Json(payload): Json<Value>,
 ) -> Result<Response<Body>> {
     let endpoint = metadata.endpoint.clone();
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
     tokio::spawn(async move {
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
@@ -301,7 +323,13 @@ pub async fn confidential_embeddings_create(
                     total_tokens,
                     &metadata.endpoint,
                 )?;
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                TOTAL_COMPLETED_REQUESTS.add(
+                    1,
+                    &[
+                        KeyValue::new("model", metadata.model_name),
+                        KeyValue::new("wallet_address", wallet_address),
+                    ],
+                );
                 Ok(Json(response).into_response())
             }
             Err(e) => {
@@ -378,8 +406,22 @@ async fn handle_embeddings_response(
     // Record the request in the total text embedding requests metric
     let model_label: String = model_name.clone();
 
+    let wallet_address = state
+        .sui
+        .write()
+        .await
+        .get_wallet_address()
+        .unwrap_or_default()
+        .to_string();
+
     // Record the request in the total failed requests metric
-    TEXT_EMBEDDINGS_NUM_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+    TEXT_EMBEDDINGS_NUM_REQUESTS.add(
+        1,
+        &[
+            KeyValue::new("model", model_label.clone()),
+            KeyValue::new("wallet_address", wallet_address),
+        ],
+    );
 
     let client = reqwest::Client::new();
     let time = Instant::now();
