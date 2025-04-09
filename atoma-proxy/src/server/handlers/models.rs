@@ -89,14 +89,14 @@ pub async fn open_router_models_list(
     let file_content = fs::read_to_string(state.open_router_models_file)
         .await
         .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to read OpenRouter models file: {}", err),
+            message: format!("Failed to read OpenRouter models file: {err}"),
             client_message: None,
             endpoint: OPEN_ROUTER_MODELS_PATH.to_string(),
         })?;
 
     let json_data: Value =
         serde_json::from_str(&file_content).map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Failed to parse OpenRouter models file: {}", err),
+            message: format!("Failed to parse OpenRouter models file: {err}"),
             client_message: None,
             endpoint: OPEN_ROUTER_MODELS_PATH.to_string(),
         })?;
