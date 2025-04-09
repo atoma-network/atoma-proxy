@@ -1,6 +1,7 @@
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::server::error::AtomaProxyError;
@@ -83,6 +84,23 @@ pub struct Model {
     pub owned_by: String,
 }
 
+/// OpenRouter models listing endpoint
+///
+/// This endpoint returns a list of available models from the OpenRouter
+/// models file. The file is expected to be in JSON format and contains
+/// information about the models, including their IDs and other metadata.
+#[utoipa::path(
+    get,
+    path = "/v1/open_router/models",
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "List of available models", body = Value),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")
+    )
+)]
+#[instrument(level = "trace", skip_all)]
 pub async fn open_router_models_list(
     State(state): State<ProxyState>,
 ) -> std::result::Result<Json<Value>, AtomaProxyError> {
