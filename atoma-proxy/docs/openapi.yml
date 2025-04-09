@@ -342,6 +342,24 @@ paths:
           description: Failed to retrieve list of available models
       security:
       - bearerAuth: []
+  /v1/open_router/models:
+    get:
+      tags:
+      - Models
+      summary: OpenRouter models listing endpoint
+      description: |-
+        This endpoint returns a list of available models from the OpenRouter
+        models file. The file is expected to be in JSON format and contains
+        information about the models, including their IDs and other metadata.
+      operationId: open_router_models_list
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Failed to retrieve list of available models
   /v1/nodes:
     post:
       tags:

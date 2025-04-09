@@ -84,6 +84,15 @@ pub struct Model {
     pub owned_by: String,
 }
 
+/// OpenAPI documentation for the open router models listing endpoint.
+///
+/// This struct is used to generate OpenAPI documentation for the models listing
+/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
+/// the OpenAPI specification from the code.
+#[derive(OpenApi)]
+#[openapi(paths(open_router_models_list))]
+pub struct OpenRouterModelsListApi;
+
 /// OpenRouter models listing endpoint
 ///
 /// This endpoint returns a list of available models from the OpenRouter
@@ -91,10 +100,7 @@ pub struct Model {
 /// information about the models, including their IDs and other metadata.
 #[utoipa::path(
     get,
-    path = "/v1/open_router/models",
-    security(
-        ("bearerAuth" = [])
-    ),
+    path = "",
     responses(
         (status = OK, description = "List of available models", body = Value),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to retrieve list of available models")

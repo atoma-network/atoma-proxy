@@ -19,7 +19,7 @@ use crate::server::handlers::{
     embeddings::EMBEDDINGS_PATH,
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
-    models::{ModelsOpenApi, MODELS_PATH},
+    models::{ModelsOpenApi, OpenRouterModelsListApi, MODELS_PATH, OPEN_ROUTER_MODELS_PATH},
     nodes::NodesOpenApi,
 };
 use crate::server::handlers::{
@@ -42,6 +42,7 @@ pub fn openapi_routes() -> Router {
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
             (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
+            (path = OPEN_ROUTER_MODELS_PATH, api = OpenRouterModelsListApi, tags = ["Models"]),
             (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
         tags(
