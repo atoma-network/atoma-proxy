@@ -68,6 +68,7 @@ services:
       - "${ATOMA_P2P_PORT:-8083}:8083/udp"
       - "${ATOMA_P2P_PORT:-8083}:8083/tcp"
       - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081/tcp"
+      - "${ATOMA_SERVICE_PORT:-8080}:8080/tcp"
 
   backend:
     profiles: ["cloud"]
