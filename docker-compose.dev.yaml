@@ -3,14 +3,17 @@ x-atoma-proxy-base: &atoma-proxy-base
   build: &atoma-proxy-base-build
     context: .
     dockerfile: Dockerfile
-  env_file:
-    - .env
   volumes:
     - ${CONFIG_PATH:-./config.toml}:/app/config.toml
     - ./logs:/app/logs
     - sui-config-volume:/root/.sui/sui_config
     - ${SUI_CONFIG_PATH:-~/.sui/sui_config}:/tmp/.sui/sui_config
-
+    - ./data:/app/data
+  env_file:
+    - .env
+  environment:
+    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    - RUST_LOG=${ATOMA_LOG_LEVELS:-info}
   depends_on:
     db:
       condition: service_healthy
@@ -18,51 +21,23 @@ x-atoma-proxy-base: &atoma-proxy-base
     - atoma-network
 
 services:
-  traefik:
-    profiles: ["cloud"]
-    image: traefik:v2.9
-    container_name: traefik
-    restart: unless-stopped
-    command:
-      - "--log.level=INFO"
-      # EntryPoints
-      - "--entryPoints.web.address=:80"
-      - "--entryPoints.websecure.address=:443"
-      # Enable Docker provider
-      - "--providers.docker=true"
-      - "--providers.docker.exposedByDefault=false"
-      # Let's Encrypt (ACME) configuration
-      - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
-      - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
-      - "--certificatesResolvers.myresolver.acme.email=${ACME_EMAIL}"
-      - "--certificatesResolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "80:80"
-      - "443:443"
-    networks:
-      - atoma-network
-    labels:
-      - "traefik.http.routers.traefik.rule=Host(`traefik.atoma.network`)"
-      - "traefik.http.routers.traefik.entrypoints=websecure"
-      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
-      - "traefik.http.services.traefik.loadbalancer.server.port=8090"
-
   db:
     profiles: ["local", "cloud"]
     image: postgres:13
     restart: always
-    env_file: .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT}:${POSTGRES_INTERNAL_PORT}"
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - atoma-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_INTERNAL_PORT} || exit 1"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p 5432 || exit 1"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
@@ -78,6 +53,7 @@ services:
     ports:
       - "${ATOMA_SERVICE_PORT:-8080}:8080"
       - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081"
+      - "${ATOMA_P2P_SERVICE_PORT:-8083}:8083"
 
   # Cloud proxy configuration
   atoma-proxy-cloud:
@@ -88,22 +64,18 @@ services:
       <<: *atoma-proxy-base-build
       args:
         PROFILE: cloud
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.atoma.network`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=myresolver"
-      - "traefik.http.routers.api.service=api_service"
-      - "traefik.http.services.api_service.loadbalancer.server.port=8080" # This is the internal port of the docker, this have to match the port in the config.toml
-      - "traefik.http.routers.credentials.rule=Host(`credentials.atoma.network`)"
-      - "traefik.http.routers.credentials.entrypoints=websecure"
-      - "traefik.http.routers.credentials.tls.certresolver=myresolver"
-      - "traefik.http.routers.credentials.service=credentials_service"
-      - "traefik.http.services.credentials_service.loadbalancer.server.port=8081" # This is the internal port of the docker, this have to match the port in the config.toml
+    ports:
+      - "${ATOMA_P2P_PORT:-8083}:8083/udp"
+      - "${ATOMA_P2P_PORT:-8083}:8083/tcp"
+      - "${ATOMA_PROXY_SERVICE_PORT:-8081}:8081/tcp"
+      - "${ATOMA_SERVICE_PORT:-8080}:8080/tcp"
 
   backend:
     profiles: ["cloud"]
     image: mysten/zklogin:prover-stable
+    volumes:
+      # The ZKEY environment variable must be set to the path of the zkey file.
+      - ${ZKEY}:/app/binaries/zkLogin.zkey
     environment:
       - ZKEY=/app/binaries/zkLogin.zkey
       - WITNESS_BINARIES=/app/binaries
@@ -118,20 +90,91 @@ services:
       - PROVER_URI=http://backend:8080/input
       - NODE_ENV=production
       - DEBUG=zkLogin:info,jwks
-      # The default timeout is 15 seconds. Uncomment the following line to change it.
-      # - PROVER_TIMEOUT=30
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.prover.rule=Host(`prover.atoma.network`)"
-      - "traefik.http.routers.prover.entrypoints=websecure"
-      - "traefik.http.routers.prover.tls.certresolver=myresolver"
-      - "traefik.http.routers.prover.service=prover_service"
-      - "traefik.http.services.prover_service.loadbalancer.server.port=8080" # This is the internal port of the docker
     networks:
       - atoma-network
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.119.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP http receiver
+      - "8889:8889" # Prometheus metrics exporter
+    networks:
+      - atoma-network
+    depends_on:
+      - prometheus
+      - grafana
+      - loki
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - atoma-network
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    env_file: .env
+    environment:
+      - GF_SERVER_ROOT_URL=http://${GRAFANA_DOMAIN}:${GRAFANA_PORT:-3000}/
+    networks:
+      - atoma-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml
+      - loki-data:/loki
+    networks:
+      - atoma-network
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+    networks:
+      - atoma-network
+    user: "0"
+
 volumes:
+  postgres-data:
   sui-config-volume:
+  letsencrypt:
+  grafana_data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  atoma-local-key:
 
 networks:
   atoma-network:
