@@ -238,7 +238,7 @@ pub async fn completions_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
     headers: HeaderMap,
-    Json(payload): Json<Value>,
+    Json(mut payload): Json<Value>,
 ) -> Result<Response<Body>> {
     // Transform the payload
     if let Some(prompt) = payload.get("prompt") {
@@ -276,7 +276,7 @@ pub async fn completions_create(
     }
 
     // Forward the transformed payload to /v1/chat/completions
-    chat_completions_create(metadata, state, headers, Json(payload)).await
+    chat_completions_create(Extension(metadata), State(state), headers, Json(payload)).await
 }
 
 /// Routes chat completion requests to either streaming or non-streaming handlers based on the request type.
