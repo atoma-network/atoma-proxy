@@ -21,9 +21,12 @@ use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_st
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
-    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
-    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
-    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS, TOTAL_COMPLETED_REQUESTS
+    CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER, CHAT_COMPLETIONS_COMPLETIONS_TOKENS,
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER, CHAT_COMPLETIONS_INPUT_TOKENS,
+    CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER, CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME,
+    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
+    CHAT_COMPLETIONS_TOTAL_TOKENS, CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER,
+    CHAT_COMPLETION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -63,6 +66,8 @@ pub struct Streamer {
     start_decode: Option<Instant>,
     /// Node id that's running this request
     node_id: i64,
+    /// The user id which requested the inference
+    user_id: i64,
     /// Model name
     model_name: String,
     /// Endpoint
@@ -109,6 +114,7 @@ impl Streamer {
         num_input_tokens: i64,
         estimated_total_tokens: i64,
         start: Instant,
+        user_id: i64,
         node_id: i64,
         model_name: String,
         endpoint: String,
@@ -122,6 +128,7 @@ impl Streamer {
             start,
             start_decode: None,
             node_id,
+            user_id,
             model_name,
             endpoint,
             chunk_buffer: String::new(),
@@ -217,6 +224,18 @@ impl Streamer {
             output_tokens as u64,
             &[KeyValue::new("model", self.model_name.clone())],
         );
+        CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER.add(
+            total_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
+        CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER.add(
+            input_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
+        CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER.add(
+            output_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,
             self.stack_small_id,
@@ -234,11 +253,6 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
-        // Record the request in the chat completions num requests metric
-        CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
-            self.start.elapsed().as_secs_f64(),
-            &[KeyValue::new("model", self.model_name.clone())],
-        );
         self.is_final_chunk_handled = true;
         Ok(())
     }
@@ -529,8 +543,16 @@ impl Drop for Streamer {
     fn drop(&mut self) {
         if self.is_final_chunk_handled {
             TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", self.model_name.clone())]);
+            // Record the request in the chat completions num requests metric
+            CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+                self.start.elapsed().as_secs_f64(),
+                &[KeyValue::new("model", self.model_name.clone())],
+            );
+            CHAT_COMPLETION_REQUESTS_PER_USER.add(1, &[KeyValue::new("user_id", self.user_id)]);
             return;
         }
+        CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER
+            .add(1, &[KeyValue::new("user_id", self.user_id)]);
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,
             self.stack_small_id,
