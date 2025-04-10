@@ -39,7 +39,7 @@ use crate::server::{
 
 use super::components;
 use super::handlers::chat_completions::{
-    confidential_chat_completions_create, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+    confidential_chat_completions_create, COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
 };
 use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
 use super::handlers::image_generations::{
@@ -221,7 +221,8 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
-        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create));
+        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
+        .route(COMPLETIONS_PATH, post(completions_create));
 
     let node_routes = Router::new()
         .route(NODES_CREATE_PATH, post(nodes_create))
