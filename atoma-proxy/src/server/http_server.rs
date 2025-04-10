@@ -39,7 +39,8 @@ use crate::server::{
 
 use super::components;
 use super::handlers::chat_completions::{
-    confidential_chat_completions_create, COMPLETIONS_PATH, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+    completions_create, confidential_chat_completions_create, COMPLETIONS_PATH,
+    CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
 };
 use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
 use super::handlers::image_generations::{
