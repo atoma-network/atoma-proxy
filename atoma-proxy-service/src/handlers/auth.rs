@@ -691,7 +691,6 @@ pub struct GetZkSalt;
     )
 )]
 #[instrument(level = "info", skip_all)]
-#[axum::debug_handler]
 pub async fn get_zk_salt(
     State(proxy_service_state): State<ProxyServiceState>,
     headers: HeaderMap,

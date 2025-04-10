@@ -405,7 +405,6 @@ pub struct GetGraphData;
         (status = INTERNAL_SERVER_ERROR, description = "Failed to get graph data")
     )
 )]
-#[axum::debug_handler]
 #[instrument(level = "trace", skip_all)]
 async fn get_graph_data(
     State(proxy_service_state): State<ProxyServiceState>,
