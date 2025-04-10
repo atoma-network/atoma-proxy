@@ -551,3 +551,37 @@ pub static EMBEDDING_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
         .with_unit("tokens")
         .build()
 });
+
+/// Counter metric that tracks the total number of unavailable stack status codes per stack small id and user_id.
+///
+/// # Metric Details
+/// - Name: `atoma_unavailable_stack_counter`
+/// - Type: Counter
+/// - Labels: `stack_small_id`, `user_id`
+/// - Unit: requests (count)
+pub static UNAVAILABLE_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_unavailable_stack_counter")
+        .with_description(
+            "Total number of unavailable stack status codes per stack small id and user_id",
+        )
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of locked stack status codes per stack small id and user_id.
+///
+/// # Metric Details
+/// - Name: `atoma_locked_stack_counter`
+/// - Type: Counter
+/// - Labels: `stack_small_id`, `user_id`
+/// - Unit: requests (count)
+pub static LOCKED_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_locked_stack_counter_per_user")
+        .with_description(
+            "Total number of locked stack status codes per stack small id and user_id",
+        )
+        .with_unit("requests")
+        .build()
+});
