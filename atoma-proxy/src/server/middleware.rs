@@ -26,7 +26,10 @@ use super::{
     error::AtomaProxyError,
     handlers::{
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
-        metrics::{STACK_LOCKED_COUNTER, STACK_NUM_REQUESTS_COUNTER, STACK_UNAVAILABLE_COUNTER},
+        metrics::{
+            LOCKED_STACK_COUNTER_PER_USER, STACK_LOCKED_COUNTER, STACK_NUM_REQUESTS_COUNTER,
+            STACK_UNAVAILABLE_COUNTER, UNAVAILABLE_STACK_COUNTER_PER_USER,
+        },
         models::MODELS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
         update_state_manager,
@@ -650,6 +653,16 @@ pub async fn handle_locked_stack_middleware(
                     endpoint: endpoint.to_string(),
                 })?;
             STACK_LOCKED_COUNTER.add(1, &[KeyValue::new("model", request_metadata.model_name)]);
+            LOCKED_STACK_COUNTER_PER_USER.add(
+                1,
+                &[
+                    KeyValue::new(
+                        "stack_small_id",
+                        request_metadata.selected_stack_small_id.to_string(),
+                    ),
+                    KeyValue::new("user_id", request_metadata.user_id),
+                ],
+            );
             // Lock the current stack, in the Proxy's internal state
             utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
             req_parts
@@ -683,6 +696,16 @@ pub async fn handle_locked_stack_middleware(
             STACK_UNAVAILABLE_COUNTER.add(
                 1,
                 &[KeyValue::new("model", request_metadata.model_name.clone())],
+            );
+            UNAVAILABLE_STACK_COUNTER_PER_USER.add(
+                1,
+                &[
+                    KeyValue::new(
+                        "stack_small_id",
+                        request_metadata.selected_stack_small_id.to_string(),
+                    ),
+                    KeyValue::new("user_id", request_metadata.user_id),
+                ],
             );
             // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
             if is_confidential_compute_endpoint(&endpoint) {

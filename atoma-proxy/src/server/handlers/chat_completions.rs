@@ -42,9 +42,12 @@ use tracing::instrument;
 use utoipa::OpenApi;
 
 use super::metrics::{
-    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER,
+    CHAT_COMPLETIONS_INPUT_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER,
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
     TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
 use super::{
@@ -178,6 +181,8 @@ pub async fn chat_completions_create(
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
                 TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -262,6 +267,7 @@ async fn handle_chat_completions_request(
         handle_streaming_response(
             state,
             &metadata.node_address,
+            metadata.user_id,
             metadata.node_id,
             headers,
             &payload,
@@ -276,6 +282,7 @@ async fn handle_chat_completions_request(
         handle_non_streaming_response(
             state,
             &metadata.node_address,
+            metadata.user_id,
             metadata.node_id,
             headers,
             &payload,
@@ -428,6 +435,8 @@ pub async fn confidential_chat_completions_create(
 
                 // Record the failed request in the total failed requests metric
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
                 update_state_manager(
                     &state.state_manager_sender,
@@ -534,6 +543,7 @@ pub fn confidential_chat_completions_create_stream(
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
+    user_id: i64,
     selected_node_id: i64,
     headers: HeaderMap,
     payload: &Value,
@@ -609,6 +619,14 @@ async fn handle_non_streaming_response(
         output_tokens as u64,
         &[KeyValue::new("model", model_name.clone())],
     );
+    CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER
+        .add(total_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+    CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER
+        .add(input_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER
+        .add(output_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+
+    CHAT_COMPLETION_REQUESTS_PER_USER.add(1, &[KeyValue::new("user_id", user_id)]);
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
@@ -733,6 +751,7 @@ async fn handle_non_streaming_response(
 async fn handle_streaming_response(
     state: &ProxyState,
     node_address: &String,
+    user_id: i64,
     node_id: i64,
     mut headers: HeaderMap,
     payload: &Value,
@@ -791,6 +810,7 @@ async fn handle_streaming_response(
             num_input_tokens.unwrap_or(0),
             estimated_total_tokens,
             start,
+            user_id,
             node_id,
             model_name,
             endpoint,
