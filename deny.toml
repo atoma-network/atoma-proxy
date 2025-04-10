@@ -24,12 +24,10 @@ ignore = [
     "RUSTSEC-2024-0370",
     # protobuf crash due to uncontrolled recursion
     "RUSTSEC-2024-0437",
-    # ring AES functions may panic with overflow checking
-    "RUSTSEC-2025-0009",
-    # ring unmaintained (older versions)
-    "RUSTSEC-2025-0010",
     # paste is unmaintained
     "RUSTSEC-2024-0436",
+    # openssl v0.10.71 is required by sui-sdk
+    "RUSTSEC-2025-0022",
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
