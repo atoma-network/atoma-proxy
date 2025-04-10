@@ -22,7 +22,7 @@ pub const TASKS_PATH: &str = "/tasks";
 /// * `Router<ProxyServiceState>` - A router with the tasks endpoint
 pub fn tasks_router() -> Router<ProxyServiceState> {
     Router::new()
-        .route(&format!("{TASKS_PATH}/:id"), get(get_nodes_for_tasks))
+        .route(&format!("{TASKS_PATH}/{{id}}"), get(get_nodes_for_tasks))
         .route(TASKS_PATH, get(get_all_tasks))
 }
 
