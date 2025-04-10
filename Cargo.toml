@@ -11,12 +11,12 @@ version = "0.1.0"
 anyhow                = "1.0.91"
 async-trait           = "0.1.88"
 atoma-auth            = { path = "./atoma-auth" }
-atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
+atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "openrouter-integration" }
 atoma-proxy-service   = { path = "./atoma-proxy-service" }
 atoma-state           = { path = "./atoma-state" }
-atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
-atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
-axum                  = "0.7.7"
+atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "openrouter-integration" }
+atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "openrouter-integration" }
+axum                  = "0.8.3"
 base64                = "0.22.1"
 bcs                   = "0.1.6"
 blake2                = "0.10.6"
@@ -52,10 +52,10 @@ serde                 = "1.0.214"
 serde_json            = "1.0.140"
 serde_yaml            = "0.9.34"
 serial_test           = "3.1.1"
-shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.45.2" }
+shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.46.2" }
 sqlx                  = { version = "0.8.2", features = [ "postgres", "runtime-tokio-native-tls" ] }
-sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.45.2" }
-sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.45.2" }
+sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.46.2" }
+sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.46.2" }
 sui-sdk-types         = "0.0.2"
 thiserror             = "2.0.12"
 tokenizers            = "0.21.0"
@@ -70,8 +70,8 @@ tracing-loki          = "0.2.6"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber    = "0.3.18"
 url                   = "2.5.4"
-utoipa                = "5.2.0"
-utoipa-swagger-ui     = "8.0.3"
+utoipa                = "5.3.1"
+utoipa-swagger-ui     = "9.0.1"
 uuid                  = "1.15.1"
 x25519-dalek          = "2.0.1"
 zeroize               = "1.8.1"
