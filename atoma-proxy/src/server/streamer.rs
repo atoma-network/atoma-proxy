@@ -23,7 +23,7 @@ use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
     CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
-    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS, TOTAL_COMPLETED_REQUESTS
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -528,6 +528,7 @@ impl Drop for Streamer {
     )]
     fn drop(&mut self) {
         if self.is_final_chunk_handled {
+            TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", self.model_name.clone())]);
             return;
         }
         if let Err(e) = update_state_manager(
