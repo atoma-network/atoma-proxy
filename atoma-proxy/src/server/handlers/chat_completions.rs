@@ -35,7 +35,7 @@ use openai_api::{
 use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest};
 use opentelemetry::KeyValue;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
 use tracing::instrument;
