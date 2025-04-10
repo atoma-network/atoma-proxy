@@ -32,7 +32,9 @@ use openai_api::{
     usage::CompletionUsage,
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse,
 };
-use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest};
+use openai_api::{
+    CompletionRequest, CreateChatCompletionRequest, CreateChatCompletionStreamRequest,
+};
 use opentelemetry::KeyValue;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -218,7 +220,7 @@ pub async fn chat_completions_create(
     request_body = CompletionRequest,
     responses(
         (status = OK, description = "Chat completions", content(
-            (CompletionResponse = "text/event-stream")
+            (ChatCompletionResponse = "text/event-stream")
         )),
         (status = BAD_REQUEST, description = "Bad request"),
         (status = UNAUTHORIZED, description = "Unauthorized"),
