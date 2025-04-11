@@ -210,10 +210,48 @@ pub async fn chat_completions_create(
     })?
 }
 
-/// Create completion stream
+#[derive(OpenApi)]
+#[openapi(
+    paths(completions_create),
+    components(schemas(
+        CompletionRequest,
+        ChatCompletionResponse,
+        ChatCompletionChoice,
+        CompletionUsage,
+        PromptTokensDetails,
+        ChatCompletionChunk,
+        ChatCompletionChunkChoice,
+        ChatCompletionChunkDelta,
+        StopReason,
+        ChatCompletionChunkDeltaToolCall,
+        ChatCompletionChunkDeltaToolCallFunction,
+        ChatCompletionLogProbs,
+        ChatCompletionLogProbsContent,
+        ChatCompletionLogProb,
+        Role,
+    ))
+)]
+pub struct CompletionsOpenApi;
+
+/// Create completion
+///
+/// This function processes completion requests by using the chat completions endpoint.
+///
+/// ## Returns
+///
+/// Returns a Response containing either:
+/// - A streaming SSE connection for real-time completions
+/// - A single JSON response for non-streaming completions
+///
+/// ## Errors
+///
+/// Returns an error status code if:
+/// - The request processing fails
+/// - The streaming/non-streaming handlers encounter errors
+/// - The underlying inference service returns an error
 #[utoipa::path(
     post,
-    path = "#stream",
+    path = "",
     security(
         ("bearerAuth" = [])
     ),
