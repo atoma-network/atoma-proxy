@@ -174,7 +174,6 @@ pub async fn embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
@@ -185,7 +184,6 @@ pub async fn embeddings_create(
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
             num_input_compute_units as i64,
@@ -277,7 +275,6 @@ pub async fn confidential_embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
@@ -288,7 +285,6 @@ pub async fn confidential_embeddings_create(
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
             num_input_compute_units as i64,
@@ -384,7 +380,6 @@ pub async fn confidential_embeddings_create(
 async fn handle_embeddings_response(
     state: &ProxyState,
     node_address: String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     num_input_compute_units: i64,
@@ -449,7 +444,6 @@ async fn handle_embeddings_response(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
                 model_name,
-                node_small_id: selected_node_id,
                 input_tokens: num_input_compute_units,
                 output_tokens: 0,
                 time: time.elapsed().as_secs_f64(),

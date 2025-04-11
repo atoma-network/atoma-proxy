@@ -739,41 +739,12 @@ pub enum AtomaAtomaStateManagerEvent {
         timestamp: DateTime<Utc>,
         /// The name/identifier of the model
         model_name: String,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
         /// Number of input tokens
         input_tokens: i64,
         /// Number of output tokens
         output_tokens: i64,
         /// Time taken to process the tokens
         time: f64,
-    },
-    /// Records statistics about a node's prefill performance
-    UpdateNodePrefillPerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's decode performance
-    UpdateNodeDecodePerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's latency performance
-    UpdateNodeLatencyPerformance {
-        /// Timestamp of the transaction that created the stack
-        timestamp: DateTime<Utc>,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Latency in seconds
-        latency: f64,
     },
     /// Registers a new user with a password
     RegisterUserWithPassword {

@@ -175,7 +175,6 @@ pub async fn image_generations_create(
         match handle_image_generation_response(
             &state,
             metadata.node_address,
-            metadata.node_id,
             headers,
             payload,
             metadata.max_total_num_compute_units as i64,
@@ -272,7 +271,6 @@ pub async fn confidential_image_generations_create(
         match handle_image_generation_response(
             &state,
             metadata.node_address,
-            metadata.node_id,
             headers,
             payload,
             metadata.max_total_num_compute_units as i64,
@@ -360,7 +358,6 @@ pub async fn confidential_image_generations_create(
 async fn handle_image_generation_response(
     state: &ProxyState,
     node_address: String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     total_tokens: i64,
@@ -415,7 +412,6 @@ async fn handle_image_generation_response(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
                 model_name,
-                node_small_id: selected_node_id,
                 input_tokens: 0,
                 output_tokens: total_tokens,
                 time: time.elapsed().as_secs_f64(),

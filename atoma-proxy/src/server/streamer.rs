@@ -9,7 +9,6 @@ use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
-use sqlx::types::chrono::{DateTime, Utc};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -62,10 +61,6 @@ pub struct Streamer {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// Start time of the request
     start: Instant,
-    /// Start time of the decode
-    start_decode: Option<Instant>,
-    /// Node id that's running this request
-    node_id: i64,
     /// The user id which requested the inference
     user_id: i64,
     /// Model name
@@ -115,7 +110,6 @@ impl Streamer {
         estimated_total_tokens: i64,
         start: Instant,
         user_id: i64,
-        node_id: i64,
         model_name: String,
         endpoint: String,
     ) -> Self {
@@ -126,8 +120,6 @@ impl Streamer {
             stack_small_id,
             state_manager_sender,
             start,
-            start_decode: None,
-            node_id,
             user_id,
             model_name,
             endpoint,
@@ -435,26 +427,6 @@ impl Stream for Streamer {
                     );
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
-
-                if self.start_decode.is_none() {
-                    self.start_decode = Some(Instant::now());
-                    let latency = self.start.elapsed().as_secs_f64();
-                    self.state_manager_sender
-                        .send(AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {
-                            timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()), // Convert to chrono::DateTime<Utc>
-                            node_small_id: self.node_id,
-                            latency,
-                        })
-                        .map_err(|e| {
-                            error!(
-                                target = "atoma-service-streamer",
-                                level = "error",
-                                "Error updating node latency performance: {}",
-                                e
-                            );
-                            Error::new(format!("Error updating node latency performance: {e:?}"))
-                        })?;
-                }
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
