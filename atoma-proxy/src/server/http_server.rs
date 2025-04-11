@@ -39,7 +39,8 @@ use crate::server::{
 
 use super::components;
 use super::handlers::chat_completions::{
-    confidential_chat_completions_create, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+    completions_create, confidential_chat_completions_create, COMPLETIONS_PATH,
+    CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
 };
 use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
 use super::handlers::image_generations::{
@@ -132,6 +133,9 @@ pub struct ProxyState {
 
     /// Open router models file.
     pub open_router_models_file: String,
+
+    /// The address and port on which the service is running.
+    pub port: u16,
 }
 
 #[derive(OpenApi)]
@@ -229,7 +233,8 @@ pub fn create_router(state: &ProxyState) -> Router {
 
     let public_routes = Router::new()
         .route(HEALTH_PATH, get(health))
-        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list));
+        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list))
+        .route(COMPLETIONS_PATH, post(completions_create));
 
     Router::new()
         .merge(
@@ -294,6 +299,7 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
         open_router_models_file: config.open_router_models_file,
+        port: tcp_listener.local_addr().unwrap().port(),
     };
     let router = create_router(&proxy_state);
     let server =
