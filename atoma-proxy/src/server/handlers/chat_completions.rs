@@ -248,7 +248,7 @@ pub async fn completions_create(
             });
         }
     }
-    if let Some(_) = payload.get("suffix") {
+    if payload.get("suffix").is_some() {
         return Err(AtomaProxyError::RequestError {
             message: "Suffix is not supported".to_string(),
             endpoint: COMPLETIONS_PATH.to_string(),
@@ -269,7 +269,7 @@ pub async fn completions_create(
             })?;
         // If the logprogs field is present, remove it and set it to true
         payload.remove("logprobs");
-        payload.insert("logprobs".to_string(), Value::Bool(true.into()));
+        payload.insert("logprobs".to_string(), Value::Bool(true));
     }
     // Transform the payload
     if let Some(prompt) = payload.get("prompt") {
