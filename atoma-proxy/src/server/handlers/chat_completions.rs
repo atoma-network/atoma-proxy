@@ -240,6 +240,28 @@ pub async fn completions_create(
     headers: HeaderMap,
     Json(mut payload): Json<Value>,
 ) -> Result<Response<Body>> {
+    if let Some(best_of) = payload.get("best_if") {
+        if best_of.as_u64().unwrap_or(0) > 1 {
+            return Err(AtomaProxyError::RequestError {
+                message: "Best of > 1 is not supported".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            });
+        }
+    }
+    if let Some(_) = payload.get("suffix") {
+        return Err(AtomaProxyError::RequestError {
+            message: "Suffix is not supported".to_string(),
+            endpoint: COMPLETIONS_PATH.to_string(),
+        });
+    }
+    if let Some(logprobs) = payload.get("logprobs") {
+        if logprobs.as_u64().unwrap_or(0) > 0 {
+            return Err(AtomaProxyError::RequestError {
+                message: "Logprobs is not supported".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            });
+        }
+    }
     // Transform the payload
     if let Some(prompt) = payload.get("prompt") {
         let messages = match prompt {
