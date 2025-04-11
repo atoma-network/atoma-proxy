@@ -261,6 +261,15 @@ pub async fn completions_create(
                 endpoint: COMPLETIONS_PATH.to_string(),
             });
         }
+        let payload = payload
+            .as_object_mut()
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "Invalid payload".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            })?;
+        // If the logprogs field is present, remove it and set it to true
+        payload.remove("logprobs");
+        payload.insert("logprobs".to_string(), Value::Bool(true.into()));
     }
     // Transform the payload
     if let Some(prompt) = payload.get("prompt") {
