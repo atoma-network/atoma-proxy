@@ -133,6 +133,9 @@ pub struct ProxyState {
 
     /// Open router models file.
     pub open_router_models_file: String,
+
+    /// The address and port on which the service is running.
+    pub port: u16,
 }
 
 #[derive(OpenApi)]
@@ -222,8 +225,7 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(MODELS_PATH, get(models_list))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
-        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create))
-        .route(COMPLETIONS_PATH, post(completions_create));
+        .route(IMAGE_GENERATIONS_PATH, post(image_generations_create));
 
     let node_routes = Router::new()
         .route(NODES_CREATE_PATH, post(nodes_create))
@@ -231,7 +233,8 @@ pub fn create_router(state: &ProxyState) -> Router {
 
     let public_routes = Router::new()
         .route(HEALTH_PATH, get(health))
-        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list));
+        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list))
+        .route(COMPLETIONS_PATH, post(completions_create));
 
     Router::new()
         .merge(
@@ -296,6 +299,7 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
         open_router_models_file: config.open_router_models_file,
+        port: tcp_listener.local_addr().unwrap().port(),
     };
     let router = create_router(&proxy_state);
     let server =

@@ -231,13 +231,12 @@ pub async fn chat_completions_create(
     level = "info",
     skip_all,
     fields(
-        path = metadata.endpoint,
+        path = COMPLETIONS_PATH,
     )
 )]
 pub async fn completions_create(
-    Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
-    headers: HeaderMap,
+    mut headers: HeaderMap,
     Json(mut payload): Json<Value>,
 ) -> Result<Response<Body>> {
     if let Some(best_of) = payload.get("best_if") {
@@ -310,7 +309,41 @@ pub async fn completions_create(
     }
 
     // Forward the transformed payload to /v1/chat/completions
-    chat_completions_create(Extension(metadata), State(state), headers, Json(payload)).await
+    let chat_completions_endpoint = format!("http://localhost:{}/v1/chat/completions", state.port);
+    let client = reqwest::Client::new();
+    headers.remove("content-length");
+
+    let response = client
+        .post(chat_completions_endpoint)
+        .headers(headers)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to forward request to chat completions endpoint: {err:?}"),
+            client_message: Some("Failed to connect to the chat completions endpoint.".to_string()),
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    let status = response.status();
+    let body_bytes = response
+        .bytes()
+        .await
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to read response from chat completions endpoint: {err:?}"),
+            client_message: None,
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    let body = Body::from(body_bytes);
+    let response = Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to create response: {err:?}"),
+            client_message: None,
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    Ok(response)
 }
 
 /// Routes chat completion requests to either streaming or non-streaming handlers based on the request type.
