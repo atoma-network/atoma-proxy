@@ -263,11 +263,14 @@ pub async fn completions_create(
         };
 
         // Replace "prompt" with "messages"
-        payload.as_object_mut().unwrap().remove("prompt");
-        payload
+        let payload = payload
             .as_object_mut()
-            .unwrap()
-            .insert("messages".to_string(), Value::Array(messages));
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "Invalid payload".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            })?;
+        payload.remove("prompt");
+        payload.insert("messages".to_string(), Value::Array(messages));
     } else {
         return Err(AtomaProxyError::RequestError {
             message: "Missing 'prompt' field".to_string(),
