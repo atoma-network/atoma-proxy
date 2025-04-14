@@ -113,6 +113,14 @@ async fn main() -> Result<()> {
     let (_request_best_available_models_sender, request_best_available_models_receiver) =
         flume::unbounded();
     let node_metrics_collector = NodeMetricsCollector::new()?;
+
+    let tokenizers = initialize_tokenizers(
+        &config.service.models,
+        &config.service.revisions,
+        &config.service.hf_token,
+    )
+    .await?;
+
     let metrics_collector_handle = spawn_with_shutdown(
         trigger_new_metrics_collection_task(
             node_metrics_collector,
@@ -141,12 +149,6 @@ async fn main() -> Result<()> {
     );
 
     let sui_subscriber_handle = spawn_with_shutdown(sui_subscriber.run(), shutdown_sender.clone());
-    let tokenizers = initialize_tokenizers(
-        &config.service.models,
-        &config.service.revisions,
-        &config.service.hf_token,
-    )
-    .await?;
 
     let models_with_modalities = config
         .service
@@ -298,11 +300,7 @@ async fn initialize_tokenizers(
                     RepoType::Model,
                     revision.clone(),
                 ));
-
-                let tokenizer_filename = repo
-                    .get("tokenizer.json")
-                    .expect("Failed to get tokenizer.json");
-
+                let tokenizer_filename = repo.get("tokenizer.json")?;
                 Tokenizer::from_file(tokenizer_filename)
                     .map_err(|e| {
                         anyhow::anyhow!(format!(
