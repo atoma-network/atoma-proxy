@@ -28,8 +28,10 @@ use crate::server::{
 use super::{
     handle_status_code_error,
     metrics::{
+        EMBEDDING_TOTAL_TOKENS_PER_USER, SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
         TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
         TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
+        UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
     },
     request_model::{ComputeUnitsEstimate, RequestModel},
     update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
@@ -172,14 +174,16 @@ pub async fn embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
+        EMBEDDING_TOTAL_TOKENS_PER_USER.add(
+            num_input_compute_units,
+            &[KeyValue::new("user_id", metadata.user_id)],
+        );
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
             num_input_compute_units as i64,
@@ -191,13 +195,16 @@ pub async fn embeddings_create(
         {
             Ok(response) => {
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 Ok(Json(response).into_response())
             }
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
                 TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-
+                UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -268,14 +275,16 @@ pub async fn confidential_embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            node_id,
             max_total_num_compute_units: num_input_compute_units,
             ..
         } = metadata;
+        EMBEDDING_TOTAL_TOKENS_PER_USER.add(
+            num_input_compute_units,
+            &[KeyValue::new("user_id", metadata.user_id)],
+        );
         match handle_embeddings_response(
             &state,
             node_address,
-            node_id,
             headers,
             payload,
             num_input_compute_units as i64,
@@ -302,12 +311,16 @@ pub async fn confidential_embeddings_create(
                     &metadata.endpoint,
                 )?;
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 Ok(Json(response).into_response())
             }
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
                 TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
                 update_state_manager(
                     &state.state_manager_sender,
@@ -367,7 +380,6 @@ pub async fn confidential_embeddings_create(
 async fn handle_embeddings_response(
     state: &ProxyState,
     node_address: String,
-    selected_node_id: i64,
     headers: HeaderMap,
     payload: Value,
     num_input_compute_units: i64,
@@ -432,7 +444,6 @@ async fn handle_embeddings_response(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
                 model_name,
-                node_small_id: selected_node_id,
                 input_tokens: num_input_compute_units,
                 output_tokens: 0,
                 time: time.elapsed().as_secs_f64(),

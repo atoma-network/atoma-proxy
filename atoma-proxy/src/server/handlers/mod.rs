@@ -321,6 +321,14 @@ pub fn handle_status_code_error(
             message: format!("Inference service returned locked error: {error}"),
             endpoint: endpoint.to_string(),
         }),
+        StatusCode::TOO_EARLY => Err(AtomaProxyError::UnavailableStack {
+            message: format!("Inference service returned too early error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
+        StatusCode::TOO_MANY_REQUESTS => Err(AtomaProxyError::TooManyRequests {
+            message: format!("Inference service returned too many requests error: {error}"),
+            endpoint: endpoint.to_string(),
+        }),
         _ => Err(AtomaProxyError::InternalError {
             message: format!("Inference service returned non-success error: {error}"),
             client_message: Some(format!(

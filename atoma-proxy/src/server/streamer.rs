@@ -9,22 +9,23 @@ use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
 use reqwest;
 use serde_json::Value;
-use sqlx::types::chrono::{DateTime, Utc};
 use std::{
     pin::Pin,
     task::{Context, Poll},
     time::Instant,
 };
-use tokio::sync::mpsc;
 use tracing::{error, info, instrument, warn};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
-    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
-    CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME, CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS,
-    CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER, CHAT_COMPLETIONS_COMPLETIONS_TOKENS,
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER, CHAT_COMPLETIONS_INPUT_TOKENS,
+    CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER, CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME,
+    CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS, CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN,
+    CHAT_COMPLETIONS_TOTAL_TOKENS, CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER,
+    CHAT_COMPLETION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
 };
 use super::handlers::verify_response_hash_and_signature;
 
@@ -60,10 +61,8 @@ pub struct Streamer {
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// Start time of the request
     start: Instant,
-    /// Start time of the decode
-    start_decode: Option<Instant>,
-    /// Node id that's running this request
-    node_id: i64,
+    /// The user id which requested the inference
+    user_id: i64,
     /// Model name
     model_name: String,
     /// Endpoint
@@ -110,7 +109,7 @@ impl Streamer {
         num_input_tokens: i64,
         estimated_total_tokens: i64,
         start: Instant,
-        node_id: i64,
+        user_id: i64,
         model_name: String,
         endpoint: String,
     ) -> Self {
@@ -121,8 +120,7 @@ impl Streamer {
             stack_small_id,
             state_manager_sender,
             start,
-            start_decode: None,
-            node_id,
+            user_id,
             model_name,
             endpoint,
             chunk_buffer: String::new(),
@@ -218,6 +216,18 @@ impl Streamer {
             output_tokens as u64,
             &[KeyValue::new("model", self.model_name.clone())],
         );
+        CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER.add(
+            total_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
+        CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER.add(
+            input_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
+        CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER.add(
+            output_tokens as u64,
+            &[KeyValue::new("user_id", self.user_id)],
+        );
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,
             self.stack_small_id,
@@ -235,11 +245,6 @@ impl Streamer {
                 "Error updating stack num tokens: {e:?}"
             )));
         }
-        // Record the request in the chat completions num requests metric
-        CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
-            self.start.elapsed().as_secs_f64(),
-            &[KeyValue::new("model", self.model_name.clone())],
-        );
         self.is_final_chunk_handled = true;
         Ok(())
     }
@@ -260,6 +265,7 @@ impl Stream for Streamer {
                 }
 
                 if chunk.as_ref() == KEEP_ALIVE_CHUNK {
+                    cx.waker().wake_by_ref();
                     return Poll::Pending;
                 }
 
@@ -294,6 +300,7 @@ impl Stream for Streamer {
                                 "Full keep-alive received, resetting position"
                             );
                         }
+                        cx.waker().wake_by_ref();
                         return Poll::Pending;
                     } else if self.keep_alive_pos > 0 {
                         // Reset position if we had partial match but current chunk doesn't continue it
@@ -357,6 +364,7 @@ impl Stream for Streamer {
                                 chunk_str
                             );
                             self.chunk_buffer.push_str(chunk_str);
+                            cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
 
@@ -387,6 +395,7 @@ impl Stream for Streamer {
                             Err(e) => {
                                 if e.is_eof() {
                                     // NOTE: We don't need to push the chunk to the buffer, as it was pushed already
+                                    cx.waker().wake_by_ref();
                                     return Poll::Pending;
                                 }
                                 error!(
@@ -418,26 +427,6 @@ impl Stream for Streamer {
                     );
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
-
-                if self.start_decode.is_none() {
-                    self.start_decode = Some(Instant::now());
-                    let latency = self.start.elapsed().as_secs_f64();
-                    self.state_manager_sender
-                        .send(AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {
-                            timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()), // Convert to chrono::DateTime<Utc>
-                            node_small_id: self.node_id,
-                            latency,
-                        })
-                        .map_err(|e| {
-                            error!(
-                                target = "atoma-service-streamer",
-                                level = "error",
-                                "Error updating node latency performance: {}",
-                                e
-                            );
-                            Error::new(format!("Error updating node latency performance: {e:?}"))
-                        })?;
-                }
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
@@ -525,8 +514,17 @@ impl Drop for Streamer {
     )]
     fn drop(&mut self) {
         if self.is_final_chunk_handled {
+            TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", self.model_name.clone())]);
+            // Record the request in the chat completions num requests metric
+            CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS.record(
+                self.start.elapsed().as_secs_f64(),
+                &[KeyValue::new("model", self.model_name.clone())],
+            );
+            CHAT_COMPLETION_REQUESTS_PER_USER.add(1, &[KeyValue::new("user_id", self.user_id)]);
             return;
         }
+        CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER
+            .add(1, &[KeyValue::new("user_id", self.user_id)]);
         if let Err(e) = update_state_manager(
             &self.state_manager_sender,
             self.stack_small_id,
@@ -550,7 +548,7 @@ pub struct ClientStreamer {
     /// The receiver for the event chunks
     pub chunk_receiver: flume::Receiver<Event>,
     /// The sender for the kill signal
-    pub kill_signal: mpsc::Sender<()>,
+    pub kill_signal: flume::Sender<()>,
     /// If the streamer has reached done state
     pub done: bool,
 }
@@ -559,7 +557,7 @@ impl ClientStreamer {
     /// Creates a new client streamer
     pub const fn new(
         chunk_receiver: flume::Receiver<Event>,
-        kill_signal: mpsc::Sender<()>,
+        kill_signal: flume::Sender<()>,
     ) -> Self {
         Self {
             chunk_receiver,
@@ -593,7 +591,7 @@ impl Stream for ClientStreamer {
 impl Drop for ClientStreamer {
     fn drop(&mut self) {
         if !self.done {
-            let _ = self.kill_signal.blocking_send(());
+            let _ = self.kill_signal.send(());
         }
     }
 }

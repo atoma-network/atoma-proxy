@@ -628,6 +628,7 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
     },
+    /// Retrieves all stacks associated with a specific task
     GetStacksForTask {
         /// Unique small integer identifier for the task
         task_small_id: i64,
@@ -636,19 +637,8 @@ pub enum AtomaAtomaStateManagerEvent {
         /// The user id of the stacks to filter by
         user_id: i64,
         /// Channel to send back the list of matching stacks
+        /// Returns Ok(Vec<Stack>) with matching stacks or an error if the query fails
         result_sender: oneshot::Sender<Result<Option<Stack>>>,
-    },
-    /// Verifies if a stack is valid for confidential compute request
-    VerifyStackForConfidentialComputeRequest {
-        /// Unique small integer identifier for the stack
-        stack_small_id: i64,
-
-        /// Available compute units for the stack
-        available_compute_units: i64,
-
-        /// Channel to send back the result
-        /// Returns Ok(bool) with true if the stack is valid or false if it is not
-        result_sender: oneshot::Sender<Result<bool>>,
     },
     /// Locks compute units for a stack
     LockComputeUnitsForStack {
@@ -749,41 +739,12 @@ pub enum AtomaAtomaStateManagerEvent {
         timestamp: DateTime<Utc>,
         /// The name/identifier of the model
         model_name: String,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
         /// Number of input tokens
         input_tokens: i64,
         /// Number of output tokens
         output_tokens: i64,
         /// Time taken to process the tokens
         time: f64,
-    },
-    /// Records statistics about a node's prefill performance
-    UpdateNodePrefillPerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's decode performance
-    UpdateNodeDecodePerformance {
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Number of tokens
-        tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
-    /// Records statistics about a node's latency performance
-    UpdateNodeLatencyPerformance {
-        /// Timestamp of the transaction that created the stack
-        timestamp: DateTime<Utc>,
-        /// Unique small integer identifier for the node
-        node_small_id: i64,
-        /// Latency in seconds
-        latency: f64,
     },
     /// Registers a new user with a password
     RegisterUserWithPassword {

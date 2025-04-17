@@ -1034,8 +1034,8 @@ pub async fn handle_state_manager_event(
             model,
             free_compute_units,
             user_id,
-            result_sender,
             is_confidential,
+            result_sender,
         } => {
             trace!(
                 target = "atoma-state-handlers",
@@ -1145,22 +1145,6 @@ pub async fn handle_state_manager_event(
                 .send(node)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
-        AtomaAtomaStateManagerEvent::VerifyStackForConfidentialComputeRequest {
-            stack_small_id,
-            available_compute_units,
-            result_sender,
-        } => {
-            let is_valid = state_manager
-                .state
-                .verify_stack_for_confidential_compute_request(
-                    stack_small_id,
-                    available_compute_units,
-                )
-                .await;
-            result_sender
-                .send(is_valid)
-                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
-        }
         AtomaAtomaStateManagerEvent::UpsertNodePublicAddress {
             node_small_id,
             public_address,
@@ -1247,20 +1231,10 @@ pub async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
             timestamp,
             model_name,
-            node_small_id,
             input_tokens,
             output_tokens,
             time,
         } => {
-            state_manager
-                .state
-                .update_node_throughput_performance(
-                    node_small_id,
-                    input_tokens,
-                    output_tokens,
-                    time,
-                )
-                .await?;
             state_manager
                 .state
                 .add_compute_units_processed(
@@ -1270,37 +1244,6 @@ pub async fn handle_state_manager_event(
                     time,
                 )
                 .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodePrefillPerformance {
-            node_small_id,
-            tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .update_node_prefill_performance(node_small_id, tokens, time)
-                .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodeDecodePerformance {
-            node_small_id,
-            tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .update_node_decode_performance(node_small_id, tokens, time)
-                .await?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodeLatencyPerformance {
-            timestamp,
-            node_small_id,
-            latency,
-        } => {
-            state_manager
-                .state
-                .update_node_latency_performance(node_small_id, latency)
-                .await?;
-            state_manager.state.add_latency(timestamp, latency).await?;
         }
         AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
             email,

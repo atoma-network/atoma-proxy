@@ -25,7 +25,7 @@ tower-http                   = { workspace = true, features = [ "cors" ] }
 tracing.workspace            = true
 tracing-subscriber.workspace = true
 utoipa                       = { workspace = true, features = [ "axum_extras" ] }
-utoipa-swagger-ui            = { workspace = true }
+utoipa-swagger-ui            = { workspace = true, features = [ "axum" ] }
 
 [features]
 google-oauth = [ "atoma-auth/google-oauth" ]

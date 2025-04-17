@@ -26,7 +26,7 @@ pub const GET_ALL_STACKS_FOR_USER_PATH: &str = "/all_stacks";
 pub fn stacks_router() -> Router<ProxyServiceState> {
     Router::new()
         .route(
-            &format!("{GET_CURRENT_STACKS_PATH}/:id"),
+            &format!("{GET_CURRENT_STACKS_PATH}/{{id}}"),
             get(get_node_stacks),
         )
         .route(GET_CURRENT_STACKS_PATH, get(get_current_stacks))

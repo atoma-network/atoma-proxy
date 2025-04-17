@@ -1,4 +1,7 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::verify_signature;
@@ -17,11 +20,15 @@ use utoipa::{OpenApi, ToSchema};
 
 use crate::server::check_auth;
 use crate::server::error::AtomaProxyError;
-use crate::server::http_server::ProxyState;
+use crate::server::http_server::{
+    LockedComputeUnits, LockedDetails, ProxyState, StackSmallId, Timeout,
+};
 use crate::server::middleware::acquire_stack_lock;
 use crate::server::middleware::auth::{
     acquire_new_stack, get_stack_if_locked, SelectedNodeMetadata,
 };
+
+use super::update_state_manager;
 
 pub const NODES_PATH: &str = "/v1/nodes";
 pub const NODES_CREATE_PATH: &str = "/v1/nodes";
@@ -36,6 +43,9 @@ const BODY_HASH_SIZE: usize = 32;
 /// bound for the number of tokens for each request.
 /// TODO: In the future, this number can be dynamically adjusted based on the model.
 pub const MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE: i64 = 8_192;
+
+/// The maximum timeout for the locked compute units, in seconds.
+pub const MAX_TIMEOUT_FOR_CONFIDENTIAL_COMPUTE: u64 = 5;
 
 #[derive(OpenApi)]
 #[openapi(paths(nodes_create, nodes_create_lock))]
@@ -228,6 +238,11 @@ pub struct NodesCreateLockResponse {
 pub struct NodesCreateLockRequest {
     /// The model to lock a node for
     pub model: String,
+    /// The number of tokens to be processed for confidential compute
+    /// (including input and output tokens)
+    pub max_num_tokens: Option<u64>,
+    /// An optional timeout period for the locked compute units, in seconds
+    pub timeout: Option<u64>,
 }
 
 /// Create a node lock for confidential compute
@@ -275,158 +290,241 @@ pub async fn nodes_create_lock(
         NODES_CREATE_LOCK_PATH,
     )
     .await?;
-    state
-        .state_manager_sender
-        .send(
-            AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
-                model: payload.model.clone(),
-                max_num_tokens: MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-                user_id,
-                result_sender: sender,
-            },
-        )
-        .map_err(|_| AtomaProxyError::InternalError {
-            message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
+
+    let max_num_tokens = payload
+        .max_num_tokens
+        .map_or(MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE, |max_num_tokens| {
+            max_num_tokens as i64
+        });
+    let timeout = payload
+        .timeout
+        .unwrap_or(MAX_TIMEOUT_FOR_CONFIDENTIAL_COMPUTE);
+    prune_compute_units_in_memory(&state)?;
+    tokio::spawn(async move {
+        state
+            .state_manager_sender
+            .send(
+                AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryption {
+                    model: payload.model.clone(),
+                    max_num_tokens,
+                    user_id,
+                    result_sender: sender,
+                },
+            )
+            .map_err(|_| AtomaProxyError::InternalError {
+                message: "Failed to send SelectNodePublicKeyForEncryption event".to_string(),
+                client_message: None,
+                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+            })?;
+        let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Failed to receive node public key: {e}"),
             client_message: None,
             endpoint: NODES_CREATE_LOCK_PATH.to_string(),
         })?;
-    let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
-        message: format!("Failed to receive node public key: {e}"),
-        client_message: None,
-        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-    })?;
 
-    if let Some(node_public_key) = node_public_key {
-        let stack_small_id =
-            node_public_key
-                .stack_small_id
-                .ok_or_else(|| AtomaProxyError::InternalError {
-                    message: "Stack small id not found for node public key".to_string(),
-                    client_message: None,
-                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-                })?;
-        let public_key = STANDARD.encode(node_public_key.public_key);
-        Ok(Json(NodesCreateLockResponse {
-            public_key,
-            node_small_id: node_public_key.node_small_id as u64,
-            stack_entry_digest: None,
-            stack_small_id: stack_small_id as u64,
-        }))
-    } else {
-        // NOTE: We need to check the user's balance before acquiring a new stack entry.
-        // If this is not the case, we actually do not need authentication from the user.
-        let (sender, receiver) = oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                model: payload.model.clone(),
-                is_confidential: true, // NOTE: This endpoint is only required for confidential compute
-                result_sender: sender,
-            })
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetCheapestNodeForModel event: {e:?}"),
-                client_message: None,
-                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-            })?;
-        let node = receiver
-            .await
-            .map_err(|_| AtomaProxyError::InternalError {
-                message: "Failed to receive GetCheapestNodeForModel result".to_string(),
-                client_message: None,
-                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-            })?
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetCheapestNodeForModel result: {e:?}"),
-                client_message: None,
-                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-            })?;
-        if let Some(node) = node {
-            let task_small_id = node.task_small_id;
-            let SelectedNodeMetadata {
-                stack_small_id,
-                selected_node_id,
-                tx_digest,
-            } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
-                &state.users_buy_stack_lock_map,
-                (user_id, task_small_id),
-            ) {
-                let sui = state.sui.clone();
-                // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-                acquire_new_stack(
-                    state.state_manager_sender.clone(),
-                    user_id,
-                    lock_guard,
-                    NODES_CREATE_LOCK_PATH.to_string(),
-                    MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
-                    sui,
-                    node,
-                )
-                .await?
-                // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
-                // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
-                // lock guard release will see the new stack.
-                // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
-                // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
-            } else {
-                // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
-                // so we try to get the stack from the state manager, and if it is not found, we return an error.
-                get_stack_if_locked(
-                    &state,
-                    user_id,
-                    task_small_id,
-                    NODES_CREATE_LOCK_PATH,
-                    MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
-                )
-                .await?
-            };
-
-            // NOTE: The contract might select a different node than the one we used to extract
-            // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
-            // to be the one selected by the contract, that we can query from the `StackCreatedEvent`.
-            let node_small_id = selected_node_id;
-            // NOTE: We need to get the public key for the selected node for the acquired stack.
+        if let Some(node_public_key) = node_public_key {
+            let stack_small_id =
+                node_public_key
+                    .stack_small_id
+                    .ok_or_else(|| AtomaProxyError::InternalError {
+                        message: "Stack small id not found for node public key".to_string(),
+                        client_message: None,
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })?;
+            let public_key = STANDARD.encode(node_public_key.public_key);
+            lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
+            Ok(Json(NodesCreateLockResponse {
+                public_key,
+                node_small_id: node_public_key.node_small_id as u64,
+                stack_entry_digest: None,
+                stack_small_id: stack_small_id as u64,
+            }))
+        } else {
+            // NOTE: We need to check the user's balance before acquiring a new stack entry.
+            // If this is not the case, we actually do not need authentication from the user.
             let (sender, receiver) = oneshot::channel();
             state
                 .state_manager_sender
-                .send(
-                    AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryptionForNode {
-                        node_small_id,
-                        result_sender: sender,
-                    },
-                )
+                .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                    model: payload.model.clone(),
+                    is_confidential: true, // NOTE: This endpoint is only required for confidential compute
+                    result_sender: sender,
+                })
                 .map_err(|e| AtomaProxyError::InternalError {
-                    message: format!("Failed to send GetNodePublicKeyForEncryption event: {e:?}"),
+                    message: format!("Failed to send GetCheapestNodeForModel event: {e:?}"),
                     client_message: None,
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })?;
-            let node_public_key = receiver.await.map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetNodePublicKeyForEncryption result: {e:?}"),
-                client_message: None,
-                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-            })?;
-            if let Some(node_public_key) = node_public_key {
-                let public_key = STANDARD.encode(node_public_key.public_key);
-                Ok(Json(NodesCreateLockResponse {
-                    public_key,
-                    node_small_id: node_public_key.node_small_id as u64,
-                    stack_entry_digest: tx_digest.map(|tx| tx.to_string()),
-                    stack_small_id: stack_small_id as u64,
-                }))
+            let node = receiver
+                .await
+                .map_err(|_| AtomaProxyError::InternalError {
+                    message: "Failed to receive GetCheapestNodeForModel result".to_string(),
+                    client_message: None,
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                })?
+                .map_err(|e| AtomaProxyError::InternalError {
+                    message: format!("Failed to get GetCheapestNodeForModel result: {e:?}"),
+                    client_message: None,
+                    endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                })?;
+            if let Some(node) = node {
+                let task_small_id = node.task_small_id;
+                let SelectedNodeMetadata {
+                    stack_small_id,
+                    selected_node_id,
+                    tx_digest,
+                } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
+                    &state.users_buy_stack_lock_map,
+                    (user_id, task_small_id),
+                ) {
+                    let sui = state.sui.clone();
+                    // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+                    acquire_new_stack(
+                        state.state_manager_sender.clone(),
+                        user_id,
+                        lock_guard,
+                        NODES_CREATE_LOCK_PATH.to_string(),
+                        MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
+                        sui,
+                        node,
+                    )
+                    .await?
+                    // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
+                    // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
+                    // lock guard release will see the new stack.
+                    // NOTE: When the `lock_guard` goes out of scope, it ensures that the `DashMap` entry is removed,
+                    // even if the `acquire_new_stack` returned an error, previously, as this is handled at drop time.
+                } else {
+                    // NOTE: Failed to acquire stack lock (meaning, we are in a race condition scenario)
+                    // so we try to get the stack from the state manager, and if it is not found, we return an error.
+                    get_stack_if_locked(
+                        &state,
+                        user_id,
+                        task_small_id,
+                        NODES_CREATE_LOCK_PATH,
+                        MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE as u64,
+                    )
+                    .await?
+                };
+
+                // NOTE: The contract might select a different node than the one we used to extract
+                // the price per one million compute units. In this case, we need to update the value of the `node_small_id``
+                // to be the one selected by the contract, that we can query from the `StackCreatedEvent`.
+                let node_small_id = selected_node_id;
+                // NOTE: We need to get the public key for the selected node for the acquired stack.
+                let (sender, receiver) = oneshot::channel();
+                state
+                    .state_manager_sender
+                    .send(
+                        AtomaAtomaStateManagerEvent::SelectNodePublicKeyForEncryptionForNode {
+                            node_small_id,
+                            result_sender: sender,
+                        },
+                    )
+                    .map_err(|e| AtomaProxyError::InternalError {
+                        message: format!(
+                            "Failed to send GetNodePublicKeyForEncryption event: {e:?}"
+                        ),
+                        client_message: None,
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })?;
+                let node_public_key =
+                    receiver.await.map_err(|e| AtomaProxyError::InternalError {
+                        message: format!(
+                            "Failed to receive GetNodePublicKeyForEncryption result: {e:?}"
+                        ),
+                        client_message: None,
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })?;
+                if let Some(node_public_key) = node_public_key {
+                    let public_key = STANDARD.encode(node_public_key.public_key);
+                    lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
+                    Ok(Json(NodesCreateLockResponse {
+                        public_key,
+                        node_small_id: node_public_key.node_small_id as u64,
+                        stack_entry_digest: tx_digest.map(|tx| tx.to_string()),
+                        stack_small_id: stack_small_id as u64,
+                    }))
+                } else {
+                    Err(AtomaProxyError::InternalError {
+                        message: format!("No node public key found for node {node_small_id}"),
+                        client_message: Some("Node public key not found".to_string()),
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })
+                }
             } else {
-                Err(AtomaProxyError::InternalError {
-                    message: format!("No node public key found for node {node_small_id}"),
-                    client_message: Some("Node public key not found".to_string()),
+                Err(AtomaProxyError::ServiceUnavailable {
+                    message: format!(
+                        "No node found for model {} with confidential compute enabled",
+                        payload.model
+                    ),
                     endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                 })
             }
-        } else {
-            Err(AtomaProxyError::ServiceUnavailable {
-                message: format!(
-                    "No node found for model {} with confidential compute enabled",
-                    payload.model
-                ),
-                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
-            })
+        }
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn task: {e}"),
+        client_message: None,
+        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+    })?
+}
+
+/// Locks compute units in memory, so that the middleware can later handle it appropriately.
+///
+/// # Arguments
+///
+/// * `state` - The state of the proxy
+/// * `stack_small_id` - The small id of the stack
+/// * `timeout` - The timeout for the locked compute units
+/// * `max_num_tokens` - The maximum number of tokens for the locked compute units
+///
+/// # Note
+/// This function is not thread safe, and should only be called from the main thread.
+fn lock_compute_units_in_memory(
+    state: &ProxyState,
+    stack_small_id: StackSmallId,
+    timeout: Timeout,
+    max_num_tokens: LockedComputeUnits,
+) {
+    let start = std::time::Instant::now();
+    let mut entry = state
+        .stack_locked_compute_units
+        .entry(stack_small_id)
+        .or_insert_with(BinaryHeap::new);
+    entry.push(Reverse(LockedDetails {
+        expires_at: start + Duration::from_secs(timeout),
+        max_num_tokens,
+    }));
+}
+
+/// Prune every stack locked compute units in memory.
+///
+/// # Arguments
+///
+/// * `state` - The state of the proxy
+/// * `timeout` - The timeout for the locked compute units
+fn prune_compute_units_in_memory(state: &ProxyState) -> Result<(), AtomaProxyError> {
+    let now = Instant::now();
+    for mut entry in state.stack_locked_compute_units.iter_mut() {
+        let stack_small_id = *entry.key();
+        let details = entry.value_mut();
+
+        while let Some(Reverse(lock)) = details.peek() {
+            if lock.expires_at >= now {
+                break;
+            }
+            // NOTE: Update the state manager to release the lock of compute units, that were previously locked on the `v1/nodes/lock` endpoint.
+            update_state_manager(
+                &state.state_manager_sender,
+                stack_small_id,
+                lock.max_num_tokens,
+                0,
+                NODES_CREATE_LOCK_PATH,
+            )?;
+            details.pop();
         }
     }
+    Ok(())
 }

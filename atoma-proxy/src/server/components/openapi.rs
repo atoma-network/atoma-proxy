@@ -13,13 +13,13 @@ use crate::server::handlers::image_generations::{
     ConfidentialImageGenerationsOpenApi, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use crate::server::handlers::{
-    chat_completions::ChatCompletionsOpenApi,
-    chat_completions::CHAT_COMPLETIONS_PATH,
+    chat_completions::{ChatCompletionsOpenApi, CompletionsOpenApi},
+    chat_completions::{CHAT_COMPLETIONS_PATH, COMPLETIONS_PATH},
     embeddings::EmbeddingsOpenApi,
     embeddings::EMBEDDINGS_PATH,
     image_generations::ImageGenerationsOpenApi,
     image_generations::IMAGE_GENERATIONS_PATH,
-    models::{ModelsOpenApi, MODELS_PATH},
+    models::{ModelsOpenApi, OpenRouterModelsListApi, MODELS_PATH, OPEN_ROUTER_MODELS_PATH},
     nodes::NodesOpenApi,
 };
 use crate::server::handlers::{
@@ -34,6 +34,7 @@ pub fn openapi_routes() -> Router {
     #[openapi(
         modifiers(&SpeakeasyExtension, &SecurityAddon),
         nest(
+            (path = COMPLETIONS_PATH, api = CompletionsOpenApi, tags = ["Chat"]),
             (path = CHAT_COMPLETIONS_PATH, api = ChatCompletionsOpenApi, tags = ["Chat"]),
             (path = CONFIDENTIAL_CHAT_COMPLETIONS_PATH, api = ConfidentialChatCompletionsOpenApi, tags = ["Confidential Chat"]),
             (path = CONFIDENTIAL_EMBEDDINGS_PATH, api = ConfidentialEmbeddingsOpenApi, tags = ["Confidential Embeddings"]),
@@ -42,6 +43,7 @@ pub fn openapi_routes() -> Router {
             (path = HEALTH_PATH, api = HealthOpenApi, tags = ["Health"]),
             (path = IMAGE_GENERATIONS_PATH, api = ImageGenerationsOpenApi, tags = ["Images"]),
             (path = MODELS_PATH, api = ModelsOpenApi, tags = ["Models"]),
+            (path = OPEN_ROUTER_MODELS_PATH, api = OpenRouterModelsListApi, tags = ["Models"]),
             (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
         tags(

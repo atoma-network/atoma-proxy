@@ -331,8 +331,8 @@ pub static TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS: Lazy<Counter<u64>> = Lazy::new(
 /// # Metric Details
 /// - Name: `atoma_stack_unavailable_counter`
 /// - Type: Counter
-/// - Labels: `model`
-/// - Unit: requests (count)
+/// - Labels: `stack_small_id`
+/// - Unit: Unavailable counts
 pub static STACK_UNAVAILABLE_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_stack_unavailable_counter")
@@ -346,12 +346,242 @@ pub static STACK_UNAVAILABLE_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
 /// # Metric Details
 /// - Name: `atoma_stack_locked_counter`
 /// - Type: Counter
-/// - Labels: `model`
-/// - Unit: requests (count)
+/// - Labels: `stack_small_id`
+/// - Unit: Locked counts
 pub static STACK_LOCKED_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_stack_locked_counter")
         .with_description("Total number of stack locked errors")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of stack requests.
+///
+/// # Metric Details
+/// - Name: `atoma_stack_num_requests_counter`
+/// - Type: Counter
+/// - Labels: `stack_small_id`
+/// - Unit: requests (count)
+pub static STACK_NUM_REQUESTS_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_stack_num_requests_counter")
+        .with_description("Total number of stack requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of successful chat completion requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completion_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completion_requests_per_user")
+        .with_description("Total number of chat completion requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of unsuccessful chat completion requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_unsuccessful_chat_completion_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_unsuccessful_chat_completion_requests_per_user")
+        .with_description("Total number of unsuccessful chat completion requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of successful image generation requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_successful_image_generation_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_successful_image_generation_requests_per_user")
+        .with_description("Total number of successful image generation requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of unsuccessful image generation requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_unsuccessful_image_generation_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_unsuccessful_image_generation_requests_per_user")
+        .with_description("Total number of unsuccessful image generation requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of successful text embedding requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_successful_text_embedding_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_successful_text_embedding_requests_per_user")
+        .with_description("Total number of successful text embedding requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of unsuccessful text embedding requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_unsuccessful_text_embedding_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_unsuccessful_text_embedding_requests_per_user")
+        .with_description("Total number of unsuccessful text embedding requests per user")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of chat completion tokens per user.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completions_total_tokens_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: tokens (count)
+pub static CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completions_total_tokens_per_user")
+        .with_description("Total number of chat completion tokens per user")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of chat completion input tokens per user.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completions_input_tokens_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: tokens (count)
+pub static CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completions_input_tokens_per_user")
+        .with_description("Total number of chat completion input tokens per user")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of chat completion completions tokens per user.
+///
+/// # Metric Details
+/// - Name: `atoma_chat_completions_completions_tokens_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: tokens (count)
+pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_chat_completions_completions_tokens_per_user")
+        .with_description("Total number of chat completion completions tokens per user")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of cancelled stream chat completion requests per user.
+///
+/// # Metric Details
+/// - Name: `atoma_cancelled_stream_chat_completion_requests_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: requests (count)
+pub static CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> =
+    Lazy::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_cancelled_stream_requests_per_user")
+            .with_description("Total number of cancelled stream requests per user")
+            .with_unit("requests")
+            .build()
+    });
+
+/// Counter metric that tracks the total number of image generation tokens per user.
+///
+/// # Metric Details
+/// - Name: `atoma_image_generation_total_tokens_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: tokens (count)
+pub static IMAGE_GENERATION_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_image_generation_total_tokens_per_user")
+        .with_description("Total number of image generation tokens per user")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of embedding tokens per user.
+///
+/// # Metric Details
+/// - Name: `atoma_embedding_total_tokens_per_user`
+/// - Type: Counter
+/// - Labels: `user_id`
+/// - Unit: tokens (count)
+pub static EMBEDDING_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_embedding_total_tokens_per_user")
+        .with_description("Total number of embedding tokens per user")
+        .with_unit("tokens")
+        .build()
+});
+
+/// Counter metric that tracks the total number of unavailable stack status codes per stack small id and user_id.
+///
+/// # Metric Details
+/// - Name: `atoma_unavailable_stack_counter`
+/// - Type: Counter
+/// - Labels: `stack_small_id`, `user_id`
+/// - Unit: requests (count)
+pub static UNAVAILABLE_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_unavailable_stack_counter")
+        .with_description(
+            "Total number of unavailable stack status codes per stack small id and user_id",
+        )
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of locked stack status codes per stack small id and user_id.
+///
+/// # Metric Details
+/// - Name: `atoma_locked_stack_counter`
+/// - Type: Counter
+/// - Labels: `stack_small_id`, `user_id`
+/// - Unit: requests (count)
+pub static LOCKED_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_locked_stack_counter_per_user")
+        .with_description(
+            "Total number of locked stack status codes per stack small id and user_id",
+        )
         .with_unit("requests")
         .build()
 });

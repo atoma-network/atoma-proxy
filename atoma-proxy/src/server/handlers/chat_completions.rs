@@ -32,20 +32,24 @@ use openai_api::{
     usage::CompletionUsage,
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse,
 };
-use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest};
+use openai_api::{
+    CompletionRequest, CreateChatCompletionRequest, CreateChatCompletionStreamRequest,
+};
 use opentelemetry::KeyValue;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::types::chrono::{DateTime, Utc};
 use tokenizers::Tokenizer;
-use tokio::sync::mpsc;
 use tracing::instrument;
 use utoipa::OpenApi;
 
 use super::metrics::{
-    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS,
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER,
+    CHAT_COMPLETIONS_INPUT_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER,
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
     TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
 use super::{
@@ -71,6 +75,12 @@ pub const CONTENT_KEY: &str = "content";
 /// This endpoint follows the OpenAI API format for chat completions
 /// and is used to process chat-based requests for AI model inference.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+
+/// Path for the completions endpoint.
+///
+/// This endpoint follows the OpenAI API format for legacy completions
+/// and is used to process chat-based requests for AI model inference.
+pub const COMPLETIONS_PATH: &str = "/v1/completions";
 
 /// The interval for the keep-alive message in the SSE stream.
 const STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS: u64 = 15;
@@ -179,6 +189,8 @@ pub async fn chat_completions_create(
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
                 TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 update_state_manager(
                     &state.state_manager_sender,
                     metadata.selected_stack_small_id,
@@ -196,6 +208,180 @@ pub async fn chat_completions_create(
         client_message: None,
         endpoint,
     })?
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(completions_create),
+    components(schemas(
+        CompletionRequest,
+        ChatCompletionResponse,
+        ChatCompletionChoice,
+        CompletionUsage,
+        PromptTokensDetails,
+        ChatCompletionChunk,
+        ChatCompletionChunkChoice,
+        ChatCompletionChunkDelta,
+        StopReason,
+        ChatCompletionChunkDeltaToolCall,
+        ChatCompletionChunkDeltaToolCallFunction,
+        ChatCompletionLogProbs,
+        ChatCompletionLogProbsContent,
+        ChatCompletionLogProb,
+        Role,
+    ))
+)]
+pub struct CompletionsOpenApi;
+
+/// Create completion
+///
+/// This function processes completion requests by using the chat completions endpoint.
+///
+/// ## Returns
+///
+/// Returns a Response containing either:
+/// - A streaming SSE connection for real-time completions
+/// - A single JSON response for non-streaming completions
+///
+/// ## Errors
+///
+/// Returns an error status code if:
+/// - The request processing fails
+/// - The streaming/non-streaming handlers encounter errors
+/// - The underlying inference service returns an error
+#[utoipa::path(
+    post,
+    path = "",
+    security(
+        ("bearerAuth" = [])
+    ),
+    request_body = CompletionRequest,
+    responses(
+        (status = OK, description = "Chat completions", content(
+            (ChatCompletionResponse = "text/event-stream")
+        )),
+        (status = BAD_REQUEST, description = "Bad request"),
+        (status = UNAUTHORIZED, description = "Unauthorized"),
+        (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
+    )
+)]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        path = COMPLETIONS_PATH,
+    )
+)]
+pub async fn completions_create(
+    State(state): State<ProxyState>,
+    mut headers: HeaderMap,
+    Json(mut payload): Json<Value>,
+) -> Result<Response<Body>> {
+    if let Some(best_of) = payload.get("best_if") {
+        if best_of.as_u64().unwrap_or(0) > 1 {
+            return Err(AtomaProxyError::RequestError {
+                message: "Best of > 1 is not supported".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            });
+        }
+    }
+    if payload.get("suffix").is_some() {
+        return Err(AtomaProxyError::RequestError {
+            message: "Suffix is not supported".to_string(),
+            endpoint: COMPLETIONS_PATH.to_string(),
+        });
+    }
+    if let Some(logprobs) = payload.get("logprobs") {
+        if logprobs.as_u64().unwrap_or(0) > 0 {
+            return Err(AtomaProxyError::RequestError {
+                message: "Logprobs is not supported".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            });
+        }
+        let payload = payload
+            .as_object_mut()
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "Invalid payload".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            })?;
+        // If the logprogs field is present, remove it and set it to true
+        payload.remove("logprobs");
+        payload.insert("logprobs".to_string(), Value::Bool(true));
+    }
+    // Transform the payload
+    if let Some(prompt) = payload.get("prompt") {
+        let messages = match prompt {
+            Value::String(single_prompt) => {
+                // Single string prompt
+                vec![json!({ "role": "user", "content": single_prompt })]
+            }
+            Value::Array(prompts) => {
+                // Array of string prompts
+                prompts
+                    .iter()
+                    .filter_map(|p| p.as_str().map(|s| json!({ "role": "user", "content": s })))
+                    .collect()
+            }
+            _ => {
+                return Err(AtomaProxyError::RequestError {
+                    message: "Invalid 'prompt' field".to_string(),
+                    endpoint: COMPLETIONS_PATH.to_string(),
+                });
+            }
+        };
+
+        // Replace "prompt" with "messages"
+        let payload = payload
+            .as_object_mut()
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "Invalid payload".to_string(),
+                endpoint: COMPLETIONS_PATH.to_string(),
+            })?;
+        payload.remove("prompt");
+        payload.insert("messages".to_string(), Value::Array(messages));
+    } else {
+        return Err(AtomaProxyError::RequestError {
+            message: "Missing 'prompt' field".to_string(),
+            endpoint: COMPLETIONS_PATH.to_string(),
+        });
+    }
+
+    // Forward the transformed payload to /v1/chat/completions
+    let chat_completions_endpoint = format!("http://localhost:{}/v1/chat/completions", state.port);
+    let client = reqwest::Client::new();
+    headers.remove("content-length");
+
+    let response = client
+        .post(chat_completions_endpoint)
+        .headers(headers)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to forward request to chat completions endpoint: {err:?}"),
+            client_message: Some("Failed to connect to the chat completions endpoint.".to_string()),
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    let status = response.status();
+    let body_bytes = response
+        .bytes()
+        .await
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to read response from chat completions endpoint: {err:?}"),
+            client_message: None,
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    let body = Body::from(body_bytes);
+    let response = Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .map_err(|err| AtomaProxyError::InternalError {
+            message: format!("Failed to create response: {err:?}"),
+            client_message: None,
+            endpoint: COMPLETIONS_PATH.to_string(),
+        })?;
+    Ok(response)
 }
 
 /// Routes chat completion requests to either streaming or non-streaming handlers based on the request type.
@@ -263,7 +449,7 @@ async fn handle_chat_completions_request(
         handle_streaming_response(
             state,
             &metadata.node_address,
-            metadata.node_id,
+            metadata.user_id,
             headers,
             &payload,
             metadata.num_input_tokens.map(|v| v as i64),
@@ -277,7 +463,7 @@ async fn handle_chat_completions_request(
         handle_non_streaming_response(
             state,
             &metadata.node_address,
-            metadata.node_id,
+            metadata.user_id,
             headers,
             &payload,
             metadata.max_total_num_compute_units as i64,
@@ -429,6 +615,8 @@ pub async fn confidential_chat_completions_create(
 
                 // Record the failed request in the total failed requests metric
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
                 update_state_manager(
                     &state.state_manager_sender,
@@ -535,7 +723,7 @@ pub fn confidential_chat_completions_create_stream(
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
-    selected_node_id: i64,
+    user_id: i64,
     headers: HeaderMap,
     payload: &Value,
     estimated_total_tokens: i64,
@@ -610,6 +798,14 @@ async fn handle_non_streaming_response(
         output_tokens as u64,
         &[KeyValue::new("model", model_name.clone())],
     );
+    CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER
+        .add(total_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+    CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER
+        .add(input_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+    CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER
+        .add(output_tokens as u64, &[KeyValue::new("user_id", user_id)]);
+
+    CHAT_COMPLETION_REQUESTS_PER_USER.add(1, &[KeyValue::new("user_id", user_id)]);
 
     let verify_hash = endpoint != CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
     verify_response_hash_and_signature(&response.0, verify_hash)?;
@@ -620,7 +816,6 @@ async fn handle_non_streaming_response(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
                 model_name,
-                node_small_id: selected_node_id,
                 input_tokens,
                 output_tokens,
                 time: time.elapsed().as_secs_f64(),
@@ -734,7 +929,7 @@ async fn handle_non_streaming_response(
 async fn handle_streaming_response(
     state: &ProxyState,
     node_address: &String,
-    node_id: i64,
+    user_id: i64,
     mut headers: HeaderMap,
     payload: &Value,
     num_input_tokens: Option<i64>,
@@ -768,15 +963,23 @@ async fn handle_streaming_response(
         handle_status_code_error(response.status(), &endpoint, error)?;
     }
 
+    tracing::info!(
+        target = "atoma-service-chat-completions",
+        "Streaming response received"
+    );
     let stream = response.bytes_stream();
 
     let (event_sender, event_receiver) = flume::unbounded();
-    let (kill_signal_sender, mut kill_signal_receiver) = mpsc::channel(1);
+    let (kill_signal_sender, kill_signal_receiver) = flume::unbounded();
     let state_manager_sender = state.state_manager_sender.clone();
     let node_address_clone = node_address.clone();
     let request_id_clone = request_id.clone();
     let client_clone = client.clone();
     tokio::spawn(async move {
+        tracing::info!(
+            target = "atoma-service-chat-completions",
+            "Starting streamer"
+        );
         let mut streamer = Streamer::new(
             stream,
             state_manager_sender,
@@ -784,31 +987,44 @@ async fn handle_streaming_response(
             num_input_tokens.unwrap_or(0),
             estimated_total_tokens,
             start,
-            node_id,
+            user_id,
             model_name,
             endpoint,
         );
         loop {
             tokio::select! {
-                chunk = streamer.next() => {
-                    match chunk {
-                        Some(Ok(chunk)) => {
-                            event_sender.send(chunk).unwrap();
+                event = streamer.next() => {
+                    match event {
+                        Some(Ok(maybe_chunk)) => {
+                            tracing::info!(target = "atoma-service-chat-completions", "Sending chunk to event sender");
+                            if let Err(e) = event_sender.send(maybe_chunk) {
+                                tracing::error!(
+                                    target = "atoma-service-chat-completions",
+                                    level = "error",
+                                    "Error sending chunk: {e}"
+                                );
+                                // We continue the loop, to allow the streamer to finish with updated usage from the node
+                                continue;
+                            }
                         }
                         Some(Err(e)) => {
-                            tracing::error!(target = "atoma-service-streamer", level = "error", "Error sending chunk: {}", e);
+                            tracing::error!(
+                                target = "atoma-service-chat-completions",
+                                level = "error",
+                                "Error sending chunk for the inner streamer with error: {e}"
+                            );
                             continue;
                         }
                         None => {
-                            continue;
+                            break;
                         }
                     }
                 }
-                _ = kill_signal_receiver.recv() => {
+                _ = kill_signal_receiver.recv_async() => {
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
-                        .header("X-Request-ID", request_id_clone)
+                        .header("X-Request-ID", request_id_clone.clone())
                         .send()
                         .await;
 
@@ -820,10 +1036,15 @@ async fn handle_streaming_response(
                             e
                         );
                     }
-                    break;
+                    // We continue the loop, to allow the streamer to finish with updated usage from the node
+                    continue;
                 }
             }
         }
+        tracing::info!(
+            target = "atoma-service-chat-completions",
+            "Streamer finished for request id: {request_id}"
+        );
     });
 
     // Create the SSE stream
@@ -1194,6 +1415,107 @@ pub mod openai_api {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[schema(example = true)]
         pub parallel_tool_calls: Option<bool>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize, ToSchema)]
+    pub struct CompletionRequest {
+        /// ID of the model to use
+        #[schema(example = "meta-llama/Llama-3.3-70B-Instruct")]
+        pub model: String,
+
+        /// The prompt to generate completions for
+        #[schema(example = json!(["Hello!"]))]
+        pub prompt: Vec<String>,
+
+        #[schema(example = 1, default = 1)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub best_of: Option<i32>,
+
+        #[schema(example = false, default = false)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub echo: Option<bool>,
+
+        /// Number between -2.0 and 2.0. Positive values penalize new tokens based on their
+        /// existing frequency in the text so far
+        #[schema(example = 0.0)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub frequency_penalty: Option<f32>,
+
+        /// Modify the likelihood of specified tokens appearing in the completion.
+        ///
+        /// Accepts a JSON object that maps tokens (specified by their token ID in the tokenizer)
+        /// to an associated bias value from -100 to 100. Mathematically, the bias is added to the logits
+        /// generated by the model prior to sampling. The exact effect will vary per model, but values
+        /// between -1 and 1 should decrease or increase likelihood of selection; values like -100 or
+        /// 100 should result in a ban or exclusive selection of the relevant token.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(example = json!({
+            "1234567890": 0.5,
+            "1234567891": -0.5
+        }))]
+        pub logit_bias: Option<std::collections::HashMap<u32, f32>>,
+
+        /// An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
+        /// logprobs must be set to true if this parameter is used.
+        #[schema(example = 1)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub logprobs: Option<i32>,
+
+        /// The maximum number of tokens to generate in the chat completion
+        #[schema(example = 4096, default = 16)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub max_tokens: Option<i32>,
+
+        /// How many chat completion choices to generate for each input message
+        #[schema(example = 1)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub n: Option<i32>,
+
+        /// Number between -2.0 and 2.0. Positive values penalize new tokens based on
+        /// whether they appear in the text so far
+        #[schema(example = 0.0)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub presence_penalty: Option<f32>,
+
+        /// If specified, our system will make a best effort to sample deterministically
+        #[schema(example = 123)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub seed: Option<i64>,
+
+        /// Up to 4 sequences where the API will stop generating further tokens
+        #[schema(example = "json([\"stop\", \"halt\"])", default = "[]")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub stop: Option<Vec<String>>,
+
+        /// Whether to stream back partial progress
+        #[schema(example = false)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub stream: Option<bool>,
+
+        /// Options for streaming response. Only set this when you set stream: true.
+        #[schema(example = json!({"include_usage": true}))]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub stream_options: Option<stream_options::StreamOptions>,
+
+        /// The suffix that comes after a completion of inserted text.
+        #[schema(example = "json(\"\\n\")")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub suffix: Option<String>,
+
+        /// What sampling temperature to use, between 0 and 2
+        #[schema(example = 0.7)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub temperature: Option<f32>,
+
+        /// An alternative to sampling with temperature
+        #[schema(example = 1.0)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub top_p: Option<f32>,
+
+        /// A unique identifier representing your end-user
+        #[schema(example = "user-1234")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub user: Option<String>,
     }
 
     /// Represents the chat completion response.
