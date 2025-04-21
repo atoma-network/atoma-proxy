@@ -42,6 +42,9 @@ pub struct AtomaServiceConfig {
 
     /// Path to open router json.
     pub open_router_models_file: String,
+
+    /// Heartbeat URL.
+    pub heartbeat_url: String,
 }
 
 impl AtomaServiceConfig {
