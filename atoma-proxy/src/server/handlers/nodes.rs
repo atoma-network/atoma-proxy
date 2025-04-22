@@ -442,7 +442,7 @@ pub async fn nodes_create_lock(
                     Ok(Json(NodesCreateLockResponse {
                         public_key,
                         node_small_id: node_public_key.node_small_id as u64,
-                        stack_entry_digest: Some(tx_digest.to_string()),
+                        stack_entry_digest: Some(tx_digest),
                         stack_small_id: stack_small_id as u64,
                     }))
                 } else {

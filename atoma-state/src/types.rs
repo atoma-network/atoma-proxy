@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 use utoipa::ToSchema;
 
 use crate::state_manager::Result;
+use sui_sdk::types::digests::TransactionDigest;
 
 /// The modalities that can be used to collect metrics, for each of the
 /// currently supported modalities.
@@ -462,7 +463,7 @@ impl From<StackCreatedEvent> for Stack {
             in_settle_period: false,
             total_hash: vec![],
             num_total_messages: 0,
-            tx_digest: "".to_string(),
+            tx_digest: TransactionDigest::ZERO.base58_encode(),
         }
     }
 }

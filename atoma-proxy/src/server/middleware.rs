@@ -735,11 +735,7 @@ pub async fn handle_locked_stack_middleware(
             )
             .await?;
             let selected_node_metadata = match maybe_stack {
-                Some(stack) => SelectedNodeMetadata {
-                    selected_node_id: stack.selected_node_id,
-                    stack_small_id: stack.stack_small_id,
-                    tx_digest: stack.tx_digest,
-                },
+                Some(stack) => stack,
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
                     get_cheapest_node_and_acquire_new_stack(
@@ -1508,7 +1504,7 @@ pub mod auth {
         Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest: tx_digest.to_string(),
+            tx_digest: tx_digest.base58_encode(),
         })
     }
 
