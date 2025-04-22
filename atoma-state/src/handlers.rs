@@ -1729,7 +1729,7 @@ pub mod remote_attestation_verification {
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
     #[instrument(
-        level = "info", 
+        level = "info",
         skip_all,
         fields(
             device_type = device_type,
@@ -1764,8 +1764,12 @@ pub mod remote_attestation_verification {
             device_type = device_type,
             "Attesting NVIDIA evidence list, with should_be_nonce: {should_be_nonce_hex}"
         );
-        let result = match attest_remote(evidence_data, &should_be_nonce_hex, None, None, None)
-            .await
+        let result = match attest_remote(
+            evidence_data,
+            &should_be_nonce_hex,
+            remote_attestation::attest_remote::AttestRemoteOptions::default(),
+        )
+        .await
         {
             Ok(result) => result,
             Err(e) => {
