@@ -442,6 +442,9 @@ pub struct Stack {
 
     /// Number of payload requests that were received by the node for this stack.
     pub num_total_messages: i64,
+
+    /// The transaction digest of the stack
+    pub tx_digest: String,
 }
 
 impl From<StackCreatedEvent> for Stack {
@@ -459,6 +462,7 @@ impl From<StackCreatedEvent> for Stack {
             in_settle_period: false,
             total_hash: vec![],
             num_total_messages: 0,
+            tx_digest: "".to_string(),
         }
     }
 }

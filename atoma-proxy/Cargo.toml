@@ -41,6 +41,7 @@ serde_yaml = { workspace = true }
 sqlx = { workspace = true }
 sui-keys = { workspace = true }
 sui-sdk = { workspace = true }
+sui-sdk-types = { workspace = true, features = [ "serde" ] }
 thiserror = { workspace = true }
 tokenizers = { workspace = true }
 tokio = { workspace = true, features = [ "full" ] }
