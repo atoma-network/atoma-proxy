@@ -11,11 +11,11 @@ version = "0.1.0"
 anyhow                = "1.0.98"
 async-trait           = "0.1.88"
 atoma-auth            = { path = "./atoma-auth" }
-atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "openrouter-integration" }
+atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
 atoma-proxy-service   = { path = "./atoma-proxy-service" }
 atoma-state           = { path = "./atoma-state" }
-atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "openrouter-integration" }
-atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "openrouter-integration" }
+atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
+atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
 axum                  = "0.8.3"
 base64                = "0.22.1"
 bcs                   = "0.1.6"
@@ -54,8 +54,8 @@ serde_yaml            = "0.9.34"
 serial_test           = "3.1.1"
 shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.47.0" }
 sqlx                  = { version = "0.8.5", features = [ "postgres", "runtime-tokio-native-tls" ] }
-sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.46.2" }
-sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.46.2" }
+sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.47.0" }
+sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.47.0" }
 sui-sdk-types         = "0.0.2"
 thiserror             = "2.0.12"
 tokenizers            = "0.21.0"
