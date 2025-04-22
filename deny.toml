@@ -146,7 +146,9 @@ allow-registry = [ "https://github.com/rust-lang/crates.io-index" ]
 # Allow the mysten labs repositories for Sui
 allow-git = [
     "https://github.com/asonnino/prometheus-parser",
+    "https://github.com/atoma-network/nvml-wrapper",
     "https://github.com/atoma-network/nvrust",
+    "https://github.com/hyperium/tonic",
     "https://github.com/zhiburt/tabled",
 ]
 
