@@ -44,7 +44,8 @@ service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (m
 
 [atoma_proxy_service]
 grafana_api_token     = ""             # Grafana API token (read-only permissions required)
-grafana_dashboard_tag = ""             # Tag to filter which Grafana dashboards to expose
+grafana_dashboard_tag = ""             # Tag to filter which Grafana dashboards to expose as graphs
+grafana_stats_tag     = ""             # Tag to filter which Grafana dashboards to expose as stats
 grafana_url           = ""             # Grafana instance URL for metrics visualization
 service_bind_address  = "0.0.0.0:8081" # Proxy service binding address and port (must match docker-compose.yml)
 
