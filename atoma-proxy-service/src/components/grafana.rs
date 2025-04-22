@@ -165,6 +165,14 @@ impl Grafana {
     /// # Arguments
     ///
     /// * `tag` - The tag to use to filter dashboards
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DashboardResponse` objects, each containing the title and panels of the dashboard
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or if the response cannot be parsed
     pub async fn get_dashboards(
         &self,
         tag: String,
@@ -176,10 +184,12 @@ impl Grafana {
             let dashboard_title = dashboard.title();
             let mut panels: Vec<PanelResponse> = dashboard.into();
             for panel in &mut panels {
-                for query in panel.query.queries.iter_mut() {
+                for query in &mut panel.query.queries {
                     query
                         .as_object_mut()
-                        .unwrap()
+                        .ok_or_else(|| {
+                            GrafanaError::UnexpectedResponse("Query is not an object".to_string())
+                        })?
                         .insert("interval".to_string(), panel.interval.clone());
                 }
                 let data = self.get_query_data(&panel.query).await?;
@@ -261,4 +271,6 @@ pub enum GrafanaError {
     Forbidden,
     #[error("Dashboard not found")]
     NotFound,
+    #[error("Unexpected response: {0}")]
+    UnexpectedResponse(String),
 }
