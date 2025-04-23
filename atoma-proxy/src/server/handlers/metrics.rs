@@ -1,11 +1,11 @@
-use once_cell::sync::Lazy;
 use opentelemetry::{
     global,
     metrics::{Counter, Histogram, Meter},
 };
+use std::sync::LazyLock;
 
 // Add global metrics
-static GLOBAL_METER: Lazy<Meter> = Lazy::new(|| global::meter("atoma-proxy"));
+static GLOBAL_METER: LazyLock<Meter> = LazyLock::new(|| global::meter("atoma-proxy"));
 
 const LATENCY_HISTOGRAM_BUCKETS: [f64; 15] = [
     0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0,
@@ -22,7 +22,7 @@ const LATENCY_HISTOGRAM_BUCKETS: [f64; 15] = [
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static CHAT_COMPLETIONS_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_NUM_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_num_requests")
         .with_description("The number of incoming requests for chat completions tasks")
@@ -41,7 +41,7 @@ pub static CHAT_COMPLETIONS_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static IMAGE_GEN_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static IMAGE_GEN_NUM_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_image_gen_num_requests")
         .with_description("The number of incoming requests for image generation tasks")
@@ -60,7 +60,7 @@ pub static IMAGE_GEN_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TEXT_EMBEDDINGS_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TEXT_EMBEDDINGS_NUM_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_text_embs_num_requests")
         .with_description("The number of incoming requests for text embeddings tasks")
@@ -80,7 +80,7 @@ pub static TEXT_EMBEDDINGS_NUM_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static CHAT_COMPLETIONS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_LATENCY_METRICS: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     GLOBAL_METER
         .f64_histogram("atoma_chat_completions_token_latency")
         .with_description("The latency of chat completion generation in seconds")
@@ -101,13 +101,14 @@ pub static CHAT_COMPLETIONS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(||
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("atoma_chat_completions_streaming_latency")
-        .with_description("The latency of chat completion streaming in seconds")
-        .with_unit("s")
-        .build()
-});
+pub static CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS: LazyLock<Histogram<f64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .f64_histogram("atoma_chat_completions_streaming_latency")
+            .with_description("The latency of chat completion streaming in seconds")
+            .with_unit("s")
+            .build()
+    });
 
 /// Histogram metric that tracks the latency of image generation requests.
 ///
@@ -121,7 +122,7 @@ pub static CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS: Lazy<Histogram<f64>> = La
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static IMAGE_GEN_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| {
+pub static IMAGE_GEN_LATENCY_METRICS: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     GLOBAL_METER
         .f64_histogram("atoma_image_generation_latency")
         .with_description("The latency of image generation in seconds")
@@ -142,7 +143,7 @@ pub static IMAGE_GEN_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| {
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static TEXT_EMBEDDINGS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| {
+pub static TEXT_EMBEDDINGS_LATENCY_METRICS: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     GLOBAL_METER
         .f64_histogram("atoma_text_embeddings_latency")
         .with_description("The latency of text embeddings in seconds")
@@ -163,7 +164,7 @@ pub static TEXT_EMBEDDINGS_LATENCY_METRICS: Lazy<Histogram<f64>> = Lazy::new(|| 
 /// - Labels:
 ///   - `model`: The model used for completion
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_TOTAL_TOKENS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_total_tokens")
         .with_description("The estimated total number of tokens processed")
@@ -182,7 +183,7 @@ pub static CHAT_COMPLETIONS_TOTAL_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_INPUT_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_INPUT_TOKENS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_input_tokens")
         .with_description("The number of input tokens processed")
@@ -201,7 +202,7 @@ pub static CHAT_COMPLETIONS_INPUT_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_completions_tokens")
         .with_description("The number of completions tokens processed")
@@ -221,7 +222,7 @@ pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS: Lazy<Counter<u64>> = Lazy::new(|
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [[0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN: Lazy<Histogram<f64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     GLOBAL_METER
         .f64_histogram("atoma_chat_completions_time_to_first_token")
         .with_description("Time taken until first token is generated in seconds")
@@ -242,14 +243,15 @@ pub static CHAT_COMPLETIONS_TIME_TO_FIRST_TOKEN: Lazy<Histogram<f64>> = Lazy::ne
 /// - Labels: `model`
 /// - Unit: seconds
 /// - Buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-pub static CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME: Lazy<Histogram<f64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .f64_histogram("atoma_chat_completions_intra_token_generation_time")
-        .with_description("Time taken to stream between each token generation phase in seconds")
-        .with_unit("s")
-        .with_boundaries(LATENCY_HISTOGRAM_BUCKETS.to_vec())
-        .build()
-});
+pub static CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME: LazyLock<Histogram<f64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .f64_histogram("atoma_chat_completions_intra_token_generation_time")
+            .with_description("Time taken to stream between each token generation phase in seconds")
+            .with_unit("s")
+            .with_boundaries(LATENCY_HISTOGRAM_BUCKETS.to_vec())
+            .build()
+    });
 
 /// Counter metrics that tracks the total number of successfully completed requests (including chat completions, image generation, and text embeddings)
 ///
@@ -258,7 +260,7 @@ pub static CHAT_COMPLETIONS_INTER_TOKEN_GENERATION_TIME: Lazy<Histogram<f64>> = 
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TOTAL_COMPLETED_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TOTAL_COMPLETED_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_total_completed_requests")
         .with_description("Total number of successfully completed requests")
@@ -273,7 +275,7 @@ pub static TOTAL_COMPLETED_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TOTAL_FAILED_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TOTAL_FAILED_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_total_failed_requests")
         .with_description("Total number of failed requests")
@@ -288,7 +290,7 @@ pub static TOTAL_FAILED_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TOTAL_FAILED_CHAT_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TOTAL_FAILED_CHAT_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_total_failed_chat_requests")
         .with_description("Total number of failed chat requests")
@@ -303,7 +305,7 @@ pub static TOTAL_FAILED_CHAT_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TOTAL_FAILED_IMAGE_GENERATION_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TOTAL_FAILED_IMAGE_GENERATION_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_total_failed_image_generation_requests")
         .with_description("Total number of failed image generation requests")
@@ -318,7 +320,7 @@ pub static TOTAL_FAILED_IMAGE_GENERATION_REQUESTS: Lazy<Counter<u64>> = Lazy::ne
 /// - Type: Counter
 /// - Labels: `model`
 /// - Unit: requests (count)
-pub static TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_total_failed_text_embedding_requests")
         .with_description("Total number of failed text embedding requests")
@@ -333,7 +335,7 @@ pub static TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS: Lazy<Counter<u64>> = Lazy::new(
 /// - Type: Counter
 /// - Labels: `stack_small_id`
 /// - Unit: Unavailable counts
-pub static STACK_UNAVAILABLE_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static STACK_UNAVAILABLE_COUNTER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_stack_unavailable_counter")
         .with_description("Total number of stack unavailable errors")
@@ -348,7 +350,7 @@ pub static STACK_UNAVAILABLE_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `stack_small_id`
 /// - Unit: Locked counts
-pub static STACK_LOCKED_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static STACK_LOCKED_COUNTER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_stack_locked_counter")
         .with_description("Total number of stack locked errors")
@@ -363,7 +365,7 @@ pub static STACK_LOCKED_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `stack_small_id`
 /// - Unit: requests (count)
-pub static STACK_NUM_REQUESTS_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static STACK_NUM_REQUESTS_COUNTER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_stack_num_requests_counter")
         .with_description("Total number of stack requests")
@@ -378,7 +380,7 @@ pub static STACK_NUM_REQUESTS_COUNTER: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETION_REQUESTS_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completion_requests_per_user")
         .with_description("Total number of chat completion requests per user")
@@ -393,13 +395,14 @@ pub static CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| 
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_unsuccessful_chat_completion_requests_per_user")
-        .with_description("Total number of unsuccessful chat completion requests per user")
-        .with_unit("requests")
-        .build()
-});
+pub static UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_unsuccessful_chat_completion_requests_per_user")
+            .with_description("Total number of unsuccessful chat completion requests per user")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of successful image generation requests per user.
 ///
@@ -408,13 +411,14 @@ pub static UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> = 
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_successful_image_generation_requests_per_user")
-        .with_description("Total number of successful image generation requests per user")
-        .with_unit("requests")
-        .build()
-});
+pub static SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_successful_image_generation_requests_per_user")
+            .with_description("Total number of successful image generation requests per user")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of unsuccessful image generation requests per user.
 ///
@@ -423,13 +427,14 @@ pub static SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> = L
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_unsuccessful_image_generation_requests_per_user")
-        .with_description("Total number of unsuccessful image generation requests per user")
-        .with_unit("requests")
-        .build()
-});
+pub static UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_unsuccessful_image_generation_requests_per_user")
+            .with_description("Total number of unsuccessful image generation requests per user")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of successful text embedding requests per user.
 ///
@@ -438,13 +443,14 @@ pub static UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER: Lazy<Counter<u64>> =
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_successful_text_embedding_requests_per_user")
-        .with_description("Total number of successful text embedding requests per user")
-        .with_unit("requests")
-        .build()
-});
+pub static SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_successful_text_embedding_requests_per_user")
+            .with_description("Total number of successful text embedding requests per user")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of unsuccessful text embedding requests per user.
 ///
@@ -453,13 +459,14 @@ pub static SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = Laz
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_unsuccessful_text_embedding_requests_per_user")
-        .with_description("Total number of unsuccessful text embedding requests per user")
-        .with_unit("requests")
-        .build()
-});
+pub static UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_unsuccessful_text_embedding_requests_per_user")
+            .with_description("Total number of unsuccessful text embedding requests per user")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of chat completion tokens per user.
 ///
@@ -468,7 +475,7 @@ pub static UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: Lazy<Counter<u64>> = L
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_total_tokens_per_user")
         .with_description("Total number of chat completion tokens per user")
@@ -483,7 +490,7 @@ pub static CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::ne
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_chat_completions_input_tokens_per_user")
         .with_description("Total number of chat completion input tokens per user")
@@ -498,13 +505,14 @@ pub static CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::ne
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: tokens (count)
-pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
-    GLOBAL_METER
-        .u64_counter("atoma_chat_completions_completions_tokens_per_user")
-        .with_description("Total number of chat completion completions tokens per user")
-        .with_unit("tokens")
-        .build()
-});
+pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_chat_completions_completions_tokens_per_user")
+            .with_description("Total number of chat completion completions tokens per user")
+            .with_unit("tokens")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of cancelled stream chat completion requests per user.
 ///
@@ -513,8 +521,8 @@ pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER: Lazy<Counter<u64>> = La
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: requests (count)
-pub static CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>> =
-    Lazy::new(|| {
+pub static CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
         GLOBAL_METER
             .u64_counter("atoma_cancelled_stream_requests_per_user")
             .with_description("Total number of cancelled stream requests per user")
@@ -529,7 +537,7 @@ pub static CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER: Lazy<Counter<u64>
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: tokens (count)
-pub static IMAGE_GENERATION_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static IMAGE_GENERATION_TOTAL_TOKENS_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_image_generation_total_tokens_per_user")
         .with_description("Total number of image generation tokens per user")
@@ -544,7 +552,7 @@ pub static IMAGE_GENERATION_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::ne
 /// - Type: Counter
 /// - Labels: `user_id`
 /// - Unit: tokens (count)
-pub static EMBEDDING_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static EMBEDDING_TOTAL_TOKENS_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_embedding_total_tokens_per_user")
         .with_description("Total number of embedding tokens per user")
@@ -559,7 +567,7 @@ pub static EMBEDDING_TOTAL_TOKENS_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
 /// - Type: Counter
 /// - Labels: `stack_small_id`, `user_id`
 /// - Unit: requests (count)
-pub static UNAVAILABLE_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static UNAVAILABLE_STACK_COUNTER_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_unavailable_stack_counter")
         .with_description(
@@ -576,12 +584,42 @@ pub static UNAVAILABLE_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(||
 /// - Type: Counter
 /// - Labels: `stack_small_id`, `user_id`
 /// - Unit: requests (count)
-pub static LOCKED_STACK_COUNTER_PER_USER: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static LOCKED_STACK_COUNTER_PER_USER: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_locked_stack_counter_per_user")
         .with_description(
             "Total number of locked stack status codes per stack small id and user_id",
         )
         .with_unit("requests")
+        .build()
+});
+
+/// Histogram metric that tracks the time taken to acquire a stack per user and model.
+///
+/// # Metric Details
+/// - Name: `atoma_acquire_stack_time_per_user_and_model`
+/// - Type: Histogram
+/// - Labels: `user_id`, `model`
+/// - Unit: seconds
+pub static ACQUIRE_STACK_TIME_PER_USER_AND_MODEL: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .f64_histogram("atoma_acquire_stack_time_per_user_and_model")
+        .with_description("Time taken to acquire a stack per user and model")
+        .with_unit("seconds")
+        .build()
+});
+
+/// Histogram metric that tracks the time taken to authenticate a request.
+///
+/// # Metric Details
+/// - Name: `atoma_authenticate_middleware_timer`
+/// - Type: Histogram
+/// - Labels: `user_id`, `endpoint`
+/// - Unit: seconds
+pub static AUTHENTICATE_MIDDLEWARE_TIMER: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .f64_histogram("atoma_authenticate_middleware_timer")
+        .with_description("Time taken to authenticate a request")
+        .with_unit("seconds")
         .build()
 });

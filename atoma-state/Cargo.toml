@@ -17,7 +17,6 @@ futures            = { workspace = true }
 hex                = { workspace = true }
 isocountry         = { workspace = true }
 mockito            = { workspace = true }
-once_cell          = { workspace = true }
 opentelemetry      = { workspace = true }
 prometheus         = { workspace = true }
 remote-attestation = { workspace = true }
