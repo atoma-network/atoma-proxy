@@ -43,12 +43,14 @@ revisions = [ "main", "main" ] # Model revision/version tags (must match models 
 service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
 
 [atoma_proxy_service]
+environment           = "development"  # or "production" based on your deployment used in sentry
 grafana_api_token     = ""             # Grafana API token (read-only permissions required)
 grafana_dashboard_tag = ""             # Tag to filter which Grafana dashboards to expose as graphs
 grafana_stats_tag     = ""             # Tag to filter which Grafana dashboards to expose as stats
 grafana_url           = ""             # Grafana instance URL for metrics visualization
 sentry_dsn            = "sentry_dsn"   # Sentry DSN for error reporting
 service_bind_address  = "0.0.0.0:8081" # Proxy service binding address and port (must match docker-compose.yml)
+
 
 [atoma_auth]
 access_token_lifetime  = 1            # Access token validity duration in minutes

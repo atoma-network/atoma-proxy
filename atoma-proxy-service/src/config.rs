@@ -25,6 +25,9 @@ pub struct AtomaProxyServiceConfig {
 
     /// Sentry DSN for error reporting
     pub sentry_dsn: Option<String>,
+
+    /// Environment
+    pub environment: Option<String>,
 }
 
 impl AtomaProxyServiceConfig {
