@@ -584,6 +584,9 @@ pub struct NodePublicKey {
     /// The stack small id that is associated with the selected node
     #[sqlx(default)]
     pub stack_small_id: Option<i64>,
+    /// The transaction digest of the stack
+    #[sqlx(default)]
+    pub tx_digest: Option<String>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {

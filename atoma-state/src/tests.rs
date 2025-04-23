@@ -6,6 +6,7 @@ use atoma_p2p::broadcast_metrics::{
 };
 use serde_json::json;
 use std::collections::HashMap;
+use sui_sdk::types::digests::TransactionDigest;
 use uuid::Uuid;
 
 pub const POSTGRES_TEST_DB_URL: &str = "postgres://atoma:atoma@localhost:5432/atoma";
@@ -307,6 +308,7 @@ async fn create_test_user(pool: &sqlx::PgPool, user_id: i64) -> sqlx::Result<()>
 }
 
 /// Helper function to create a test stack
+#[allow(clippy::too_many_arguments)]
 async fn create_test_stack(
     pool: &sqlx::PgPool,
     task_small_id: i64,
@@ -315,6 +317,7 @@ async fn create_test_stack(
     price: i64,
     num_compute_units: i64,
     user_id: i64,
+    tx_digest: String,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO stacks (
@@ -330,8 +333,9 @@ async fn create_test_stack(
                 total_hash,
                 num_total_messages,
                 user_id,
-                acquired_timestamp
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                acquired_timestamp,
+                tx_digest
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(stack_small_id)
     .bind("test_owner") // Default test owner
@@ -346,6 +350,7 @@ async fn create_test_stack(
     .bind(0i64) // Default num_total_messages
     .bind(user_id)
     .bind(chrono::Utc::now()) // Acquired timestamp
+    .bind(tx_digest)
     .execute(pool)
     .await?;
     Ok(())
@@ -423,9 +428,18 @@ async fn test_get_cheapest_node_basic() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     // Test basic functionality
     let result = state
@@ -515,23 +529,49 @@ async fn test_get_cheapest_node_multiple_prices() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
-    create_test_node(&state.db, 2).await.unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     create_test_node_subscription(&state.db, 2, 1, 50, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 2, 2, 50, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        2,
+        2,
+        50,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     create_test_node(&state.db, 3).await.unwrap();
     create_test_node_subscription(&state.db, 3, 1, 150, 1000)
         .await
         .unwrap();
-    create_test_stack(&state.db, 1, 3, 3, 150, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        3,
+        3,
+        150,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     // Should return the cheapest node
     let result = state
         .get_cheapest_node_for_model("gpt-4", false)
@@ -605,10 +645,18 @@ async fn test_get_cheapest_node_confidential() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
-        .await
-        .unwrap();
-    // Test confidential computing requirements
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     let result = state
         .get_cheapest_node_for_model("gpt-4", true)
         .await
@@ -636,9 +684,18 @@ async fn test_get_cheapest_node_invalid_public_key() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     // Should return None when public key is invalid
     let result = state
@@ -676,9 +733,18 @@ async fn test_get_cheapest_node_deprecated_task() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     // Should return None for deprecated task
     let result = state
         .get_cheapest_node_for_model("gpt-4", false)
@@ -712,9 +778,18 @@ async fn test_get_cheapest_node_invalid_subscription() {
         .unwrap();
 
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     // Should return None for invalid subscription
     let result = state
@@ -763,13 +838,30 @@ async fn test_get_cheapest_node_mixed_security_levels() {
         .await
         .unwrap();
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
-    create_test_stack(&state.db, 1, 2, 1, 50, 1000, 1)
-        .await
-        .unwrap();
-
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        2,
+        1,
+        50,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     // Test non-confidential query (should return cheapest regardless of security level)
     let result = state
         .get_cheapest_node_for_model("gpt-4", false)
@@ -810,9 +902,18 @@ async fn test_basic_selection() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     let result = state
         .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
@@ -843,6 +944,7 @@ async fn test_price_based_selection() -> Result<()> {
             *price,
             1000,
             1,
+            TransactionDigest::random().base58_encode(),
         )
         .await
         .unwrap();
@@ -901,9 +1003,18 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 500, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        500,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     let result = state
         .select_node_public_key_for_encryption("gpt-4", 800, 1)
@@ -918,9 +1029,18 @@ async fn test_compute_capacity_requirements() -> Result<()> {
     create_test_node_subscription(&state.db, 2, 1, 100, 1000).await?;
     create_key_rotation(&state.db, 2, 2, 1).await?;
     create_test_node_public_key(&state.db, 2, 2, true).await?;
-    create_test_stack(&state.db, 1, 2, 2, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        2,
+        2,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     let result = state
         .select_node_public_key_for_encryption("gpt-4", 800, 1)
@@ -945,9 +1065,18 @@ async fn test_invalid_configurations() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, false).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
 
     let result = state
         .select_node_public_key_for_encryption("gpt-4", 800, 1)
@@ -983,9 +1112,19 @@ async fn test_security_level_requirement() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 2, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        2,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
+
     let result = state
         .select_node_public_key_for_encryption("gpt-4", 800, 1)
         .await?;
@@ -1007,10 +1146,18 @@ async fn test_edge_cases() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
-
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
     // Test edge cases
     let test_cases = vec![
         (0, true, "zero tokens"),
@@ -1043,9 +1190,19 @@ async fn test_concurrent_access() -> Result<()> {
     create_key_rotation(&state.db, 1, 1, 1).await?;
     create_test_node_public_key(&state.db, 1, 1, true).await?;
     create_test_user(&state.db, 1).await.unwrap();
-    create_test_stack(&state.db, 1, 1, 1, 100, 1000, 1)
-        .await
-        .unwrap();
+    create_test_stack(
+        &state.db,
+        1,
+        1,
+        1,
+        100,
+        1000,
+        1,
+        TransactionDigest::random().base58_encode(),
+    )
+    .await
+    .unwrap();
+
     let futures: Vec<_> = (0..5)
         .map(|_| state.select_node_public_key_for_encryption("gpt-4", 200, 1))
         .collect();

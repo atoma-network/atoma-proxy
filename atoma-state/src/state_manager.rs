@@ -422,13 +422,13 @@ impl AtomaState {
         let stack = sqlx::query(
             "
             WITH selected_stack AS (
-                SELECT stack_small_id 
+                SELECT stack_small_id
                 FROM stacks
-                WHERE task_small_id = $1 
-                AND num_compute_units - already_computed_units - locked_compute_units >= $2 
-                AND user_id = $3 
-                AND is_claimed = false 
-                AND is_locked = false 
+                WHERE task_small_id = $1
+                AND num_compute_units - already_computed_units - locked_compute_units >= $2
+                AND user_id = $3
+                AND is_claimed = false
+                AND is_locked = false
                 AND in_settle_period = false
                 LIMIT 1
                 FOR UPDATE
@@ -695,7 +695,7 @@ impl AtomaState {
                 HAVING bool_and(npk.is_valid) = true
             ),
             selected_stack AS (
-                SELECT vn.public_key, vn.node_small_id, s.stack_small_id
+                SELECT vn.public_key, vn.node_small_id, s.stack_small_id, s.tx_digest
                 FROM valid_nodes vn
                 INNER JOIN stacks s ON s.selected_node_id = vn.node_small_id
                 INNER JOIN tasks t ON t.task_small_id = s.task_small_id
@@ -713,7 +713,7 @@ impl AtomaState {
             SET locked_compute_units = stacks.locked_compute_units + $2
             FROM selected_stack
             WHERE stacks.stack_small_id = selected_stack.stack_small_id
-            RETURNING selected_stack.public_key, selected_stack.node_small_id, selected_stack.stack_small_id
+            RETURNING selected_stack.public_key, selected_stack.node_small_id, selected_stack.stack_small_id, selected_stack.tx_digest
             ",
         )
         .bind(model)
@@ -782,7 +782,7 @@ impl AtomaState {
                     GROUP BY npk.node_small_id, npk.public_key
                     HAVING bool_and(npk.is_valid) = true
                 )
-                SELECT node_small_id, public_key 
+                SELECT node_small_id, public_key
                 FROM valid_node
                 "
             )
@@ -2006,8 +2006,8 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp, tx_digest)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
@@ -3288,16 +3288,16 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_public_keys (
-                node_small_id, 
-                epoch, 
-                key_rotation_counter, 
-                public_key, 
-                evidence_bytes, 
-                device_type, 
+                node_small_id,
+                epoch,
+                key_rotation_counter,
+                public_key,
+                evidence_bytes,
+                device_type,
                 is_valid
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (node_small_id, device_type)
-            DO UPDATE SET 
+            DO UPDATE SET
                 epoch = EXCLUDED.epoch,
                 key_rotation_counter = EXCLUDED.key_rotation_counter,
                 public_key = EXCLUDED.public_key,

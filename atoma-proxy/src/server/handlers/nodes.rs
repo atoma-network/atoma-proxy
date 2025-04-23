@@ -14,7 +14,6 @@ use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
 use sui_sdk::types::base_types::SuiAddress;
 use sui_sdk::types::crypto::{PublicKey as SuiPublicKey, Signature, SuiSignature};
-use sui_sdk::types::digests::TransactionDigest;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
@@ -332,12 +331,22 @@ pub async fn nodes_create_lock(
                         client_message: None,
                         endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                     })?;
+
+            let tx_digest =
+                node_public_key
+                    .tx_digest
+                    .ok_or_else(|| AtomaProxyError::InternalError {
+                        message: "Transaction digest not found for node public key".to_string(),
+                        client_message: None,
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })?;
+
             let public_key = STANDARD.encode(node_public_key.public_key);
             lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
             Ok(Json(NodesCreateLockResponse {
                 public_key,
                 node_small_id: node_public_key.node_small_id as u64,
-                stack_entry_digest: TransactionDigest::ZERO.base58_encode(),
+                stack_entry_digest: tx_digest,
                 stack_small_id: stack_small_id as u64,
             }))
         } else {
