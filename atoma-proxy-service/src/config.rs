@@ -22,6 +22,9 @@ pub struct AtomaProxyServiceConfig {
 
     /// Only dashboards tagged with this tag will be proxied as stats
     pub grafana_stats_tag: String,
+
+    /// Sentry DSN for error reporting
+    pub sentry_dsn: Option<String>,
 }
 
 impl AtomaProxyServiceConfig {
