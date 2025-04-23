@@ -988,7 +988,7 @@ async fn handle_streaming_response(
             estimated_total_tokens,
             start,
             user_id,
-            model_name,
+            model_name.clone(),
             endpoint,
         );
         loop {
@@ -1001,7 +1001,7 @@ async fn handle_streaming_response(
                                 tracing::error!(
                                     target = "atoma-service-chat-completions",
                                     level = "error",
-                                    "Error sending chunk: {e}"
+                                    "Error sending chunk for model {model_name}: {e}"
                                 );
                                 // We continue the loop, to allow the streamer to finish with updated usage from the node
                                 continue;
