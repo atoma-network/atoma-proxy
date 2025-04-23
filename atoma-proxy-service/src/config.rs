@@ -17,8 +17,11 @@ pub struct AtomaProxyServiceConfig {
     /// Grafana api token (read only access is sufficient)
     pub grafana_api_token: String,
 
-    /// Only dashboards tagged with this tag will be proxied
+    /// Only dashboards tagged with this tag will be proxied as graphs
     pub grafana_dashboard_tag: String,
+
+    /// Only dashboards tagged with this tag will be proxied as stats
+    pub grafana_stats_tag: String,
 }
 
 impl AtomaProxyServiceConfig {
