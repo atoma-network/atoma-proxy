@@ -2,9 +2,9 @@ use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{error, instrument};
 
-use crate::handlers::stats::PanelResponse;
+use crate::handlers::stats::{DashboardResponse, PanelResponse};
 
 /// The list of dashboards uids returned from grafana
 #[derive(Deserialize)]
@@ -26,7 +26,7 @@ struct Time {
 #[derive(Deserialize, Serialize)]
 struct Panel {
     /// The targets, that's actually the queries to run
-    targets: Value,
+    targets: Vec<Value>,
     /// The title of the panel
     title: String,
     /// The panel description
@@ -35,7 +35,7 @@ struct Panel {
     #[serde(rename = "fieldConfig")]
     field_config: Value,
     /// Interval set in grafana
-    interval: Option<String>,
+    interval: Value,
     /// Type of the graph
     #[serde(rename = "type")]
     graph_type: String,
@@ -70,7 +70,7 @@ impl Dashboard {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
     /// The queries to run (left as a json that was returned from grafana)
-    queries: Value,
+    pub queries: Vec<Value>,
     /// Time range to query, in the format like "now-1w"
     from: String,
     /// Time range to query, usually it's just "now"
@@ -91,11 +91,13 @@ impl From<Dashboard> for Vec<PanelResponse> {
                 field_config: panel.field_config,
                 interval: panel.interval,
                 graph_type: panel.graph_type,
+                data: Value::Null,
                 query: Query {
                     queries: panel.targets,
                     from: from.clone(),
                     to: to.clone(),
                 },
+                from: from.clone(),
             })
             .collect()
     }
@@ -110,8 +112,6 @@ pub struct Grafana {
     url: String,
     /// The API token to use for authentication
     api_token: String,
-    /// The tag to use to filter dashboards
-    dashboard_tag: String,
     /// The reqwest client to use for requests
     client: Client,
 }
@@ -125,11 +125,10 @@ impl Grafana {
     /// * `api_token` - The API token to use for authentication
     /// * `dashboard_tag` - The tag to use to filter dashboards
     #[must_use]
-    pub fn new(url: String, api_token: String, dashboard_tag: String) -> Self {
+    pub fn new(url: String, api_token: String) -> Self {
         Self {
             url,
             api_token,
-            dashboard_tag,
             client: Client::new(),
         }
     }
@@ -140,14 +139,15 @@ impl Grafana {
             .header("Authorization", format!("Bearer {}", self.api_token))
             .header("Content-Type", "application/json")
     }
+
     /// Get the UIDs of all dashboards with the specified tag
     ///
     /// # Returns
     ///
     /// A vector of dashboard UIDs
     #[instrument(level = "info", skip_all)]
-    pub async fn get_dashboard_uids(&self) -> Result<Vec<String>, GrafanaError> {
-        let request_url = format!("{}/api/search?tag={}", self.url, self.dashboard_tag);
+    async fn get_dashboard_uids(&self, tag: String) -> Result<Vec<String>, GrafanaError> {
+        let request_url = format!("{}/api/search?tag={}", self.url, tag);
         let response = self
             .prepare_request(self.client.get(&request_url))
             .send()
@@ -160,6 +160,49 @@ impl Grafana {
             .collect())
     }
 
+    /// Get all dashboards with the specified tag
+    ///
+    /// # Arguments
+    ///
+    /// * `tag` - The tag to use to filter dashboards
+    ///
+    /// # Returns
+    ///
+    /// A vector of `DashboardResponse` objects, each containing the title and panels of the dashboard
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or if the response cannot be parsed
+    pub async fn get_dashboards(
+        &self,
+        tag: String,
+    ) -> Result<Vec<DashboardResponse>, GrafanaError> {
+        let uids = self.get_dashboard_uids(tag).await?;
+        let mut results = Vec::new();
+        for uid in uids {
+            let dashboard = self.get_dashboard(uid).await?;
+            let dashboard_title = dashboard.title();
+            let mut panels: Vec<PanelResponse> = dashboard.into();
+            for panel in &mut panels {
+                for query in &mut panel.query.queries {
+                    query
+                        .as_object_mut()
+                        .ok_or_else(|| {
+                            GrafanaError::UnexpectedResponse("Query is not an object".to_string())
+                        })?
+                        .insert("interval".to_string(), panel.interval.clone());
+                }
+                let data = self.get_query_data(&panel.query).await?;
+                panel.data = data;
+            }
+            results.push(DashboardResponse {
+                title: dashboard_title,
+                panels,
+            });
+        }
+        Ok(results)
+    }
+
     /// Get a dashboard by its UID
     ///
     /// # Arguments
@@ -170,7 +213,7 @@ impl Grafana {
     ///
     /// The dashboard with the specified UID
     #[instrument(level = "info", skip(self))]
-    pub async fn get_dashboard(&self, dashboard_uid: String) -> Result<Dashboard, GrafanaError> {
+    async fn get_dashboard(&self, dashboard_uid: String) -> Result<Dashboard, GrafanaError> {
         let request_url = format!("{}/api/dashboards/uid/{}", self.url, dashboard_uid);
         let response = self
             .prepare_request(self.client.get(&request_url))
@@ -190,12 +233,12 @@ impl Grafana {
     ///
     /// The data for the query
     #[instrument(level = "info", skip_all)]
-    pub async fn get_query_data(&self, query: Query) -> Result<Value, GrafanaError> {
+    pub async fn get_query_data(&self, query: &Query) -> Result<Value, GrafanaError> {
         let request_url = format!("{}/api/ds/query", self.url);
 
         let response = self
             .prepare_request(self.client.post(&request_url))
-            .json(&query)
+            .json(query)
             .send()
             .await?;
 
@@ -228,4 +271,6 @@ pub enum GrafanaError {
     Forbidden,
     #[error("Dashboard not found")]
     NotFound,
+    #[error("Unexpected response: {0}")]
+    UnexpectedResponse(String),
 }
