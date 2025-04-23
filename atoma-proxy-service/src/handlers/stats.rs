@@ -4,7 +4,7 @@ use atoma_state::types::{
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use serde::Serialize;
@@ -29,12 +29,18 @@ pub struct PanelResponse {
     /// The fieldConfig of the panel.
     pub field_config: Value,
     /// The query for the panel.
+    #[serde(skip)]
     pub query: grafana::Query,
     /// The interval of the panel.
-    pub interval: Option<String>,
+    #[serde(skip)]
+    pub interval: Value,
+    /// The data of the panel.
+    pub data: Value,
     /// Type of the graph.
     #[serde(rename = "type")]
     pub graph_type: String,
+    /// Start time of the panel.
+    pub from: String,
 }
 
 /// Dashboard response is part of the GraphsResponse.
@@ -63,8 +69,8 @@ pub const GET_STATS_STACKS_PATH: &str = "/get_stats_stacks";
 pub const GET_NODES_DISTRIBUTION_PATH: &str = "/get_nodes_distribution";
 /// The path for the get_graphs endpoint.
 pub const GET_GRAPHS_PATH: &str = "/get_graphs";
-/// The path for the graph's data endpoint.
-pub const GET_GRAPH_DATA_PATH: &str = "/get_graph_data";
+/// The path for the get_stats endpoint.
+pub const GET_STATS_PATH: &str = "/get_stats";
 
 /// Returns a router with the stats endpoint.
 ///
@@ -80,7 +86,7 @@ pub fn stats_router() -> Router<ProxyServiceState> {
         .route(GET_STATS_STACKS_PATH, get(get_stats_stacks))
         .route(GET_NODES_DISTRIBUTION_PATH, get(get_nodes_distribution))
         .route(GET_GRAPHS_PATH, get(get_graphs))
-        .route(GET_GRAPH_DATA_PATH, post(get_graph_data))
+        .route(GET_STATS_PATH, get(get_stats))
 }
 
 /// OpenAPI documentation for the get_compute_units_processed endpoint.
@@ -354,66 +360,51 @@ async fn get_graphs(
     State(proxy_service_state): State<ProxyServiceState>,
 ) -> Result<Json<GraphsResponse>> {
     let grafana = &proxy_service_state.grafana;
-    let uids = grafana.get_dashboard_uids().await.map_err(|e| {
-        error!("Failed to get dashboard uids: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let mut results = Vec::new();
-    for uid in uids {
-        let dashboard = grafana.get_dashboard(uid).await.map_err(|e| {
-            error!("Failed to get dashboard: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let dashboard_title = dashboard.title();
-        let queries: Vec<PanelResponse> = dashboard.into();
-        results.push(DashboardResponse {
-            title: dashboard_title,
-            panels: queries,
-        });
-    }
-
-    Ok(Json(results))
+    Ok(Json(
+        grafana
+            .get_dashboards(proxy_service_state.dashboard_tag)
+            .await
+            .map_err(|e| {
+                error!("Failed to get dashboard uids: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
 }
 
-/// OpenAPI documentation for the get_graph_data endpoint.
-///
-/// This struct is used to generate OpenAPI documentation for the get_graph_data
-/// endpoint. It uses the `utoipa` crate's derive macro to automatically generate
-/// the OpenAPI specification from the code.
 #[derive(OpenApi)]
-#[openapi(paths(get_graph_data))]
-pub struct GetGraphData;
+#[openapi(paths(get_stats))]
+pub struct GetStats;
 
-/// Get graph data.
+/// Get stats.
 ///
 /// # Arguments
 ///
 /// * `proxy_service_state` - The shared state containing the state manager
-/// * `query` - The query for grafana
-///
 /// # Returns
 ///
-/// * `Result<Json<Value>>` - A JSON response containing the graph data
-///   - `Ok(Json<Value>)` - Successfully retrieved graph data
-///   - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graph data from state manager
-///
+/// * `Result<Json<Value>>` - A JSON response containing a list of graphs
+///   - `Ok(Json<Value>)` - Successfully retrieved graphs
+///   - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
 #[utoipa::path(
-    post,
+    get,
     path = "",
     responses(
-        (status = OK, description = "Retrieves graph data", body = Value),
-        (status = INTERNAL_SERVER_ERROR, description = "Failed to get graph data")
+        (status = OK, description = "Retrieves all graphs", body = Value),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to get graphs")
     )
 )]
 #[instrument(level = "trace", skip_all)]
-async fn get_graph_data(
+async fn get_stats(
     State(proxy_service_state): State<ProxyServiceState>,
-    Json(query): Json<grafana::Query>,
-) -> Result<Json<Value>> {
+) -> Result<Json<GraphsResponse>> {
     let grafana = &proxy_service_state.grafana;
-    let data = grafana.get_query_data(query).await.map_err(|e| {
-        error!("Failed to get graph data: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    Ok(Json(data))
+    Ok(Json(
+        grafana
+            .get_dashboards(proxy_service_state.stats_tag)
+            .await
+            .map_err(|e| {
+                error!("Failed to get dashboard uids: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    ))
 }

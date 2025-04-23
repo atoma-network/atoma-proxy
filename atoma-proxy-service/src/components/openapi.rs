@@ -23,9 +23,9 @@ use crate::{
             GET_CURRENT_STACKS_PATH,
         },
         stats::{
-            GetComputeUnitsProcessed, GetGraphData, GetGraphs, GetLatency, GetNodeDistribution,
-            GetStatsStacks, COMPUTE_UNITS_PROCESSED_PATH, GET_GRAPHS_PATH, GET_GRAPH_DATA_PATH,
-            GET_NODES_DISTRIBUTION_PATH, GET_STATS_STACKS_PATH, LATENCY_PATH,
+            GetComputeUnitsProcessed, GetGraphs, GetLatency, GetNodeDistribution, GetStats,
+            GetStatsStacks, COMPUTE_UNITS_PROCESSED_PATH, GET_GRAPHS_PATH,
+            GET_NODES_DISTRIBUTION_PATH, GET_STATS_PATH, GET_STATS_STACKS_PATH, LATENCY_PATH,
         },
         subscriptions::{GetAllSubscriptionsOpenApi, SUBSCRIPTIONS_PATH},
         tasks::{GetAllTasksOpenApi, TASKS_PATH},
@@ -60,7 +60,7 @@ pub fn openapi_router() -> Router {
             (path = SUBSCRIPTIONS_PATH, api = GetAllSubscriptionsOpenApi, tags = ["Subscriptions"]),
             (path = GET_NODES_DISTRIBUTION_PATH, api = GetNodeDistribution, tags = ["Stats"]),
             (path = GET_GRAPHS_PATH, api = GetGraphs, tags = ["Stats"]),
-            (path = GET_GRAPH_DATA_PATH, api = GetGraphData, tags = ["Stats"]),
+            (path = GET_STATS_PATH, api = GetStats, tags = ["Stats"]),
         ),
         tags(
             (name = "Health", description = "Health check endpoints"),

@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 
 use atoma_p2p::broadcast_metrics::{
     ChatCompletionsMetrics, EmbeddingsMetrics, ImageGenerationMetrics, ModelMetrics, NodeMetrics,
 };
 use flume::Receiver as FlumeReceiver;
-use once_cell::sync::Lazy;
 use prometheus::{GaugeVec, Opts, Registry};
 use serde::Deserialize;
 use tokio::sync::{oneshot, watch, RwLock};
@@ -31,7 +33,7 @@ pub(crate) const DEFAULT_TOP_K_BEST_AVAILABLE_NODES: usize = 10;
 type Result<T> = std::result::Result<T, MetricsServiceError>;
 
 /// HTTP client for the node metrics queries
-static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(METRICS_TIMEOUT)
         .build()

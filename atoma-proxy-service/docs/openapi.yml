@@ -613,32 +613,29 @@ paths:
               schema: {}
         '500':
           description: Failed to get graphs
-  /get_graph_data:
-    post:
+  /get_stats:
+    get:
       tags:
       - Stats
-      summary: Get graph data.
-      description: |+
+      summary: Get stats.
+      description: |-
         # Arguments
 
         * `proxy_service_state` - The shared state containing the state manager
-        * `query` - The query for grafana
-
         # Returns
 
-        * `Result<Json<Value>>` - A JSON response containing the graph data
-          - `Ok(Json<Value>)` - Successfully retrieved graph data
-          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graph data from state manager
-
-      operationId: get_graph_data
+        * `Result<Json<Value>>` - A JSON response containing a list of graphs
+          - `Ok(Json<Value>)` - Successfully retrieved graphs
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve graphs from state manager
+      operationId: get_stats
       responses:
         '200':
-          description: Retrieves graph data
+          description: Retrieves all graphs
           content:
             application/json:
               schema: {}
         '500':
-          description: Failed to get graph data
+          description: Failed to get graphs
   /google_oauth:
     post:
       tags:

@@ -66,6 +66,12 @@ pub struct ProxyServiceState {
 
     /// Grafana client for fetching dashboards.
     pub grafana: Grafana,
+
+    /// The tag to use to filter dashboards for graphs
+    pub dashboard_tag: String,
+
+    /// The tag to use to filter dashboards for stats
+    pub stats_tag: String,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
