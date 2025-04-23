@@ -14,6 +14,7 @@ use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
 use sui_sdk::types::base_types::SuiAddress;
 use sui_sdk::types::crypto::{PublicKey as SuiPublicKey, Signature, SuiSignature};
+use sui_sdk::types::digests::TransactionDigest;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use utoipa::{OpenApi, ToSchema};
@@ -227,7 +228,7 @@ pub struct NodesCreateLockResponse {
     node_small_id: u64,
 
     /// Transaction digest for the transaction that acquires the stack entry, if any
-    stack_entry_digest: Option<String>,
+    stack_entry_digest: String,
 
     /// The stack small id to which an available stack entry was acquired, for the selected node
     stack_small_id: u64,
@@ -336,7 +337,7 @@ pub async fn nodes_create_lock(
             Ok(Json(NodesCreateLockResponse {
                 public_key,
                 node_small_id: node_public_key.node_small_id as u64,
-                stack_entry_digest: None,
+                stack_entry_digest: TransactionDigest::ZERO.base58_encode(),
                 stack_small_id: stack_small_id as u64,
             }))
         } else {
@@ -442,7 +443,7 @@ pub async fn nodes_create_lock(
                     Ok(Json(NodesCreateLockResponse {
                         public_key,
                         node_small_id: node_public_key.node_small_id as u64,
-                        stack_entry_digest: Some(tx_digest),
+                        stack_entry_digest: tx_digest,
                         stack_small_id: stack_small_id as u64,
                     }))
                 } else {

@@ -360,7 +360,16 @@ pub async fn authenticate_middleware(
             stack_small_id,
             num_input_compute_units,
             max_total_compute_units,
-            TransactionDigest::from_str(&tx_digest).unwrap(),
+            TransactionDigest::from_str(&tx_digest)
+                .map_err(|e| {
+                    tracing::error!("Failed to parse tx_digest: {e}");
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to parse tx_digest: {e}"),
+                        client_message: None,
+                        endpoint: endpoint.to_string(),
+                    }
+                })
+                .expect("Failed to parse tx_digest"),
             user_id,
             &endpoint,
         )
@@ -769,7 +778,14 @@ pub async fn handle_locked_stack_middleware(
                 selected_node_metadata.stack_small_id,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
-                TransactionDigest::from_str(&selected_node_metadata.tx_digest).unwrap(),
+                TransactionDigest::from_str(&selected_node_metadata.tx_digest).map_err(|e| {
+                    tracing::error!("Failed to parse tx_digest: {e}");
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to parse tx_digest: {e}"),
+                        client_message: None,
+                        endpoint: endpoint.to_string(),
+                    }
+                })?,
                 user_id,
                 &endpoint,
             )
