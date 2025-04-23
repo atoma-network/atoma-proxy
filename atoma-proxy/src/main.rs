@@ -179,7 +179,6 @@ async fn main() -> Result<()> {
     let grafana = Grafana::new(
         config.proxy_service.grafana_url,
         config.proxy_service.grafana_api_token,
-        config.proxy_service.grafana_dashboard_tag,
     );
 
     let proxy_service_state = ProxyServiceState {
@@ -187,6 +186,8 @@ async fn main() -> Result<()> {
         auth,
         models_with_modalities,
         grafana,
+        dashboard_tag: config.proxy_service.grafana_dashboard_tag,
+        stats_tag: config.proxy_service.grafana_stats_tag,
     };
 
     let proxy_service_handle = spawn_with_shutdown(

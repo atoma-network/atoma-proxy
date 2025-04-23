@@ -27,8 +27,9 @@ use super::{
     handlers::{
         image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
         metrics::{
-            LOCKED_STACK_COUNTER_PER_USER, STACK_LOCKED_COUNTER, STACK_NUM_REQUESTS_COUNTER,
-            STACK_UNAVAILABLE_COUNTER, UNAVAILABLE_STACK_COUNTER_PER_USER,
+            AUTHENTICATE_MIDDLEWARE_TIMER, LOCKED_STACK_COUNTER_PER_USER, STACK_LOCKED_COUNTER,
+            STACK_NUM_REQUESTS_COUNTER, STACK_UNAVAILABLE_COUNTER,
+            UNAVAILABLE_STACK_COUNTER_PER_USER,
         },
         models::MODELS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
@@ -272,6 +273,7 @@ pub async fn authenticate_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Result<Response> {
+    let timer = std::time::Instant::now();
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
     if endpoint == MODELS_PATH {
@@ -375,6 +377,14 @@ pub async fn authenticate_middleware(
                 return Err(e);
             }
         };
+        let duration = timer.elapsed();
+        AUTHENTICATE_MIDDLEWARE_TIMER.record(
+            duration.as_secs_f64(),
+            &[
+                KeyValue::new("user_id", user_id.to_string()),
+                KeyValue::new("model", model),
+            ],
+        );
         Ok(next.run(req).await)
     })
     .await
@@ -450,6 +460,7 @@ pub async fn confidential_compute_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Result<Response> {
+    let timer = std::time::Instant::now();
     let (mut req_parts, body) = req.into_parts();
     let endpoint = req_parts.uri.path().to_string();
     let endpoint_clone = endpoint.clone();
@@ -555,10 +566,18 @@ pub async fn confidential_compute_middleware(
             .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
             .with_max_total_num_compute_units(num_compute_units as u64)
             .with_user_id(user_id)
-            .with_model_name(confidential_compute_request.model_name)
+            .with_model_name(confidential_compute_request.model_name.clone())
             .with_endpoint(endpoint);
         req_parts.extensions.insert(request_metadata);
         let req = Request::from_parts(req_parts, Body::from(body_bytes));
+        let duration = timer.elapsed();
+        AUTHENTICATE_MIDDLEWARE_TIMER.record(
+            duration.as_secs_f64(),
+            &[
+                KeyValue::new("user_id", user_id.to_string()),
+                KeyValue::new("model", confidential_compute_request.model_name),
+            ],
+        );
         Ok(next.run(req).await)
     })
     .await
@@ -804,6 +823,7 @@ pub mod auth {
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
     use flume::Sender;
+    use opentelemetry::KeyValue;
     use serde_json::Value;
     use sui_sdk::types::digests::TransactionDigest;
     use tokio::sync::{oneshot, RwLock};
@@ -816,6 +836,7 @@ pub mod auth {
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
     use crate::server::handlers::image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH;
     use crate::server::handlers::image_generations::IMAGE_GENERATIONS_PATH;
+    use crate::server::handlers::metrics::ACQUIRE_STACK_TIME_PER_USER_AND_MODEL;
     use crate::server::handlers::request_model::ComputeUnitsEstimate;
     use crate::server::http_server::UserId;
     use crate::server::{
@@ -1312,6 +1333,7 @@ pub mod auth {
         // for the user. For this reason, it is safe to try to modify the underlying `DashMap
         let endpoint_clone = endpoint.clone();
         tokio::spawn(async move {
+            let timer = std::time::Instant::now();
             // NOTE: Move the lock_guard into the spawned task.
             // This ensures the lock is held for the entire duration of this background task,
             // even if the original request handler that called `acquire_new_stack` is cancelled
@@ -1331,7 +1353,7 @@ pub mod auth {
             .await?;
             // 2. Acquire a new stack on USDC deduction and send the NewStackAcquired event to the state manager.
             // NOTE: If acquiring a new stack fails, we will refund the USDC to the user's balance.
-            acquire_new_stack_on_usdc_deduction_wrapper(AcquireNewStackArgs {
+            let result = acquire_new_stack_on_usdc_deduction_wrapper(AcquireNewStackArgs {
                 state_manager_sender,
                 sui,
                 user_id,
@@ -1341,7 +1363,16 @@ pub mod auth {
                 endpoint: endpoint_clone.clone(),
                 total_tokens,
             })
-            .await
+            .await;
+            let duration = timer.elapsed();
+            ACQUIRE_STACK_TIME_PER_USER_AND_MODEL.record(
+                duration.as_secs_f64(),
+                &[
+                    KeyValue::new("user_id", user_id.to_string()),
+                    KeyValue::new("endpoint", endpoint_clone),
+                ],
+            );
+            result
         })
         .await
         .map_err(|e| AtomaProxyError::InternalError {
