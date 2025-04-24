@@ -2,8 +2,8 @@ CREATE TABLE
   IF NOT EXISTS fiat_balance (
     user_id INTEGER NOT NULL PRIMARY KEY,
     usd_balance BIGINT NOT NULL DEFAULT 0,
-    already_paid BIGINT NOT NULL DEFAULT 0,
-    locked BIGINT NOT NULL DEFAULT 0,
+    already_debited_amount BIGINT NOT NULL DEFAULT 0,
+    locked_amount BIGINT NOT NULL DEFAULT 0,
     num_requests BIGINT NOT NULL DEFAULT 0
   );
 
