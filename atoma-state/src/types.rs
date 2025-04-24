@@ -735,6 +735,8 @@ pub enum AtomaAtomaStateManagerEvent {
         locked_compute_units: i64,
         /// Timestamp of the transaction that created the stack
         transaction_timestamp: DateTime<Utc>,
+        /// Transaction digest of the stack
+        tx_digest: TransactionDigest,
         /// User id of the stack owner (referencing local user table)
         user_id: i64,
         /// Channel to send back the result

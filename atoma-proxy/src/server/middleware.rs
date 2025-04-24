@@ -1526,6 +1526,7 @@ pub mod auth {
                 event,
                 locked_compute_units: total_tokens as i64,
                 transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
+                tx_digest,
                 user_id,
                 result_sender,
             })

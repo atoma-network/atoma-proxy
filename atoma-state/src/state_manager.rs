@@ -2023,6 +2023,7 @@ impl AtomaState {
             .bind(stack.num_total_messages)
             .bind(user_id)
             .bind(acquired_timestamp)
+            .bind(stack.tx_digest)
             .execute(&self.db)
             .await?;
         Ok(())
