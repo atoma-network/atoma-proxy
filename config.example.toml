@@ -25,6 +25,7 @@ models = [
 top_k = 10 # Number of top performing nodes to return in rankings
 
 [atoma_service]
+heartbeat_url = "my-heartbeat-url" # Heartbeat URL for the service
 hf_token = "<API_KEY>" # Hugging Face API token (required for gated/private models)
 modalities = [
     [
