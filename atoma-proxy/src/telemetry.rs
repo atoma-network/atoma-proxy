@@ -153,6 +153,7 @@ pub fn setup_logging<P: AsRef<Path>>(log_dir: P) -> Result<(WorkerGuard, WorkerG
         .with(file_layer)
         .with(opentelemetry_layer)
         .with(layer)
+        .with(sentry::integrations::tracing::layer())
         .try_init()
         .context("Failed to set global default subscriber")?;
 
