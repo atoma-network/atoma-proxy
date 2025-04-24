@@ -3,7 +3,7 @@ CREATE TABLE
     user_id INTEGER NOT NULL PRIMARY KEY,
     usd_balance BIGINT NOT NULL DEFAULT 0,
     already_debited_amount BIGINT NOT NULL DEFAULT 0,
-    locked_amount BIGINT NOT NULL DEFAULT 0,
+    overcharged_unsettled_amount BIGINT NOT NULL DEFAULT 0,
     num_requests BIGINT NOT NULL DEFAULT 0
   );
 
@@ -11,7 +11,7 @@ CREATE TABLE
   IF NOT EXISTS usage_per_model (
     user_id INTEGER NOT NULL,
     model STRING NOT NULL,
-    total_number_processed_tokens_per_model BIGINT NOT NULL DEFAULT 0,
+    total_number_processed_tokens BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, model)
   );
 
