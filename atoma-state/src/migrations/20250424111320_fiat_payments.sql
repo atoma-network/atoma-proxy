@@ -14,3 +14,5 @@ CREATE TABLE
     total_number_processed_tokens_per_model BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, model)
   );
+
+  ALTER TABLE IF EXISTS balance RENAME TO crypto_balance;
