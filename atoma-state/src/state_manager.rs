@@ -3898,7 +3898,7 @@ impl AtomaState {
 
     /// Get balance for a user.
     ///
-    /// This method fetches the balance for a user from the `crypto_balance` table.
+    /// This method fetches the balance for a user from the `crypto_balances` table.
     ///
     /// # Arguments
     ///
@@ -3927,7 +3927,7 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip(self))]
     pub async fn get_crypto_balance_for_user(&self, user_id: i64) -> Result<i64> {
-        let balance = sqlx::query("SELECT usdc_balance FROM crypto_balance WHERE user_id = $1")
+        let balance = sqlx::query("SELECT usdc_balance FROM crypto_balances WHERE user_id = $1")
             .bind(user_id)
             .fetch_optional(&self.db)
             .await?
@@ -4335,11 +4335,11 @@ impl AtomaState {
     #[instrument(level = "trace", skip(self))]
     pub async fn top_up_crypto_balance(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query(
-            "INSERT INTO crypto_balance (user_id, usdc_balance)
+            "INSERT INTO crypto_balances (user_id, usdc_balance)
                          VALUES ($1, $2)
                          ON CONFLICT (user_id)
                          DO UPDATE SET
-                            usdc_balance = crypto_balance.usdc_balance + EXCLUDED.usdc_balance",
+                            usdc_balance = crypto_balances.usdc_balance + EXCLUDED.usdc_balance",
         )
         .bind(user_id)
         .bind(balance)
@@ -4368,7 +4368,7 @@ impl AtomaState {
     /// - The database query fails to execute (that could mean the balance is not available)
     #[instrument(level = "trace", skip(self))]
     pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
-        let result = sqlx::query("UPDATE crypto_balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
+        let result = sqlx::query("UPDATE crypto_balances SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
             .bind(user_id)
             .bind(balance)
             .execute(&self.db)
@@ -4381,7 +4381,7 @@ impl AtomaState {
 
     /// Refunds a USDC payment.
     ///
-    /// This method refunds a USDC payment to the user in the `crypto_balance` table.
+    /// This method refunds a USDC payment to the user in the `crypto_balances` table.
     ///
     /// # Arguments
     ///
@@ -4400,7 +4400,7 @@ impl AtomaState {
     #[instrument(level = "trace", skip(self))]
     pub async fn refund_usdc(&self, user_id: i64, amount: i64) -> Result<()> {
         sqlx::query(
-            "UPDATE crypto_balance SET usdc_balance = usdc_balance + $2 WHERE user_id = $1",
+            "UPDATE crypto_balances SET usdc_balance = usdc_balance + $2 WHERE user_id = $1",
         )
         .bind(user_id)
         .bind(amount)

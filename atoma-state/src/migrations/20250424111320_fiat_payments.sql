@@ -15,4 +15,4 @@ CREATE TABLE
     PRIMARY KEY (user_id, model)
   );
 
-  ALTER TABLE IF EXISTS balance RENAME TO crypto_balance;
+  ALTER TABLE IF EXISTS balance RENAME TO crypto_balances;
