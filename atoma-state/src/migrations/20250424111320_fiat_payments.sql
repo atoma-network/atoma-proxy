@@ -10,7 +10,7 @@ CREATE TABLE
 CREATE TABLE
   IF NOT EXISTS usage_per_model (
     user_id INTEGER NOT NULL,
-    model STRING NOT NULL,
+    model TEXT NOT NULL,
     total_number_processed_tokens BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, model)
   );
