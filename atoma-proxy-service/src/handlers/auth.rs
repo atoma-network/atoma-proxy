@@ -586,7 +586,7 @@ pub async fn get_balance(
     Ok(Json(
         proxy_service_state
             .atoma_state
-            .get_crypto_balance_for_user(user_id)
+            .get_balance_for_user(user_id)
             .await
             .map_err(|e| {
                 error!("Failed to get balance: {:?}", e);
