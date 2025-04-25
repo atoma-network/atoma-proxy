@@ -25,7 +25,9 @@ use super::metrics::{
     UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER,
 };
 use super::request_model::ComputeUnitsEstimate;
-use super::{handle_status_code_error, verify_response_hash_and_signature};
+use super::{
+    handle_status_code_error, update_state_manager_fiat, verify_response_hash_and_signature,
+};
 use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
 use crate::server::{Result, MODEL};
 
@@ -208,7 +210,13 @@ pub async fn image_generations_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat")
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.node_address,
+                            metadata.fiat_estimated_amount.unwrap_or(0),
+                            0,
+                            &metadata.endpoint,
+                        )?;
                     }
                 }
                 Err(e)
@@ -315,7 +323,13 @@ pub async fn confidential_image_generations_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat")
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.node_address,
+                            metadata.fiat_estimated_amount.unwrap_or(0),
+                            0,
+                            &metadata.endpoint,
+                        )?;
                     }
                 }
                 Err(e)

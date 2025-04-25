@@ -33,7 +33,7 @@ use super::{
         },
         models::MODELS_PATH,
         nodes::MAX_NUM_TOKENS_FOR_CONFIDENTIAL_COMPUTE,
-        update_state_manager,
+        update_state_manager, update_state_manager_fiat,
     },
     http_server::ProxyState,
 };
@@ -82,7 +82,10 @@ pub struct RequestMetadataExtension {
     pub selected_stack_small_id: Option<i64>,
 
     /// Estimated amount for fiat currency.
-    // pub fiat_estimated_amount: Option<i64>,
+    pub fiat_estimated_amount: Option<i64>,
+
+    /// Price per million tokens for this request.
+    pub price_per_million: Option<i64>,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -338,6 +341,8 @@ pub async fn authenticate_middleware(
             stack_small_id,
             selected_node_id,
             tx_digest,
+            fiat_locked_amount,
+            price_per_million,
         } = auth::get_selected_node(GetSelectedNodeArgs {
             model: &model,
             state: &state,
@@ -356,9 +361,9 @@ pub async fn authenticate_middleware(
         //
         // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
         // the proxy will be in an inconsistent state for the current stack.
-        match stack_small_id {
+        let req = match stack_small_id {
             Some(stack_small_id) => {
-                let req = match utils::try_validate_stack_for_request(
+                match utils::try_validate_stack_for_request(
                     &state,
                     &body_json,
                     &mut req_parts,
@@ -383,22 +388,46 @@ pub async fn authenticate_middleware(
                         )?;
                         return Err(e);
                     }
-                };
-                let duration = timer.elapsed();
-                AUTHENTICATE_MIDDLEWARE_TIMER.record(
-                    duration.as_secs_f64(),
-                    &[
-                        KeyValue::new("user_id", user_id.to_string()),
-                        KeyValue::new("model", model),
-                    ],
-                );
-                Ok(next.run(req).await)
+                }
             }
             None => {
-                // We are using fiat currency.
-                unimplemented!("Fiat currency is not supported yet");
+                match utils::create_fiat_request(
+                    &state,
+                    &body_json,
+                    &mut req_parts,
+                    selected_node_id,
+                    fiat_locked_amount.unwrap(),
+                    price_per_million.unwrap(),
+                    num_input_compute_units,
+                    max_total_compute_units,
+                    user_id,
+                    &endpoint,
+                )
+                .await
+                {
+                    Ok(req) => req,
+                    Err(e) => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            user_id,
+                            fiat_locked_amount.unwrap(),
+                            0,
+                            &endpoint,
+                        )?;
+                        return Err(e);
+                    }
+                }
             }
-        }
+        };
+        let duration = timer.elapsed();
+        AUTHENTICATE_MIDDLEWARE_TIMER.record(
+            duration.as_secs_f64(),
+            &[
+                KeyValue::new("user_id", user_id.to_string()),
+                KeyValue::new("model", model),
+            ],
+        );
+        Ok(next.run(req).await)
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
@@ -766,6 +795,8 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
+                    fiat_locked_amount: None,
+                    price_per_million: None,
                 },
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
@@ -1219,6 +1250,8 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
+                fiat_locked_amount: None,
+                price_per_million: None,
             }))
         } else {
             Ok(None)
@@ -1328,6 +1361,10 @@ pub mod auth {
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
+        /// The amount locked for fiat request
+        pub fiat_locked_amount: Option<i64>,
+        /// The price per million compute units (this is used for the fiat request)
+        pub price_per_million: Option<i64>,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1571,6 +1608,8 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
+            fiat_locked_amount: None,
+            price_per_million: None,
         })
     }
 
@@ -1885,6 +1924,8 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
+                fiat_locked_amount: None,
+                price_per_million: None,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -1997,12 +2038,14 @@ pub mod auth {
 
         // We don't have a stack for the user, lets check if the user is using fiat currency.
         let (result_sender, result_receiver) = oneshot::channel();
+        let fiat_locked_amount = total_tokens as i64
+            * node.price_per_one_million_compute_units as i64
+            / ONE_MILLION as i64;
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
                 user_id,
-                amount: total_tokens as i64 * node.price_per_one_million_compute_units as i64
-                    / ONE_MILLION as i64,
+                amount: fiat_locked_amount,
                 result_sender,
             })
             .map_err(|err| AtomaProxyError::InternalError {
@@ -2029,6 +2072,8 @@ pub mod auth {
                 stack_small_id: None,
                 selected_node_id: node.node_small_id,
                 tx_digest: None,
+                fiat_locked_amount: Some(fiat_locked_amount),
+                price_per_million: Some(node.price_per_one_million_compute_units),
             })
         } else {
             // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
@@ -2113,6 +2158,8 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
+            fiat_locked_amount: None,
+            price_per_million: None,
         }))
     }
 }
@@ -2282,6 +2329,129 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
+            fiat_estimated_amount: None,
+            price_per_million: None,
+            endpoint: endpoint.to_string(),
+            model_name: request_model.to_string(),
+        });
+
+        // update headers
+        let req = Request::from_parts(req_parts.clone(), Body::from(body_json.to_string()));
+        Ok(req)
+    }
+
+    /// Validates and prepares a request for processing by a fiat request and node.
+    ///
+    /// This function performs several key operations to prepare a request for forwarding:
+    /// 1. Obtain node address and signature
+    /// 2. Sets up required headers for node communication
+    /// 3. Configures request metadata for tracking and routing
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Server state containing shared resources and connections
+    /// * `body_json` - The parsed JSON body of the request
+    /// * `req_parts` - Mutable reference to request parts for header modification
+    /// * `selected_node_id` - ID of the node selected to process this request
+    /// * `fiat_estimated_amount` - The amount of fiat that was locked
+    /// * `total_compute_units` - Total compute units required for this request
+    /// * `user_id` - ID of the user making the request
+    /// * `endpoint` - API endpoint path being accessed
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<Request<Body>>` containing the fully prepared request if successful.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AtomaProxyError` in the following cases:
+    /// * `InternalError` - Failed to:
+    ///   - Convert values to header format
+    ///   - Set up required headers
+    /// * `InvalidBody` - Request body missing required "model" field
+    ///
+    /// # Headers Set
+    ///
+    /// The following headers are set on the request:
+    /// * `X-Signature` - Authentication signature for the node
+    /// * `Content-Length` - Updated body length
+    /// * `X-Tx-Digest` - (Optional) Transaction digest for new stacks
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// let prepared_request = create_fiat_request(
+    ///     &state,
+    ///     &body_json,
+    ///     &mut req_parts,
+    ///     node_id,
+    ///     fiat_estimated_amount,
+    ///     compute_units,
+    ///     user_id,
+    ///     "/v1/chat/completions"
+    /// ).await?;
+    /// ```
+    ///
+    /// # Request Metadata
+    ///
+    /// The function also sets up `RequestMetadataExtension` with:
+    /// * Node address and ID
+    /// * Compute units allocation
+    /// * Stack ID
+    /// * Endpoint path
+    /// * Model name
+    pub async fn create_fiat_request(
+        state: &State<ProxyState>,
+        body_json: &Value,
+        req_parts: &mut Parts,
+        selected_node_id: i64,
+        fiat_estimated_amount: i64,
+        price_per_million: i64,
+        num_input_tokens: u64,
+        total_compute_units: u64,
+        user_id: i64,
+        endpoint: &str,
+    ) -> Result<Request<Body>> {
+        let ProcessedRequest {
+            node_address,
+            signature,
+        } = auth::process_selected_stack(state, body_json, selected_node_id, endpoint).await?;
+
+        let signature_header =
+            HeaderValue::from_str(&signature).map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to convert signature to header value: {e:?}"),
+                client_message: None,
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+        let content_length_header = HeaderValue::from_str(&body_json.to_string().len().to_string())
+            .map_err(|e| AtomaProxyError::InternalError {
+                message: format!("Failed to convert content length to header value: {e:?}"),
+                client_message: None,
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+        req_parts
+            .headers
+            .insert(constants::SIGNATURE, signature_header);
+        req_parts
+            .headers
+            .insert(CONTENT_LENGTH, content_length_header);
+        let request_model = body_json
+            .get(MODEL)
+            .and_then(|m| m.as_str())
+            .ok_or_else(|| AtomaProxyError::RequestError {
+                message: "{MODEL} not found".to_string(),
+                endpoint: req_parts.uri.path().to_string(),
+            })?;
+
+        req_parts.extensions.insert(RequestMetadataExtension {
+            node_address,
+            node_id: selected_node_id,
+            num_input_tokens: Some(num_input_tokens),
+            max_total_num_compute_units: total_compute_units,
+            user_id,
+            selected_stack_small_id: None,
+            fiat_estimated_amount: Some(fiat_estimated_amount),
+            price_per_million: Some(price_per_million),
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });

@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::server::handlers::update_state_manager_fiat;
 use crate::server::streamer::ClientStreamer;
 use crate::server::types::{ConfidentialComputeResponse, ConfidentialComputeStreamResponse};
 use crate::server::{
@@ -202,14 +203,14 @@ pub async fn chat_completions_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat")
-                    } // update_state_manager_fiat(
-                      //     &state.state_manager_sender,
-                      //     user_id,
-                      //     metadata.fiat_estimated_amount.unwrap(),
-                      //     amount,
-                      //     &metadata.endpoint,
-                      // ),
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
                 }
                 Err(e)
             }
@@ -480,6 +481,7 @@ async fn handle_chat_completions_request(
             headers,
             &payload,
             metadata.max_total_num_compute_units as i64,
+            metadata.fiat_estimated_amount,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -641,7 +643,15 @@ pub async fn confidential_chat_completions_create(
                             &metadata.endpoint,
                         )?;
                     }
-                    None => todo!("fiat"),
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
                 }
                 Err(e)
             }
@@ -745,6 +755,7 @@ async fn handle_non_streaming_response(
     headers: HeaderMap,
     payload: &Value,
     estimated_total_tokens: i64,
+    fiat_estimated_amount: Option<i64>,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -894,7 +905,19 @@ async fn handle_non_streaming_response(
             }
         }
         None => {
-            todo!("fiat");
+            if let Err(e) = update_state_manager_fiat(
+                &state.state_manager_sender,
+                user_id,
+                fiat_estimated_amount.unwrap_or(0),
+                total_tokens,
+                &endpoint,
+            ) {
+                return Err(AtomaProxyError::InternalError {
+                    message: format!("Error updating fiat state manager: {e:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                });
+            }
         }
     }
 
