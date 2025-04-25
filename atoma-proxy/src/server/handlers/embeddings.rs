@@ -22,7 +22,7 @@ use crate::server::{
     http_server::ProxyState,
     middleware::RequestMetadataExtension,
     types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
-    MODEL,
+    MODEL, ONE_MILLION,
 };
 
 use super::{
@@ -34,7 +34,8 @@ use super::{
         UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
     },
     request_model::{ComputeUnitsEstimate, RequestModel},
-    update_state_manager, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
+    update_state_manager, update_state_manager_fiat, verify_response_hash_and_signature,
+    RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -216,7 +217,13 @@ pub async fn embeddings_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat");
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
                     }
                 }
                 Err(e)
@@ -321,7 +328,13 @@ pub async fn confidential_embeddings_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat");
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            total_tokens * metadata.price_per_million / ONE_MILLION,
+                            &metadata.endpoint,
+                        )?;
                     }
                 }
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
@@ -347,7 +360,13 @@ pub async fn confidential_embeddings_create(
                         )?;
                     }
                     None => {
-                        todo!("fiat");
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
                     }
                 }
                 Err(e)

@@ -27,7 +27,8 @@ use super::handlers::metrics::{
     CHAT_COMPLETIONS_TOTAL_TOKENS, CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER,
     CHAT_COMPLETION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
 };
-use super::handlers::verify_response_hash_and_signature;
+use super::handlers::{update_state_manager_fiat, verify_response_hash_and_signature};
+use super::ONE_MILLION;
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -55,6 +56,10 @@ pub struct Streamer {
     status: StreamStatus,
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
+    /// Estimated amount for fiat currency.
+    fiat_estimated_amount: Option<i64>,
+    /// Price per million tokens for this request.
+    price_per_million: Option<i64>,
     /// Stack small id
     stack_small_id: Option<i64>,
     /// State manager sender
@@ -249,7 +254,21 @@ impl Streamer {
                 }
             }
             None => {
-                todo!("fiat")
+                if let Err(e) = update_state_manager_fiat(
+                    &self.state_manager_sender,
+                    self.user_id,
+                    self.fiat_estimated_amount.unwrap_or_default(),
+                    total_tokens * self.price_per_million.unwrap_or_default() / ONE_MILLION,
+                    &self.endpoint,
+                ) {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error updating fiat num tokens: {}",
+                        e
+                    );
+                    return Err(Error::new(format!("Error updating fiat num tokens: {e:?}")));
+                }
             }
         }
         self.is_final_chunk_handled = true;
@@ -550,7 +569,21 @@ impl Drop for Streamer {
                 }
             }
             None => {
-                todo!("fiat")
+                if let Err(e) = update_state_manager_fiat(
+                    &self.state_manager_sender,
+                    self.user_id,
+                    self.fiat_estimated_amount.unwrap_or_default(),
+                    self.num_generated_tokens * self.price_per_million.unwrap_or_default()
+                        / ONE_MILLION,
+                    &self.endpoint,
+                ) {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error updating fiat num tokens: {}",
+                        e
+                    );
+                }
             }
         }
         self.status = StreamStatus::Completed;
