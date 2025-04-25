@@ -56,7 +56,7 @@ pub struct Streamer {
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
     /// Stack small id
-    stack_small_id: i64,
+    stack_small_id: Option<i64>,
     /// State manager sender
     state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
     /// Start time of the request
@@ -105,7 +105,7 @@ impl Streamer {
     pub fn new(
         stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
-        stack_small_id: i64,
+        stack_small_id: Option<i64>,
         num_input_tokens: i64,
         estimated_total_tokens: i64,
         start: Instant,
@@ -228,22 +228,29 @@ impl Streamer {
             output_tokens as u64,
             &[KeyValue::new("user_id", self.user_id)],
         );
-        if let Err(e) = update_state_manager(
-            &self.state_manager_sender,
-            self.stack_small_id,
-            self.estimated_total_tokens,
-            total_tokens,
-            &self.endpoint,
-        ) {
-            error!(
-                target = "atoma-service-streamer",
-                level = "error",
-                "Error updating stack num tokens: {}",
-                e
-            );
-            return Err(Error::new(format!(
-                "Error updating stack num tokens: {e:?}"
-            )));
+        match self.stack_small_id {
+            Some(stack_small_id) => {
+                if let Err(e) = update_state_manager(
+                    &self.state_manager_sender,
+                    stack_small_id,
+                    self.estimated_total_tokens,
+                    total_tokens,
+                    &self.endpoint,
+                ) {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error updating stack num tokens: {}",
+                        e
+                    );
+                    return Err(Error::new(format!(
+                        "Error updating stack num tokens: {e:?}"
+                    )));
+                }
+            }
+            None => {
+                todo!("fiat")
+            }
         }
         self.is_final_chunk_handled = true;
         Ok(())
@@ -525,19 +532,26 @@ impl Drop for Streamer {
         }
         CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER
             .add(1, &[KeyValue::new("user_id", self.user_id)]);
-        if let Err(e) = update_state_manager(
-            &self.state_manager_sender,
-            self.stack_small_id,
-            self.estimated_total_tokens,
-            self.num_generated_tokens,
-            &self.endpoint,
-        ) {
-            error!(
-                target = "atoma-service-streamer",
-                level = "error",
-                "Error updating stack num tokens: {}",
-                e
-            );
+        match self.stack_small_id {
+            Some(stack_small_id) => {
+                if let Err(e) = update_state_manager(
+                    &self.state_manager_sender,
+                    stack_small_id,
+                    self.estimated_total_tokens,
+                    self.num_generated_tokens,
+                    &self.endpoint,
+                ) {
+                    error!(
+                        target = "atoma-service-streamer",
+                        level = "error",
+                        "Error updating stack num tokens: {}",
+                        e
+                    );
+                }
+            }
+            None => {
+                todo!("fiat")
+            }
         }
         self.status = StreamStatus::Completed;
     }

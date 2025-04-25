@@ -82,6 +82,28 @@ pub fn update_state_manager(
     Ok(())
 }
 
+pub fn update_state_manager_fiat(
+    state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+    user_id: i64,
+    estimated_amount: i64,
+    amount: i64,
+    endpoint: &str,
+) -> Result<()> {
+    // Update stack num tokens
+    state_manager_sender
+        .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
+            user_id,
+            estimated_amount,
+            amount,
+        })
+        .map_err(|e| AtomaProxyError::InternalError {
+            message: format!("Error updating stack num tokens fiat: {e}"),
+            client_message: None,
+            endpoint: endpoint.to_string(),
+        })?;
+    Ok(())
+}
+
 /// Verifies a Sui signature from a handler response
 ///
 /// # Arguments

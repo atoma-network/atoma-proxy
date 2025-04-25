@@ -911,4 +911,20 @@ pub enum AtomaAtomaStateManagerEvent {
         /// The result sender to send back the result
         result_sender: oneshot::Sender<Result<()>>,
     },
+    LockUserFiatBalance {
+        /// The user ID
+        user_id: i64,
+        /// The amount to lock
+        amount: i64,
+        /// The result sender to send back the success status
+        result_sender: oneshot::Sender<Result<bool>>,
+    },
+    UpdateStackNumTokensFiat {
+        /// The user ID
+        user_id: i64,
+        /// The original estimated amount
+        estimated_amount: i64,
+        /// The actual amount
+        amount: i64,
+    },
 }
