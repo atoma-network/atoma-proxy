@@ -213,7 +213,7 @@ pub async fn image_generations_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or(0),
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
                             0,
                             &metadata.endpoint,
                         )?;
@@ -326,7 +326,7 @@ pub async fn confidential_image_generations_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or(0),
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
                             0,
                             &metadata.endpoint,
                         )?;
