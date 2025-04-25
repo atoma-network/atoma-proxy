@@ -113,6 +113,8 @@ impl Streamer {
         stack_small_id: Option<i64>,
         num_input_tokens: i64,
         estimated_total_tokens: i64,
+        fiat_estimated_amount: Option<i64>,
+        price_per_million: Option<i64>,
         start: Instant,
         user_id: i64,
         model_name: String,
@@ -134,6 +136,8 @@ impl Streamer {
             inter_stream_token_latency_timer: None,
             is_final_chunk_handled: false,
             num_generated_tokens: num_input_tokens,
+            fiat_estimated_amount,
+            price_per_million,
         }
     }
 
@@ -258,7 +262,7 @@ impl Streamer {
                     &self.state_manager_sender,
                     self.user_id,
                     self.fiat_estimated_amount.unwrap_or_default(),
-                    total_tokens * self.price_per_million.unwrap_or_default() / ONE_MILLION,
+                    total_tokens * self.price_per_million.unwrap_or_default() / ONE_MILLION as i64,
                     &self.endpoint,
                 ) {
                     error!(
@@ -574,7 +578,7 @@ impl Drop for Streamer {
                     self.user_id,
                     self.fiat_estimated_amount.unwrap_or_default(),
                     self.num_generated_tokens * self.price_per_million.unwrap_or_default()
-                        / ONE_MILLION,
+                        / ONE_MILLION as i64,
                     &self.endpoint,
                 ) {
                     error!(
