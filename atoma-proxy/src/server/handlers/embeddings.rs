@@ -332,7 +332,8 @@ pub async fn confidential_embeddings_create(
                             &state.state_manager_sender,
                             metadata.user_id,
                             metadata.fiat_estimated_amount.unwrap_or_default(),
-                            total_tokens * metadata.price_per_million / ONE_MILLION,
+                            total_tokens * metadata.price_per_million.unwrap_or_default()
+                                / ONE_MILLION as i64,
                             &metadata.endpoint,
                         )?;
                     }
