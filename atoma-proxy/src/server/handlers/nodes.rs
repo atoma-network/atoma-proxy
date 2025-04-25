@@ -438,6 +438,7 @@ pub async fn nodes_create_lock(
                     })?;
                 if let Some(node_public_key) = node_public_key {
                     let public_key = STANDARD.encode(node_public_key.public_key);
+                    let stack_small_id = stack_small_id.unwrap();
                     lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
                     Ok(Json(NodesCreateLockResponse {
                         public_key,

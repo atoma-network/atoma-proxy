@@ -197,13 +197,20 @@ pub async fn image_generations_create(
                 // Record the failed request in the total failed requests metric
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
 
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    metadata.max_total_num_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            metadata.max_total_num_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        todo!("fiat")
+                    }
+                }
                 Err(e)
             }
         }
@@ -297,13 +304,20 @@ pub async fn confidential_image_generations_create(
                 TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    metadata.max_total_num_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            metadata.max_total_num_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        todo!("fiat")
+                    }
+                }
                 Err(e)
             }
         }
@@ -363,7 +377,7 @@ async fn handle_image_generation_response(
     total_tokens: i64,
     endpoint: String,
     model_name: String,
-    stack_small_id: i64,
+    stack_small_id: Option<i64>,
 ) -> Result<Response<Body>> {
     // Record the request in the image generations num requests metric
     let model_label: String = model_name.clone();
@@ -438,17 +452,19 @@ async fn handle_image_generation_response(
             endpoint: endpoint.to_string(),
         })?;
 
-    state
-        .state_manager_sender
-        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-            stack_small_id,
-            total_hash,
-        })
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
+    if let Some(stack_small_id) = stack_small_id {
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+                stack_small_id,
+                total_hash,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Error updating stack total hash: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+    }
 
     IMAGE_GEN_LATENCY_METRICS.record(
         time.elapsed().as_secs_f64(),

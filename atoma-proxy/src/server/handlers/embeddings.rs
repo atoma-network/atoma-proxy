@@ -205,13 +205,20 @@ pub async fn embeddings_create(
                 TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    num_input_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            num_input_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        todo!("fiat");
+                    }
+                }
                 Err(e)
             }
         }
@@ -303,13 +310,20 @@ pub async fn confidential_embeddings_create(
                     .and_then(|usage| usage.get("total_tokens"))
                     .and_then(serde_json::Value::as_u64)
                     .map_or(0, |n| n as i64);
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    num_input_compute_units as i64,
-                    total_tokens,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            num_input_compute_units as i64,
+                            total_tokens,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        todo!("fiat");
+                    }
+                }
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
@@ -322,13 +336,20 @@ pub async fn confidential_embeddings_create(
                 UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    num_input_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            num_input_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        todo!("fiat");
+                    }
+                }
                 Err(e)
             }
         }
@@ -385,7 +406,7 @@ async fn handle_embeddings_response(
     num_input_compute_units: i64,
     endpoint: String,
     model_name: String,
-    stack_small_id: i64,
+    stack_small_id: Option<i64>,
 ) -> Result<Value> {
     // Record the request in the total text embedding requests metric
     let model_label: String = model_name.clone();
@@ -472,17 +493,19 @@ async fn handle_embeddings_response(
             endpoint: endpoint.to_string(),
         })?;
 
-    state
-        .state_manager_sender
-        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-            stack_small_id,
-            total_hash,
-        })
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
+    if let Some(stack_small_id) = stack_small_id {
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+                stack_small_id,
+                total_hash,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Error updating stack total hash: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+    }
 
     TEXT_EMBEDDINGS_LATENCY_METRICS.record(
         time.elapsed().as_secs_f64(),

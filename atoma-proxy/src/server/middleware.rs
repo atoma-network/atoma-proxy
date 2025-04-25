@@ -79,7 +79,10 @@ pub struct RequestMetadataExtension {
     pub user_id: i64,
 
     /// Selected stack small id for this request.
-    pub selected_stack_small_id: i64,
+    pub selected_stack_small_id: Option<i64>,
+
+    /// Estimated amount for fiat currency.
+    // pub fiat_estimated_amount: Option<i64>,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -168,7 +171,7 @@ impl RequestMetadataExtension {
     ///
     /// Returns self with the stack small id field populated, enabling method chaining
     pub const fn with_stack_small_id(mut self, stack_small_id: i64) -> Self {
-        self.selected_stack_small_id = stack_small_id;
+        self.selected_stack_small_id = Some(stack_small_id);
         self
     }
 
@@ -345,47 +348,57 @@ pub async fn authenticate_middleware(
         })
         .await?;
 
-        STACK_NUM_REQUESTS_COUNTER.add(1, &[KeyValue::new("stack_small_id", stack_small_id)]);
+        if let Some(stack_small_id) = &stack_small_id {
+            STACK_NUM_REQUESTS_COUNTER.add(1, &[KeyValue::new("stack_small_id", *stack_small_id)]);
+        }
 
         // Validates the stack for the request.
         //
         // NOTE: If this method fails, we need to rollback the compute units that we locked for the stack, back to 0. Otherwise,
         // the proxy will be in an inconsistent state for the current stack.
-        let req = match utils::try_validate_stack_for_request(
-            &state,
-            &body_json,
-            &mut req_parts,
-            selected_node_id,
-            stack_small_id,
-            num_input_compute_units,
-            max_total_compute_units,
-            tx_digest,
-            user_id,
-            &endpoint,
-        )
-        .await
-        {
-            Ok(req) => req,
-            Err(e) => {
-                update_state_manager(
-                    &state.state_manager_sender,
+        match stack_small_id {
+            Some(stack_small_id) => {
+                let req = match utils::try_validate_stack_for_request(
+                    &state,
+                    &body_json,
+                    &mut req_parts,
+                    selected_node_id,
                     stack_small_id,
-                    max_total_compute_units as i64,
-                    0,
+                    num_input_compute_units,
+                    max_total_compute_units,
+                    tx_digest,
+                    user_id,
                     &endpoint,
-                )?;
-                return Err(e);
+                )
+                .await
+                {
+                    Ok(req) => req,
+                    Err(e) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            max_total_compute_units as i64,
+                            0,
+                            &endpoint,
+                        )?;
+                        return Err(e);
+                    }
+                };
+                let duration = timer.elapsed();
+                AUTHENTICATE_MIDDLEWARE_TIMER.record(
+                    duration.as_secs_f64(),
+                    &[
+                        KeyValue::new("user_id", user_id.to_string()),
+                        KeyValue::new("model", model),
+                    ],
+                );
+                Ok(next.run(req).await)
             }
-        };
-        let duration = timer.elapsed();
-        AUTHENTICATE_MIDDLEWARE_TIMER.record(
-            duration.as_secs_f64(),
-            &[
-                KeyValue::new("user_id", user_id.to_string()),
-                KeyValue::new("model", model),
-            ],
-        );
-        Ok(next.run(req).await)
+            None => {
+                // We are using fiat currency.
+                unimplemented!("Fiat currency is not supported yet");
+            }
+        }
     })
     .await
     .map_err(|e| AtomaProxyError::InternalError {
@@ -672,16 +685,15 @@ pub async fn handle_locked_stack_middleware(
                     endpoint: endpoint.to_string(),
                 })?;
             STACK_LOCKED_COUNTER.add(1, &[KeyValue::new("model", request_metadata.model_name)]);
-            LOCKED_STACK_COUNTER_PER_USER.add(
-                1,
-                &[
-                    KeyValue::new(
-                        "stack_small_id",
-                        request_metadata.selected_stack_small_id.to_string(),
-                    ),
-                    KeyValue::new("user_id", request_metadata.user_id),
-                ],
-            );
+            if let Some(stack_small_id) = request_metadata.selected_stack_small_id {
+                LOCKED_STACK_COUNTER_PER_USER.add(
+                    1,
+                    &[
+                        KeyValue::new("stack_small_id", stack_small_id.to_string()),
+                        KeyValue::new("user_id", request_metadata.user_id),
+                    ],
+                );
+            }
             // Lock the current stack, in the Proxy's internal state
             utils::lock_stack(&state.state_manager_sender, &mut req_parts, &endpoint)?;
             req_parts
@@ -716,16 +728,15 @@ pub async fn handle_locked_stack_middleware(
                 1,
                 &[KeyValue::new("model", request_metadata.model_name.clone())],
             );
-            UNAVAILABLE_STACK_COUNTER_PER_USER.add(
-                1,
-                &[
-                    KeyValue::new(
-                        "stack_small_id",
-                        request_metadata.selected_stack_small_id.to_string(),
-                    ),
-                    KeyValue::new("user_id", request_metadata.user_id),
-                ],
-            );
+            if let Some(stack_small_id) = request_metadata.selected_stack_small_id {
+                UNAVAILABLE_STACK_COUNTER_PER_USER.add(
+                    1,
+                    &[
+                        KeyValue::new("stack_small_id", stack_small_id.to_string()),
+                        KeyValue::new("user_id", request_metadata.user_id),
+                    ],
+                );
+            }
             // NOTE: In this case, the node hasn't locked the stack immediately (has overestimated the compute units required for the request).
             if is_confidential_compute_endpoint(&endpoint) {
                 // NOTE: If this is a confidential compute request, the client already sent a request encrypted for a specific node.
@@ -774,7 +785,17 @@ pub async fn handle_locked_stack_middleware(
                 .insert(AUTHORIZATION, authorization_header);
             req_parts.headers.insert(
                 constants::STACK_SMALL_ID,
-                HeaderValue::from_str(&selected_node_metadata.stack_small_id.to_string()).unwrap(),
+                HeaderValue::from_str(
+                    &selected_node_metadata
+                        .stack_small_id
+                        .ok_or_else(|| AtomaProxyError::InternalError {
+                            message: "Too early without a stack information".to_string(),
+                            client_message: None,
+                            endpoint: endpoint.to_string(),
+                        })?
+                        .to_string(),
+                )
+                .unwrap(),
             );
             let body_json =
                 serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
@@ -786,7 +807,13 @@ pub async fn handle_locked_stack_middleware(
                 &body_json,
                 &mut req_parts,
                 selected_node_metadata.selected_node_id,
-                selected_node_metadata.stack_small_id,
+                selected_node_metadata.stack_small_id.ok_or_else(|| {
+                    AtomaProxyError::InternalError {
+                        message: "Too early without a stack information".to_string(),
+                        client_message: None,
+                        endpoint: endpoint.to_string(),
+                    }
+                })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
                 selected_node_metadata.tx_digest,
@@ -799,7 +826,13 @@ pub async fn handle_locked_stack_middleware(
                 Err(e) => {
                     update_state_manager(
                         &state.state_manager_sender,
-                        selected_node_metadata.stack_small_id,
+                        selected_node_metadata.stack_small_id.ok_or_else(|| {
+                            AtomaProxyError::InternalError {
+                                message: "Too early without a stack information".to_string(),
+                                client_message: None,
+                                endpoint: endpoint.to_string(),
+                            }
+                        })?,
                         max_total_num_compute_units as i64,
                         0,
                         &endpoint,
@@ -1183,7 +1216,7 @@ pub mod auth {
             })?;
         if let Some(stack) = optional_stack {
             Ok(Some(SelectedNodeMetadata {
-                stack_small_id: stack.stack_small_id,
+                stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
             }))
@@ -1290,7 +1323,7 @@ pub mod auth {
     #[derive(Debug)]
     pub struct SelectedNodeMetadata {
         /// The small ID of the stack
-        pub stack_small_id: i64,
+        pub stack_small_id: Option<i64>,
         /// The small ID of the selected node
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
@@ -1535,7 +1568,7 @@ pub mod auth {
                 endpoint: endpoint.to_string(),
             })?;
         Ok(SelectedNodeMetadata {
-            stack_small_id,
+            stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
         })
@@ -1849,7 +1882,7 @@ pub mod auth {
         } = args;
         if let Some(stack) = optional_stack {
             return Ok(SelectedNodeMetadata {
-                stack_small_id: stack.stack_small_id,
+                stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
             });
@@ -1962,17 +1995,54 @@ pub mod auth {
                 .await;
         };
 
-        // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-        acquire_new_stack(
-            state.state_manager_sender.clone(),
-            user_id,
-            lock_guard,
-            endpoint.to_string(),
-            total_tokens,
-            Arc::clone(&state.sui),
-            node,
-        )
-        .await
+        // We don't have a stack for the user, lets check if the user is using fiat currency.
+        let (result_sender, result_receiver) = oneshot::channel();
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
+                user_id,
+                amount: total_tokens as i64 * node.price_per_one_million_compute_units as i64
+                    / ONE_MILLION as i64,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send LockUserFiatBalance event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        let locked_fiat = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive LockUserFiatBalance result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get LockUserFiatBalance result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        if locked_fiat {
+            Ok(SelectedNodeMetadata {
+                stack_small_id: None,
+                selected_node_id: node.node_small_id,
+                tx_digest: None,
+            })
+        } else {
+            // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+            acquire_new_stack(
+                state.state_manager_sender.clone(),
+                user_id,
+                lock_guard,
+                endpoint.to_string(),
+                total_tokens,
+                Arc::clone(&state.sui),
+                node,
+            )
+            .await
+        }
         // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
         // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
         // lock guard release will see the new stack.
@@ -2041,7 +2111,7 @@ pub mod auth {
             })?;
         Ok(maybe_stack.map(|stack| SelectedNodeMetadata {
             selected_node_id: stack.selected_node_id,
-            stack_small_id: stack.stack_small_id,
+            stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
         }))
     }
@@ -2211,7 +2281,7 @@ pub mod utils {
             num_input_tokens: Some(num_input_tokens),
             max_total_num_compute_units: total_compute_units,
             user_id,
-            selected_stack_small_id,
+            selected_stack_small_id: Some(selected_stack_small_id),
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
