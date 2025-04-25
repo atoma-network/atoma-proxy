@@ -82,6 +82,31 @@ pub fn update_state_manager(
     Ok(())
 }
 
+/// Updates the state manager with amount usage for fiat requests.
+///
+/// Updates the amount count for the user with both estimated and actual usage
+///
+/// # Arguments
+///
+/// * `state` - Reference to the application state containing the state manager sender
+/// * `user_id` - Unique identifier of the user
+/// * `estimated_amount` - The estimated amount before processing
+/// * `amount` - The actual amount used
+///
+/// # Returns
+///
+/// Returns `Ok(())` if both updates succeed, or a `AtomaProxyError::InternalError` if either update fails.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The state manager channel is closed
+/// - Either update operation fails to complete
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(user_id, estimated_amount, amount, endpoint)
+)]
 pub fn update_state_manager_fiat(
     state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
     user_id: i64,

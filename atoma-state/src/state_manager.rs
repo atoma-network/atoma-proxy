@@ -4509,6 +4509,7 @@ impl AtomaState {
     /// This function will return an error if:
     ///
     /// - The database query fails to execute.
+    #[instrument(level = "trace", skip(self),fields(%user_id, %amount))]
     pub async fn lock_user_fiat_balance(&self, user_id: i64, amount: i64) -> Result<bool> {
         let result = sqlx::query(
             "UPDATE fiat_balance SET overcharged_unsettled_amount = overcharged_unsettled_amount + $2 WHERE user_id = $1 AND usd_balance >= already_debited_amount + overcharged_unsettled_amount + $1",
