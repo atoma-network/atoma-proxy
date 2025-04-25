@@ -2038,9 +2038,8 @@ pub mod auth {
 
         // We don't have a stack for the user, lets check if the user is using fiat currency.
         let (result_sender, result_receiver) = oneshot::channel();
-        let fiat_locked_amount = total_tokens as i64
-            * node.price_per_one_million_compute_units as i64
-            / ONE_MILLION as i64;
+        let fiat_locked_amount =
+            total_tokens as i64 * node.price_per_one_million_compute_units / ONE_MILLION as i64;
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
@@ -2400,6 +2399,12 @@ pub mod utils {
     /// * Stack ID
     /// * Endpoint path
     /// * Model name
+    #[instrument(level = "info", skip_all, fields(
+        %endpoint,
+        %fiat_estimated_amount,
+        %user_id
+    ), err)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_fiat_request(
         state: &State<ProxyState>,
         body_json: &Value,
