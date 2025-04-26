@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 use utoipa::ToSchema;
 
 use crate::state_manager::Result;
+use sui_sdk::types::digests::TransactionDigest;
 
 /// The modalities that can be used to collect metrics, for each of the
 /// currently supported modalities.
@@ -442,6 +443,9 @@ pub struct Stack {
 
     /// Number of payload requests that were received by the node for this stack.
     pub num_total_messages: i64,
+
+    /// The transaction digest of the stack
+    pub tx_digest: String,
 }
 
 impl From<StackCreatedEvent> for Stack {
@@ -459,6 +463,7 @@ impl From<StackCreatedEvent> for Stack {
             in_settle_period: false,
             total_hash: vec![],
             num_total_messages: 0,
+            tx_digest: TransactionDigest::ZERO.base58_encode(),
         }
     }
 }
@@ -579,6 +584,9 @@ pub struct NodePublicKey {
     /// The stack small id that is associated with the selected node
     #[sqlx(default)]
     pub stack_small_id: Option<i64>,
+    /// The transaction digest of the stack
+    #[sqlx(default)]
+    pub tx_digest: Option<String>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {
@@ -727,6 +735,8 @@ pub enum AtomaAtomaStateManagerEvent {
         locked_compute_units: i64,
         /// Timestamp of the transaction that created the stack
         transaction_timestamp: DateTime<Utc>,
+        /// Transaction digest of the stack
+        tx_digest: TransactionDigest,
         /// User id of the stack owner (referencing local user table)
         user_id: i64,
         /// Channel to send back the result

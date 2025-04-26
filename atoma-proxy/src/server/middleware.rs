@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use atoma_utils::constants;
 use auth::{
@@ -18,6 +20,7 @@ use reqwest::{
     StatusCode,
 };
 use serde_json::Value;
+use sui_sdk::types::digests::TransactionDigest;
 use tracing::instrument;
 use utils::is_confidential_compute_endpoint;
 
@@ -359,7 +362,14 @@ pub async fn authenticate_middleware(
             stack_small_id,
             num_input_compute_units,
             max_total_compute_units,
-            tx_digest,
+            TransactionDigest::from_str(&tx_digest).map_err(|e| {
+                tracing::error!("Failed to parse tx_digest: {e}");
+                AtomaProxyError::InternalError {
+                    message: format!("Failed to parse tx_digest: {e}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                }
+            })?,
             user_id,
             &endpoint,
         )
@@ -751,11 +761,7 @@ pub async fn handle_locked_stack_middleware(
             )
             .await?;
             let selected_node_metadata = match maybe_stack {
-                Some(stack) => SelectedNodeMetadata {
-                    selected_node_id: stack.selected_node_id,
-                    stack_small_id: stack.stack_small_id,
-                    tx_digest: None,
-                },
+                Some(stack) => stack,
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
                     get_cheapest_node_and_acquire_new_stack(
@@ -789,7 +795,14 @@ pub async fn handle_locked_stack_middleware(
                 selected_node_metadata.stack_small_id,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
-                selected_node_metadata.tx_digest,
+                TransactionDigest::from_str(&selected_node_metadata.tx_digest).map_err(|e| {
+                    tracing::error!("Failed to parse tx_digest: {e}");
+                    AtomaProxyError::InternalError {
+                        message: format!("Failed to parse tx_digest: {e}"),
+                        client_message: None,
+                        endpoint: endpoint.to_string(),
+                    }
+                })?,
                 user_id,
                 &endpoint,
             )
@@ -825,7 +838,6 @@ pub mod auth {
     use flume::Sender;
     use opentelemetry::KeyValue;
     use serde_json::Value;
-    use sui_sdk::types::digests::TransactionDigest;
     use tokio::sync::{oneshot, RwLock};
     use tracing::instrument;
 
@@ -857,7 +869,7 @@ pub mod auth {
     const MAX_STACK_WAIT_ATTEMPTS: usize = 10;
 
     /// Metadata about the stack that was selected for the request.
-    /// This is used to update the stack's num_tokens after the request is processed.  
+    /// This is used to update the stack's num_tokens after the request is processed.
     #[derive(Clone, Debug)]
     pub struct StackMetadata {
         /// The stack that was selected for the request.
@@ -1185,7 +1197,7 @@ pub mod auth {
             Ok(Some(SelectedNodeMetadata {
                 stack_small_id: stack.stack_small_id,
                 selected_node_id: stack.selected_node_id,
-                tx_digest: None,
+                tx_digest: stack.tx_digest,
             }))
         } else {
             Ok(None)
@@ -1294,7 +1306,7 @@ pub mod auth {
         /// The small ID of the selected node
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
-        pub tx_digest: Option<TransactionDigest>,
+        pub tx_digest: String,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1514,6 +1526,7 @@ pub mod auth {
                 event,
                 locked_compute_units: total_tokens as i64,
                 transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
+                tx_digest,
                 user_id,
                 result_sender,
             })
@@ -1537,7 +1550,7 @@ pub mod auth {
         Ok(SelectedNodeMetadata {
             stack_small_id,
             selected_node_id,
-            tx_digest: Some(tx_digest),
+            tx_digest: tx_digest.base58_encode(),
         })
     }
 
@@ -1851,7 +1864,7 @@ pub mod auth {
             return Ok(SelectedNodeMetadata {
                 stack_small_id: stack.stack_small_id,
                 selected_node_id: stack.selected_node_id,
-                tx_digest: None,
+                tx_digest: stack.tx_digest,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -1994,7 +2007,7 @@ pub mod auth {
     /// * `endpoint` - The API endpoint being accessed
     ///
     /// # Returns
-    /// * `Result<Option<SelectedNodeMetadata>>` - The stack if found, otherwise None   
+    /// * `Result<Option<SelectedNodeMetadata>>` - The stack if found, otherwise None
     ///
     /// # Errors
     /// * `AtomaProxyError::InternalError` - Failed to send or receive message to the state manager
@@ -2042,7 +2055,7 @@ pub mod auth {
         Ok(maybe_stack.map(|stack| SelectedNodeMetadata {
             selected_node_id: stack.selected_node_id,
             stack_small_id: stack.stack_small_id,
-            tx_digest: None,
+            tx_digest: stack.tx_digest,
         }))
     }
 }
@@ -2148,7 +2161,7 @@ pub mod utils {
         selected_stack_small_id: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
-        tx_digest: Option<TransactionDigest>,
+        tx_digest: TransactionDigest,
         user_id: i64,
         endpoint: &str,
     ) -> Result<Request<Body>> {
@@ -2184,19 +2197,18 @@ pub mod utils {
         req_parts
             .headers
             .insert(CONTENT_LENGTH, content_length_header);
-        if let Some(tx_digest) = tx_digest {
-            let tx_digest_header =
-                HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
-                    AtomaProxyError::InternalError {
-                        message: format!("Failed to convert tx digest to header value: {e:?}"),
-                        client_message: None,
-                        endpoint: req_parts.uri.path().to_string(),
-                    }
-                })?;
-            req_parts
-                .headers
-                .insert(constants::TX_DIGEST, tx_digest_header);
-        }
+
+        let tx_digest_header = HeaderValue::from_str(&tx_digest.base58_encode()).map_err(|e| {
+            AtomaProxyError::InternalError {
+                message: format!("Failed to convert tx digest to header value: {e:?}"),
+                client_message: None,
+                endpoint: req_parts.uri.path().to_string(),
+            }
+        })?;
+        req_parts
+            .headers
+            .insert(constants::TX_DIGEST, tx_digest_header);
+
         let request_model = body_json
             .get(MODEL)
             .and_then(|m| m.as_str())

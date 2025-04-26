@@ -9,6 +9,7 @@ use atoma_sui::events::{
 use atoma_utils::compression::decompress_bytes;
 use chrono::{DateTime, Utc};
 use remote_attestation::DeviceEvidence;
+use sui_sdk::types::digests::TransactionDigest;
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
@@ -573,6 +574,7 @@ pub async fn handle_stack_created_event(
     locked_compute_units: i64,
     user_id: i64,
     acquired_timestamp: DateTime<Utc>,
+    tx_digest: TransactionDigest,
 ) -> Result<()> {
     let node_small_id = event.selected_node_id.inner;
     trace!(
@@ -582,6 +584,7 @@ pub async fn handle_stack_created_event(
     );
     let mut stack: Stack = event.into();
     stack.locked_compute_units = locked_compute_units;
+    stack.tx_digest = tx_digest.base58_encode();
     state_manager
         .state
         .insert_new_stack(stack, user_id, acquired_timestamp)
@@ -1213,6 +1216,7 @@ pub async fn handle_state_manager_event(
             event,
             locked_compute_units,
             transaction_timestamp,
+            tx_digest,
             user_id,
             result_sender,
         } => {
@@ -1222,6 +1226,7 @@ pub async fn handle_state_manager_event(
                 locked_compute_units,
                 user_id,
                 transaction_timestamp,
+                tx_digest,
             )
             .await;
             result_sender
@@ -1732,7 +1737,7 @@ pub mod remote_attestation_verification {
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
     #[instrument(
-        level = "info", 
+        level = "info",
         skip_all,
         fields(
             device_type = device_type,

@@ -227,7 +227,7 @@ pub struct NodesCreateLockResponse {
     node_small_id: u64,
 
     /// Transaction digest for the transaction that acquires the stack entry, if any
-    stack_entry_digest: Option<String>,
+    stack_entry_digest: String,
 
     /// The stack small id to which an available stack entry was acquired, for the selected node
     stack_small_id: u64,
@@ -331,12 +331,22 @@ pub async fn nodes_create_lock(
                         client_message: None,
                         endpoint: NODES_CREATE_LOCK_PATH.to_string(),
                     })?;
+
+            let tx_digest =
+                node_public_key
+                    .tx_digest
+                    .ok_or_else(|| AtomaProxyError::InternalError {
+                        message: "Transaction digest not found for node public key".to_string(),
+                        client_message: None,
+                        endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                    })?;
+
             let public_key = STANDARD.encode(node_public_key.public_key);
             lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
             Ok(Json(NodesCreateLockResponse {
                 public_key,
                 node_small_id: node_public_key.node_small_id as u64,
-                stack_entry_digest: None,
+                stack_entry_digest: tx_digest,
                 stack_small_id: stack_small_id as u64,
             }))
         } else {
@@ -442,7 +452,7 @@ pub async fn nodes_create_lock(
                     Ok(Json(NodesCreateLockResponse {
                         public_key,
                         node_small_id: node_public_key.node_small_id as u64,
-                        stack_entry_digest: tx_digest.map(|tx| tx.to_string()),
+                        stack_entry_digest: tx_digest,
                         stack_small_id: stack_small_id as u64,
                     }))
                 } else {

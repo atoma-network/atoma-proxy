@@ -24,6 +24,8 @@ reqwest            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "chrono", "runtime-tokio-native-tls", "sqlite" ] }
+sui-sdk.workspace  = true
+sui-sdk-types      = { workspace = true, features = [ "serde" ] }
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "full" ] }
 tracing            = { workspace = true }
