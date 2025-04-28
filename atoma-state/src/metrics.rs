@@ -262,7 +262,17 @@ async fn collect_best_available_nodes(
         .models
         .iter()
         .map(|(modality, modality_model)| {
-            let metrics_url = metrics_collection_config.metrics_url.clone();
+            // Use default Prometheus URL if none is specified
+            let metrics_url = if metrics_collection_config.metrics_url.is_empty() {
+                tracing::info!(
+                    target = "atoma-state-manager",
+                    event = "using_default_prometheus_url",
+                    "No metrics URL specified, using default: http://localhost:9090"
+                );
+                "http://localhost:9090".to_string()
+            } else {
+                metrics_collection_config.metrics_url.clone()
+            };
             let best_available_nodes = best_available_nodes.clone();
             async move {
                 let model_best_available_nodes = match modality {
@@ -1047,9 +1057,9 @@ impl NodeMetricsCollector {
         format!(
             r#"topk({top_k},
                 -1 * (
-                    (embeddings_queue_duration{{model="{model}"}} + 
-                    embeddings_inference_duration{{model="{model}"}}) * 
-                    (1 + (embeddings_batch_tokens{{model="{model}"}} / 
+                    (embeddings_queue_duration{{model="{model}"}} +
+                    embeddings_inference_duration{{model="{model}"}}) *
+                    (1 + (embeddings_batch_tokens{{model="{model}"}} /
                           max(embeddings_batch_size{{model="{model}"}}, 1) / 1000000))
                 )
             )"#,
