@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
-use tracing::{error, info, instrument, warn};
+use tracing::{error, instrument, trace};
 
 use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
 
@@ -287,7 +287,7 @@ impl Stream for Streamer {
                 if let Some(remaining) = KEEP_ALIVE_CHUNK_STR.get(self.keep_alive_pos..) {
                     if remaining.starts_with(chunk_str) {
                         self.keep_alive_pos += chunk_str.len();
-                        info!(
+                        trace!(
                             target: "atoma-service-streamer",
                             "Partial keep-alive received, current position: {}",
                             self.keep_alive_pos
@@ -295,7 +295,7 @@ impl Stream for Streamer {
                         if self.keep_alive_pos >= KEEP_ALIVE_CHUNK_STR.len() {
                             // Full keep-alive received
                             self.keep_alive_pos = 0;
-                            info!(
+                            trace!(
                                 target: "atoma-service-streamer",
                                 "Full keep-alive received, resetting position"
                             );
@@ -357,7 +357,7 @@ impl Stream for Streamer {
                     }
                     Err(e) => {
                         if e.is_eof() {
-                            info!(
+                            trace!(
                                 target = "atoma-service-streamer",
                                 parse_chunk = "eof_chunk",
                                 "EOF reached, pushing chunk to buffer: {}",
@@ -383,7 +383,7 @@ impl Stream for Streamer {
                         self.chunk_buffer.push_str(chunk_str);
                         match serde_json::from_str::<Value>(&self.chunk_buffer) {
                             Ok(chunk) => {
-                                info!(
+                                trace!(
                                     target = "atoma-service-streamer",
                                     parse_chunk = "eof_chunk",
                                     "Chunk parsed successfully, clearing buffer: {}",
@@ -447,9 +447,9 @@ impl Stream for Streamer {
                             self.handle_final_chunk(usage)?;
                         }
                     } else if let Some(usage) = chunk.get(USAGE) {
-                        info!(
+                        trace!(
                             target = "atoma-service-streamer",
-                            level = "info",
+                            level = "trace",
                             "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
                         );
                         self.status = StreamStatus::Completed;
@@ -576,7 +576,7 @@ impl Stream for ClientStreamer {
         match future.poll_unpin(cx) {
             Poll::Ready(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
             Poll::Ready(Err(RecvError::Disconnected)) => {
-                info!(
+                trace!(
                     target = "atoma-service-streamer",
                     "ClientStreamer received disconnect signal, marking as done."
                 );
