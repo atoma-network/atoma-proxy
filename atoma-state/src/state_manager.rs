@@ -4562,7 +4562,7 @@ impl AtomaState {
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(AtomaStateManagerError::UserNotFound(user_id));
+            return Err(AtomaStateManagerError::InsufficientBalance);
         }
 
         Ok(())

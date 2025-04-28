@@ -122,7 +122,7 @@ pub fn update_state_manager_fiat(
             amount,
         })
         .map_err(|e| AtomaProxyError::InternalError {
-            message: format!("Error updating stack num tokens fiat: {e}"),
+            message: format!("Error updating fiat balance: {e}"),
             client_message: None,
             endpoint: endpoint.to_string(),
         })?;

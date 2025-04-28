@@ -373,7 +373,7 @@ pub async fn nodes_create_lock(
                     stack_small_id,
                     selected_node_id,
                     tx_digest,
-                    fiat_locked_amount: _, // TODO: fiat
+                    fiat_locked_amount: _,
                     price_per_million: _,
                 } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
                     &state.users_buy_stack_lock_map,
@@ -440,13 +440,26 @@ pub async fn nodes_create_lock(
                     })?;
                 if let Some(node_public_key) = node_public_key {
                     let public_key = STANDARD.encode(node_public_key.public_key);
-                    let stack_small_id = stack_small_id.unwrap();
-                    lock_compute_units_in_memory(&state, stack_small_id, timeout, max_num_tokens);
+                    if let Some(stack_small_id) = stack_small_id {
+                        lock_compute_units_in_memory(
+                            &state,
+                            stack_small_id,
+                            timeout,
+                            max_num_tokens,
+                        );
+                    }
+
                     Ok(Json(NodesCreateLockResponse {
                         public_key,
                         node_small_id: node_public_key.node_small_id as u64,
                         stack_entry_digest: tx_digest.map(|tx| tx.to_string()),
-                        stack_small_id: stack_small_id as u64,
+                        stack_small_id: stack_small_id.ok_or_else(|| {
+                            AtomaProxyError::InternalError {
+                                message: "Stack small id not found for node public key".to_string(),
+                                client_message: None,
+                                endpoint: NODES_CREATE_LOCK_PATH.to_string(),
+                            }
+                        })? as u64,
                     }))
                 } else {
                     Err(AtomaProxyError::InternalError {

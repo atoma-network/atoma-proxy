@@ -106,6 +106,8 @@ pub enum StreamStatus {
 
 impl Streamer {
     /// Creates a new Streamer instance
+    ///
+    /// Either `stack_small_id` or `fiat_estimated_amount` must be provided.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
