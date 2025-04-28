@@ -1020,7 +1020,7 @@ async fn handle_streaming_response(
                         }
                     }
                 }
-                _ = kill_signal_receiver.recv_async() => {
+                Ok(_) = kill_signal_receiver.recv_async() => {
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
