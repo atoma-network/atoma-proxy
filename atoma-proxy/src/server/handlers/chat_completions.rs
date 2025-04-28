@@ -1004,7 +1004,6 @@ async fn handle_streaming_response(
                                     "Error sending chunk for model {model_name}: {e}"
                                 );
                                 // We continue the loop, to allow the streamer to finish with updated usage from the node
-                                continue;
                             }
                         }
                         Some(Err(e)) => {
@@ -1013,14 +1012,13 @@ async fn handle_streaming_response(
                                 level = "error",
                                 "Error sending chunk for the inner streamer with error: {e}"
                             );
-                            continue;
                         }
                         None => {
                             break;
                         }
                     }
                 }
-                _ = kill_signal_receiver.recv_async() => {
+                Ok(()) = kill_signal_receiver.recv_async() => {
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
@@ -1037,7 +1035,6 @@ async fn handle_streaming_response(
                         );
                     }
                     // We continue the loop, to allow the streamer to finish with updated usage from the node
-                    continue;
                 }
             }
         }
