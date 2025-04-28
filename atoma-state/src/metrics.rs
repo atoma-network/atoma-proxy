@@ -10,7 +10,7 @@ use flume::Receiver as FlumeReceiver;
 use prometheus::{GaugeVec, Opts, Registry};
 use serde::Deserialize;
 use tokio::sync::{oneshot, watch, RwLock};
-use tracing::instrument;
+use tracing::{info, instrument};
 
 use crate::{config::MetricsCollectionConfig, errors::MetricsServiceError, types::Modalities};
 
@@ -29,6 +29,9 @@ const NODE_SMALL_ID_LABEL: &str = "node_small_id";
 
 /// Default top k best available nodes
 pub(crate) const DEFAULT_TOP_K_BEST_AVAILABLE_NODES: usize = 10;
+
+/// Default prometheus url
+pub(crate) const DEFAULT_PROMETHEUS_URL: &str = "http://prometheus:9090";
 
 type Result<T> = std::result::Result<T, MetricsServiceError>;
 
@@ -264,12 +267,13 @@ async fn collect_best_available_nodes(
         .map(|(modality, modality_model)| {
             // Use default Prometheus URL if none is specified
             let metrics_url = if metrics_collection_config.metrics_url.is_empty() {
-                tracing::info!(
+                info!(
                     target = "atoma-state-manager",
                     event = "using_default_prometheus_url",
-                    "No metrics URL specified, using default: http://localhost:9090"
+                    "No metrics URL specified using default: {}",
+                    DEFAULT_PROMETHEUS_URL
                 );
-                "http://localhost:9090".to_string()
+                DEFAULT_PROMETHEUS_URL.to_string()
             } else {
                 metrics_collection_config.metrics_url.clone()
             };
