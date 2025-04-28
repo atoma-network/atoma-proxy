@@ -1004,7 +1004,6 @@ async fn handle_streaming_response(
                                     "Error sending chunk for model {model_name}: {e}"
                                 );
                                 // We continue the loop, to allow the streamer to finish with updated usage from the node
-                                continue;
                             }
                         }
                         Some(Err(e)) => {
@@ -1013,7 +1012,6 @@ async fn handle_streaming_response(
                                 level = "error",
                                 "Error sending chunk for the inner streamer with error: {e}"
                             );
-                            continue;
                         }
                         None => {
                             break;
@@ -1037,7 +1035,6 @@ async fn handle_streaming_response(
                         );
                     }
                     // We continue the loop, to allow the streamer to finish with updated usage from the node
-                    continue;
                 }
             }
         }
