@@ -3898,7 +3898,7 @@ impl AtomaState {
 
     /// Get balance for a user.
     ///
-    /// This method fetches the balance for a user from the `balance` table.
+    /// This method fetches the balance for a user from the `crypto_balances` table.
     ///
     /// # Arguments
     ///
@@ -3921,13 +3921,13 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn get_balance(state_manager: &AtomaStateManager, user_id: i64) -> Result<i64, AtomaStateManagerError> {
-    ///     state_manager.get_balance_for_user(user_id).await
+    /// async fn get_crypto_balance(state_manager: &AtomaStateManager, user_id: i64) -> Result<i64, AtomaStateManagerError> {
+    ///     state_manager.get_crypto_balance_for_user(user_id).await
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_balance_for_user(&self, user_id: i64) -> Result<i64> {
-        let balance = sqlx::query("SELECT usdc_balance FROM balance WHERE user_id = $1")
+    pub async fn get_crypto_balance_for_user(&self, user_id: i64) -> Result<i64> {
+        let balance = sqlx::query("SELECT usdc_balance FROM crypto_balances WHERE user_id = $1")
             .bind(user_id)
             .fetch_optional(&self.db)
             .await?
@@ -4306,7 +4306,7 @@ impl AtomaState {
 
     /// Update the balance for the user.
     ///
-    /// This method updates the `balance` field for the user in the `users` table.
+    /// This method updates the `usdc_balance` field for the user in the `users` table.
     ///
     /// # Arguments
     ///
@@ -4328,18 +4328,18 @@ impl AtomaState {
     /// ```rust,ignore
     /// use atoma_node::atoma_state::AtomaStateManager;
     ///
-    /// async fn update_balance(state_manager: &AtomaStateManager, user_id: i64, balance: i64) -> Result<(), AtomaStateManagerError> {
-    ///    state_manager.update_balance(user_id, balance).await
+    /// async fn top_up_crypto_balance(state_manager: &AtomaStateManager, user_id: i64, balance: i64) -> Result<(), AtomaStateManagerError> {
+    ///    state_manager.top_up_crypto_balance(user_id, balance).await
     /// }
     /// ```
     #[instrument(level = "trace", skip(self))]
-    pub async fn top_up_balance(&self, user_id: i64, balance: i64) -> Result<()> {
+    pub async fn top_up_crypto_balance(&self, user_id: i64, balance: i64) -> Result<()> {
         sqlx::query(
-            "INSERT INTO balance (user_id, usdc_balance)
+            "INSERT INTO crypto_balances (user_id, usdc_balance)
                          VALUES ($1, $2)
                          ON CONFLICT (user_id)
                          DO UPDATE SET
-                            usdc_balance = balance.usdc_balance + EXCLUDED.usdc_balance",
+                            usdc_balance = crypto_balances.usdc_balance + EXCLUDED.usdc_balance",
         )
         .bind(user_id)
         .bind(balance)
@@ -4368,7 +4368,7 @@ impl AtomaState {
     /// - The database query fails to execute (that could mean the balance is not available)
     #[instrument(level = "trace", skip(self))]
     pub async fn deduct_from_usdc(&self, user_id: i64, balance: i64) -> Result<()> {
-        let result = sqlx::query("UPDATE balance SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
+        let result = sqlx::query("UPDATE crypto_balances SET usdc_balance = usdc_balance - $2 WHERE user_id = $1 AND usdc_balance >= $2")
             .bind(user_id)
             .bind(balance)
             .execute(&self.db)
@@ -4381,7 +4381,7 @@ impl AtomaState {
 
     /// Refunds a USDC payment.
     ///
-    /// This method refunds a USDC payment to the user in the `balance` table.
+    /// This method refunds a USDC payment to the user in the `crypto_balances` table.
     ///
     /// # Arguments
     ///
@@ -4399,11 +4399,13 @@ impl AtomaState {
     /// - The database query fails to execute.
     #[instrument(level = "trace", skip(self))]
     pub async fn refund_usdc(&self, user_id: i64, amount: i64) -> Result<()> {
-        sqlx::query("UPDATE balance SET usdc_balance = usdc_balance + $2 WHERE user_id = $1")
-            .bind(user_id)
-            .bind(amount)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "UPDATE crypto_balances SET usdc_balance = usdc_balance + $2 WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(amount)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
@@ -4488,6 +4490,83 @@ impl AtomaState {
             .bind(user_id)
             .execute(&self.db)
             .await?;
+        Ok(())
+    }
+
+    /// Locks the fiat balance for a user.
+    ///
+    /// This method locks the fiat balance for a user in the `fiat_balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `amount` - The amount to lock.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result indicating whether the lock was successful.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "trace", skip(self),fields(%user_id, %amount))]
+    pub async fn lock_user_fiat_balance(&self, user_id: i64, amount: i64) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE fiat_balance SET overcharged_unsettled_amount = overcharged_unsettled_amount + $2 WHERE user_id = $1 AND usd_balance >= already_debited_amount + overcharged_unsettled_amount + $1",
+        )
+        .bind(user_id)
+        .bind(amount)
+        .execute(&self.db)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Updates the usd amount already computed for a user.
+    ///
+    /// This method updates the `already_debited_amount` field in the `fiat_balance` table
+    /// for the specified `user_id`.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user to update.
+    /// * `estimated_amount` - The estimated amount.
+    /// * `total_amount` - The total amount.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%user_id, %estimated_amount, %amount)
+    )]
+    pub async fn update_real_amount_fiat_balance(
+        &self,
+        user_id: i64,
+        estimated_amount: i64,
+        amount: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE fiat_balance SET already_debited_amount = already_debited_amount + $3, overcharged_unsettled_amount = overcharged_unsettled_amount - $2 WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(estimated_amount)
+        .bind(amount)
+        .execute(&self.db)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AtomaStateManagerError::InsufficientBalance);
+        }
+
         Ok(())
     }
 }
