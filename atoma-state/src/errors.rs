@@ -93,6 +93,8 @@ pub enum AtomaStateManagerError {
     CompressionError(#[from] CompressionError),
     #[error("Remote attestation error: {0}")]
     RemoteAttestationError(#[from] AtomaStateRemoteAttestationError),
+    #[error("User not found with id: {0}")]
+    UserNotFound(i64),
 }
 
 #[derive(Error, Debug)]

@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::server::handlers::update_state_manager_fiat;
 use crate::server::streamer::ClientStreamer;
 use crate::server::types::{ConfidentialComputeResponse, ConfidentialComputeStreamResponse};
 use crate::server::{
@@ -191,13 +192,26 @@ pub async fn chat_completions_create(
                 TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    metadata.max_total_num_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            metadata.max_total_num_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                }
                 Err(e)
             }
         }
@@ -454,6 +468,8 @@ async fn handle_chat_completions_request(
             &payload,
             metadata.num_input_tokens.map(|v| v as i64),
             metadata.max_total_num_compute_units as i64,
+            metadata.fiat_estimated_amount,
+            metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -467,6 +483,7 @@ async fn handle_chat_completions_request(
             headers,
             &payload,
             metadata.max_total_num_compute_units as i64,
+            metadata.fiat_estimated_amount,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -618,13 +635,26 @@ pub async fn confidential_chat_completions_create(
                 UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
-                update_state_manager(
-                    &state.state_manager_sender,
-                    metadata.selected_stack_small_id,
-                    metadata.max_total_num_compute_units as i64,
-                    0,
-                    &metadata.endpoint,
-                )?;
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            metadata.max_total_num_compute_units as i64,
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            0,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                }
                 Err(e)
             }
         }
@@ -727,7 +757,8 @@ async fn handle_non_streaming_response(
     headers: HeaderMap,
     payload: &Value,
     estimated_total_tokens: i64,
-    selected_stack_small_id: i64,
+    fiat_estimated_amount: Option<i64>,
+    selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
@@ -844,32 +875,52 @@ async fn handle_non_streaming_response(
             endpoint: endpoint.to_string(),
         })?;
 
-    state
-        .state_manager_sender
-        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-            stack_small_id: selected_stack_small_id,
-            total_hash,
-        })
-        .map_err(|err| AtomaProxyError::InternalError {
-            message: format!("Error updating stack total hash: {err:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
-
+    if let Some(stack_small_id) = selected_stack_small_id {
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+                stack_small_id,
+                total_hash,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Error updating stack total hash: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+    }
     // NOTE: We need to update the stack num tokens, because the inference response might have produced
     // less tokens than estimated what we initially estimated, from the middleware.
-    if let Err(e) = update_state_manager(
-        &state.state_manager_sender,
-        selected_stack_small_id,
-        estimated_total_tokens,
-        total_tokens,
-        &endpoint,
-    ) {
-        return Err(AtomaProxyError::InternalError {
-            message: format!("Error updating state manager: {e:?}"),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        });
+    match selected_stack_small_id {
+        Some(stack_small_id) => {
+            if let Err(e) = update_state_manager(
+                &state.state_manager_sender,
+                stack_small_id,
+                estimated_total_tokens,
+                total_tokens,
+                &endpoint,
+            ) {
+                return Err(AtomaProxyError::InternalError {
+                    message: format!("Error updating state manager: {e:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                });
+            }
+        }
+        None => {
+            if let Err(e) = update_state_manager_fiat(
+                &state.state_manager_sender,
+                user_id,
+                fiat_estimated_amount.unwrap_or(0),
+                total_tokens,
+                &endpoint,
+            ) {
+                return Err(AtomaProxyError::InternalError {
+                    message: format!("Error updating fiat state manager: {e:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                });
+            }
+        }
     }
 
     CHAT_COMPLETIONS_LATENCY_METRICS.record(
@@ -934,7 +985,9 @@ async fn handle_streaming_response(
     payload: &Value,
     num_input_tokens: Option<i64>,
     estimated_total_tokens: i64,
-    selected_stack_small_id: i64,
+    fiat_estimated_amount: Option<i64>,
+    price_per_million: Option<i64>,
+    selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
@@ -986,6 +1039,8 @@ async fn handle_streaming_response(
             selected_stack_small_id,
             num_input_tokens.unwrap_or(0),
             estimated_total_tokens,
+            fiat_estimated_amount,
+            price_per_million,
             start,
             user_id,
             model_name.clone(),
