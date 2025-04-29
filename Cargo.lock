@@ -832,6 +832,7 @@ dependencies = [
  "atoma-p2p",
  "atoma-sui",
  "atoma-utils",
+ "base64 0.22.1",
  "blake3",
  "chrono",
  "config",
@@ -844,7 +845,7 @@ dependencies = [
  "opentelemetry",
  "prometheus",
  "proptest",
- "remote-attestation",
+ "remote-attestation-verifier",
  "reqwest",
  "serde",
  "serde_json",
@@ -852,6 +853,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.12",
  "tokio",
+ "topology",
  "tracing",
  "url",
  "utoipa",
@@ -1662,7 +1664,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1671,7 +1673,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2136,7 +2138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.100",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -5787,6 +5789,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
+name = "nscq"
+version = "0.1.0"
+source = "git+https://github.com/atoma-network/nvrust?branch=main#1add98df60e9702f74d267132af0635139aeb7f6"
+dependencies = [
+ "libloading",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7269,14 +7279,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "remote-attestation"
+name = "remote-attestation-verifier"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/nvrust?branch=main#4418eccd685c75ea8a47dfa9f25b9777643ddeb4"
+source = "git+https://github.com/atoma-network/nvrust?branch=main#1add98df60e9702f74d267132af0635139aeb7f6"
 dependencies = [
  "base64 0.22.1",
  "hex",
  "jsonwebtoken",
- "nvml-wrapper",
+ "nscq",
  "once_cell",
  "rand 0.8.5",
  "reqwest",
@@ -9864,6 +9874,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "topology"
+version = "0.1.0"
+source = "git+https://github.com/atoma-network/nvrust?branch=main#1add98df60e9702f74d267132af0635139aeb7f6"
+dependencies = [
+ "nvml-wrapper",
+ "once_cell",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10713,7 +10734,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

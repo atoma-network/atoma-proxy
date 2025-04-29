@@ -100,7 +100,7 @@ pub enum AtomaStateManagerError {
 #[derive(Error, Debug)]
 pub enum AtomaStateRemoteAttestationError {
     #[error("Failed to attest remote: {0}")]
-    FailedToAttestRemote(#[from] remote_attestation::AttestError),
+    FailedToAttestRemote(#[from] remote_attestation_verifier::AttestError),
     #[error("Failed to retrieve contract nonce")]
     FailedToRetrieveContractNonce,
 }

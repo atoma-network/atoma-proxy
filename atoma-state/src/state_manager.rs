@@ -152,7 +152,6 @@ impl AtomaStateManager {
                                     error = %e,
                                     "Error handling Atoma event"
                                 );
-                                continue;
                             }
                         }
                         Err(e) => {
@@ -176,7 +175,6 @@ impl AtomaStateManager {
                                     error = %e,
                                     "Error handling state manager event"
                                 );
-                                continue;
                             }
                         }
                         Err(e) => {
@@ -189,7 +187,6 @@ impl AtomaStateManager {
                             // NOTE: We continue the loop, as the inference service might be shutting down,
                             // but we want to keep the state manager running
                             // for event synchronization with the Atoma Network protocol.
-                            continue;
                         }
                     }
                 }
@@ -208,7 +205,6 @@ impl AtomaStateManager {
                             // NOTE: We continue the loop, as the inference service might be shutting down,
                             // but we want to keep the state manager running
                             // for event synchronization with the Atoma Network protocol.
-                            continue;
                         }
                     }
                 }

@@ -8,70 +8,71 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
-anyhow                = "1.0.98"
-async-trait           = "0.1.88"
-atoma-auth            = { path = "./atoma-auth" }
-atoma-p2p             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
-atoma-proxy-service   = { path = "./atoma-proxy-service" }
-atoma-state           = { path = "./atoma-state" }
-atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
-atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
-axum                  = "0.8.3"
-base64                = "0.22.1"
-bcs                   = "0.1.6"
-blake2                = "0.10.6"
-blake3                = "1.8.2"
-chrono                = "=0.4.39"
-clap                  = "4.5.37"
-config                = "0.14.1"
-dashmap               = "6.1.0"
-fastcrypto            = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto" }
-fastcrypto-zkp        = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto-zkp" }
-fastrand              = "2.3.0"
-flume                 = "0.11.1"
-futures               = "0.3.31"
-hex                   = "0.4.3"
-hf-hub                = "0.3.2"
-isocountry            = "0.3.2"
-itertools             = "0.14.0"
-jsonwebtoken          = "9.3.0"
-mockito               = "1.6.1"
-opentelemetry         = "0.27.1"
-opentelemetry-otlp    = "0.27.0"
-opentelemetry_sdk     = "0.27.1"
-pem                   = "3.0.5"
-prometheus            = "0.13.4"
-proptest              = "1.6.0"
-rand                  = "0.8.5"
-regex                 = "1.11.1"
-remote-attestation    = { git = "https://github.com/atoma-network/nvrust", branch = "main" }
-reqwest               = "0.12.12"
-rsa                   = "0.9.7"
-sentry                = { version = "0.37.0", features = [ "tracing" ] }
-serde                 = "1.0.214"
-serde_json            = "1.0.140"
-serde_yaml            = "0.9.34"
-serial_test           = "3.1.1"
-shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.47.0" }
-sqlx                  = { version = "0.8.5", features = [ "postgres", "runtime-tokio-native-tls" ] }
-sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.47.0" }
-sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.47.0" }
-sui-sdk-types         = "0.0.2"
-thiserror             = "2.0.12"
-tokenizers            = "0.21.0"
-tokio                 = "1.44.2"
-toml                  = "0.8.19"
-tonic                 = "0.12"
-tower                 = "0.5.1"
-tower-http            = "0.6.2"
-tracing               = "0.1.40"
-tracing-appender      = "0.2.3"
-tracing-loki          = "0.2.6"
-tracing-opentelemetry = "0.28.0"
-tracing-subscriber    = "0.3.18"
-url                   = "2.5.4"
-utoipa                = "5.3.1"
-utoipa-swagger-ui     = "9.0.1"
-uuid                  = "1.15.1"
-x25519-dalek          = "2.0.1"
-zeroize               = "1.8.1"
+anyhow                      = "1.0.98"
+async-trait                 = "0.1.88"
+atoma-auth                  = { path = "./atoma-auth" }
+atoma-p2p                   = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
+atoma-proxy-service         = { path = "./atoma-proxy-service" }
+atoma-state                 = { path = "./atoma-state" }
+atoma-sui                   = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
+atoma-utils                 = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
+axum                        = "0.8.3"
+base64                      = "0.22.1"
+bcs                         = "0.1.6"
+blake2                      = "0.10.6"
+blake3                      = "1.8.2"
+chrono                      = "=0.4.39"
+clap                        = "4.5.37"
+config                      = "0.14.1"
+dashmap                     = "6.1.0"
+fastcrypto                  = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto" }
+fastcrypto-zkp              = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto-zkp" }
+fastrand                    = "2.3.0"
+flume                       = "0.11.1"
+futures                     = "0.3.31"
+hex                         = "0.4.3"
+hf-hub                      = "0.3.2"
+isocountry                  = "0.3.2"
+itertools                   = "0.14.0"
+jsonwebtoken                = "9.3.0"
+mockito                     = "1.6.1"
+opentelemetry               = "0.27.1"
+opentelemetry-otlp          = "0.27.0"
+opentelemetry_sdk           = "0.27.1"
+pem                         = "3.0.5"
+prometheus                  = "0.13.4"
+proptest                    = "1.6.0"
+rand                        = "0.8.5"
+regex                       = "1.11.1"
+remote-attestation-verifier = { git = "https://github.com/atoma-network/nvrust", package = "remote-attestation-verifier", branch = "main" }
+reqwest                     = "0.12.12"
+rsa                         = "0.9.7"
+sentry                      = { version = "0.37.0", features = [ "tracing" ] }
+serde                       = "1.0.214"
+serde_json                  = "1.0.140"
+serde_yaml                  = "0.9.34"
+serial_test                 = "3.1.1"
+shared-crypto               = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.47.0" }
+sqlx                        = { version = "0.8.5", features = [ "postgres", "runtime-tokio-native-tls" ] }
+sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.47.0" }
+sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.47.0" }
+sui-sdk-types               = "0.0.2"
+thiserror                   = "2.0.12"
+tokenizers                  = "0.21.0"
+tokio                       = "1.44.2"
+toml                        = "0.8.19"
+tonic                       = "0.12"
+topology                    = { git = "https://github.com/atoma-network/nvrust", package = "topology", branch = "main" }
+tower                       = "0.5.1"
+tower-http                  = "0.6.2"
+tracing                     = "0.1.40"
+tracing-appender            = "0.2.3"
+tracing-loki                = "0.2.6"
+tracing-opentelemetry       = "0.28.0"
+tracing-subscriber          = "0.3.18"
+url                         = "2.5.4"
+utoipa                      = "5.3.1"
+utoipa-swagger-ui           = "9.0.1"
+uuid                        = "1.15.1"
+x25519-dalek                = "2.0.1"
+zeroize                     = "1.8.1"
