@@ -1388,7 +1388,10 @@ pub async fn handle_state_manager_event(
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
         AtomaAtomaStateManagerEvent::TopUpBalance { user_id, amount } => {
-            state_manager.state.top_up_balance(user_id, amount).await?;
+            state_manager
+                .state
+                .top_up_crypto_balance(user_id, amount)
+                .await?;
         }
         AtomaAtomaStateManagerEvent::DeductFromUsdc {
             user_id,
