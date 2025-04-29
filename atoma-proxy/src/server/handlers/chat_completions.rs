@@ -49,7 +49,8 @@ use super::metrics::{
     CHAT_COMPLETIONS_INPUT_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER,
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
-    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -1044,7 +1045,7 @@ async fn handle_streaming_response(
             start,
             user_id,
             model_name.clone(),
-            endpoint,
+            endpoint.clone(),
         );
         loop {
             tokio::select! {
@@ -1074,6 +1075,7 @@ async fn handle_streaming_response(
                     }
                 }
                 Ok(()) = kill_signal_receiver.recv_async() => {
+                    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS.add(1, &[KeyValue::new("user_id", user_id)]);
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
@@ -1089,7 +1091,11 @@ async fn handle_streaming_response(
                             e
                         );
                     }
-                    // We continue the loop, to allow the streamer to finish with updated usage from the node
+                    // Return a 400 status code when the stream is cancelled
+                    return Err(AtomaProxyError::RequestError {
+                        message: "Stream cancelled by user".to_string(),
+                        endpoint,
+                    });
                 }
             }
         }
@@ -1097,6 +1103,7 @@ async fn handle_streaming_response(
             target = "atoma-service-chat-completions",
             "Streamer finished for request id: {request_id}"
         );
+        Ok(())
     });
 
     // Create the SSE stream
