@@ -4490,6 +4490,83 @@ impl AtomaState {
             .await?;
         Ok(())
     }
+
+    /// Locks the fiat balance for a user.
+    ///
+    /// This method locks the fiat balance for a user in the `fiat_balance` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `amount` - The amount to lock.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<bool>`: A result indicating whether the lock was successful.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    ///
+    /// - The database query fails to execute.
+    #[instrument(level = "trace", skip(self),fields(%user_id, %amount))]
+    pub async fn lock_user_fiat_balance(&self, user_id: i64, amount: i64) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE fiat_balance SET overcharged_unsettled_amount = overcharged_unsettled_amount + $2 WHERE user_id = $1 AND usd_balance >= already_debited_amount + overcharged_unsettled_amount + $1",
+        )
+        .bind(user_id)
+        .bind(amount)
+        .execute(&self.db)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Updates the usd amount already computed for a user.
+    ///
+    /// This method updates the `already_debited_amount` field in the `fiat_balance` table
+    /// for the specified `user_id`.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user to update.
+    /// * `estimated_amount` - The estimated amount.
+    /// * `total_amount` - The total amount.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(%user_id, %estimated_amount, %amount)
+    )]
+    pub async fn update_real_amount_fiat_balance(
+        &self,
+        user_id: i64,
+        estimated_amount: i64,
+        amount: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE fiat_balance SET already_debited_amount = already_debited_amount + $3, overcharged_unsettled_amount = overcharged_unsettled_amount - $2 WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(estimated_amount)
+        .bind(amount)
+        .execute(&self.db)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AtomaStateManagerError::InsufficientBalance);
+        }
+
+        Ok(())
+    }
 }
 
 pub mod validation {

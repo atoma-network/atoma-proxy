@@ -1441,6 +1441,29 @@ pub async fn handle_state_manager_event(
                 .send(success)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
         }
+        AtomaAtomaStateManagerEvent::LockUserFiatBalance {
+            user_id,
+            amount,
+            result_sender,
+        } => {
+            let result = state_manager
+                .state
+                .lock_user_fiat_balance(user_id, amount)
+                .await;
+            result_sender
+                .send(result)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
+            user_id,
+            estimated_amount,
+            amount,
+        } => {
+            state_manager
+                .state
+                .update_real_amount_fiat_balance(user_id, estimated_amount, amount)
+                .await?;
+        }
     }
     Ok(())
 }
