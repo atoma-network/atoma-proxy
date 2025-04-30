@@ -49,7 +49,8 @@ use super::metrics::{
     CHAT_COMPLETIONS_INPUT_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER,
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
-    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -174,7 +175,6 @@ pub async fn chat_completions_create(
 ) -> Result<Response<Body>> {
     let endpoint = metadata.endpoint.clone();
     tokio::spawn(async move {
-        // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
             .and_then(serde_json::Value::as_bool)
@@ -1074,6 +1074,7 @@ async fn handle_streaming_response(
                     }
                 }
                 Ok(()) = kill_signal_receiver.recv_async() => {
+                    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS.add(1, &[KeyValue::new("user_id", user_id)]);
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
