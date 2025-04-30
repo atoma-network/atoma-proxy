@@ -139,9 +139,22 @@ impl AtomaStateManager {
         let mut network_metrics = NetworkMetrics::new();
         let interval = std::time::Duration::from_secs(15);
 
+        // Create a channel for interval-based updates
+        let (interval_tx, interval_rx) = flume::unbounded();
+
+        // Spawn a task that sends a message every interval
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                if interval_tx.send(()).is_err() {
+                    break;
+                }
+            }
+        });
+
         loop {
             tokio::select! {
-                 () = tokio::time::sleep(interval) => {
+                _ = interval_rx.recv_async() => {
                     match self.state.retrieve_node_public_addresses().await {
                         Ok(node_addresses) => {
                             network_metrics.update_metrics(node_addresses).await;
@@ -440,13 +453,13 @@ impl AtomaState {
         let stack = sqlx::query(
             "
             WITH selected_stack AS (
-                SELECT stack_small_id 
+                SELECT stack_small_id
                 FROM stacks
-                WHERE task_small_id = $1 
-                AND num_compute_units - already_computed_units - locked_compute_units >= $2 
-                AND user_id = $3 
-                AND is_claimed = false 
-                AND is_locked = false 
+                WHERE task_small_id = $1
+                AND num_compute_units - already_computed_units - locked_compute_units >= $2
+                AND user_id = $3
+                AND is_claimed = false
+                AND is_locked = false
                 AND in_settle_period = false
                 LIMIT 1
                 FOR UPDATE
