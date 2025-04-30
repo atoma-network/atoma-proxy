@@ -110,6 +110,24 @@ pub static CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS: LazyLock<Histogram<f64>> 
             .build()
     });
 
+/// Counter metric that tracks the total number of intentionally cancelled chat completion streaming requests.
+///
+/// # Metric Details
+/// - Name: `atoma_intentionally_cancelled_chat_completion_streaming_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_intentionally_cancelled_chat_completion_streaming_requests")
+            .with_description(
+                "The number of intentionally cancelled chat completion streaming requests",
+            )
+            .with_unit("requests")
+            .build()
+    });
+
 /// Histogram metric that tracks the latency of image generation requests.
 ///
 /// This metric measures the time taken to generate images, broken down by model type.
