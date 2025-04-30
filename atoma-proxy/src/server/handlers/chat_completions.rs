@@ -1091,11 +1091,6 @@ async fn handle_streaming_response(
                             e
                         );
                     }
-                    // Return a 400 status code when the stream is cancelled
-                    return Err(AtomaProxyError::RequestError {
-                        message: "Stream cancelled by user".to_string(),
-                        endpoint,
-                    });
                 }
             }
         }
@@ -1103,7 +1098,6 @@ async fn handle_streaming_response(
             target = "atoma-service-chat-completions",
             "Streamer finished for request id: {request_id}"
         );
-        Ok(())
     });
 
     // Create the SSE stream
