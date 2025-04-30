@@ -175,7 +175,6 @@ pub async fn chat_completions_create(
 ) -> Result<Response<Body>> {
     let endpoint = metadata.endpoint.clone();
     tokio::spawn(async move {
-        // TODO: We should allow cancelling the request if the client disconnects
         let is_streaming = payload
             .get(STREAM)
             .and_then(serde_json::Value::as_bool)
@@ -1045,7 +1044,7 @@ async fn handle_streaming_response(
             start,
             user_id,
             model_name.clone(),
-            endpoint.clone(),
+            endpoint,
         );
         loop {
             tokio::select! {
@@ -1091,6 +1090,7 @@ async fn handle_streaming_response(
                             e
                         );
                     }
+                    // We continue the loop, to allow the streamer to finish with updated usage from the node
                 }
             }
         }
