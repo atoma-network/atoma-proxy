@@ -6,10 +6,20 @@ use opentelemetry::{
 use reqwest::Client;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, instrument, warn};
 
 static GLOBAL_METER: LazyLock<Meter> = LazyLock::new(|| global::meter("atoma-proxy"));
 
+/// Histogram metric that tracks the latency of node connections from the proxy to the node.
+///
+/// This metric tracks the latency of node connections from the proxy to the node.
+///
+/// # Metric Details
+/// - Name: `atoma_node_connection_latency`
+/// - Type: Histogram
+/// - Labels: `node_ip_address`
+/// - Unit: seconds (s)
+///
 pub static NODE_CONNECTION_LATENCY: LazyLock<Histogram<f64>> = LazyLock::new(|| {
     GLOBAL_METER
         .f64_histogram("atoma_node_connection_latency")
@@ -18,6 +28,16 @@ pub static NODE_CONNECTION_LATENCY: LazyLock<Histogram<f64>> = LazyLock::new(|| 
         .build()
 });
 
+/// Counter metric that tracks the number of failed node connections from the proxy to the node.
+///
+/// This metric tracks the number of failed node connections from the proxy to the node.
+///
+/// # Metric Details
+/// - Name: `atoma_failed_node_connections`
+/// - Type: Counter
+/// - Labels: `node_ip_address`
+/// - Unit: count
+///
 pub static FAILED_NODE_CONNECTIONS: LazyLock<Counter<u64>> = LazyLock::new(|| {
     GLOBAL_METER
         .u64_counter("atoma_failed_node_connections")
@@ -38,10 +58,10 @@ impl NetworkMetrics {
             client: Client::new(),
         }
     }
-
+    #[instrument(level = "trace", name = "update_metrics", skip(self))]
     pub async fn update_metrics(&mut self, node_addresses: Vec<String>) {
         for address in node_addresses {
-            let url = format!("http://{address}:3000/health");
+            let url = format!("http://{address}/health");
             let start = Instant::now();
             match self
                 .client
