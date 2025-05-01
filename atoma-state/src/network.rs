@@ -61,7 +61,7 @@ impl NetworkMetrics {
     #[instrument(level = "trace", name = "update_metrics", skip(self))]
     pub async fn update_metrics(&mut self, node_addresses: Vec<String>) {
         for address in node_addresses {
-            let url = format!("http://{address}/health");
+            let url = format!("{address}/health");
             let start = Instant::now();
             match self
                 .client
