@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
+use crate::network::NetworkMetrics;
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
     NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
@@ -135,8 +136,38 @@ impl AtomaStateManager {
     /// ```
     #[instrument(level = "trace", skip_all)]
     pub async fn run(self, mut shutdown_signal: Receiver<bool>) -> Result<()> {
+        let mut network_metrics = NetworkMetrics::new();
+        let interval = std::time::Duration::from_secs(15);
+
+        // Create a channel for interval-based updates
+        let (interval_tx, interval_rx) = flume::unbounded();
+
+        // Spawn a task that sends a message every interval
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                if interval_tx.send(()).is_err() {
+                    break;
+                }
+            }
+        });
+
         loop {
             tokio::select! {
+                _ = interval_rx.recv_async() => {
+                    match self.state.retrieve_node_public_addresses().await {
+                        Ok(node_addresses) => {
+                            network_metrics.update_metrics(node_addresses).await;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                target = "network_metrics",
+                                error = %e,
+                                "Failed to retrieve node addresses"
+                            );
+                        }
+                    }
+                }
                 atoma_event = self.event_subscriber_receiver.recv_async() => {
                     match atoma_event {
                         Ok(atoma_event) => {
@@ -422,13 +453,13 @@ impl AtomaState {
         let stack = sqlx::query(
             "
             WITH selected_stack AS (
-                SELECT stack_small_id 
+                SELECT stack_small_id
                 FROM stacks
-                WHERE task_small_id = $1 
-                AND num_compute_units - already_computed_units - locked_compute_units >= $2 
-                AND user_id = $3 
-                AND is_claimed = false 
-                AND is_locked = false 
+                WHERE task_small_id = $1
+                AND num_compute_units - already_computed_units - locked_compute_units >= $2
+                AND user_id = $3
+                AND is_claimed = false
+                AND is_locked = false
                 AND in_settle_period = false
                 LIMIT 1
                 FOR UPDATE
@@ -782,7 +813,7 @@ impl AtomaState {
                     GROUP BY npk.node_small_id, npk.public_key
                     HAVING bool_and(npk.is_valid) = true
                 )
-                SELECT node_small_id, public_key 
+                SELECT node_small_id, public_key
                 FROM valid_node
                 "
             )
@@ -2999,6 +3030,32 @@ impl AtomaState {
         Ok(())
     }
 
+    /// Retrieves all node public addresses from the database.
+    ///
+    /// This method fetches all public addresses of nodes from the `nodes` table.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Vec<String>>`: A result containing either:
+    ///   - `Ok(Vec<String>)`: A vector of all node public addresses.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    #[instrument(level = "trace", skip_all)]
+    pub async fn retrieve_node_public_addresses(&self) -> Result<Vec<String>> {
+        let addresses = sqlx::query_scalar(
+            "SELECT public_address
+             FROM nodes
+             WHERE public_address IS NOT NULL",
+        )
+        .fetch_all(&self.db)
+        .await?;
+        Ok(addresses)
+    }
+
     /// Retrieves the public address of a node from the database.
     ///
     /// This method fetches the public address of a node from the `nodes` table.
@@ -3288,16 +3345,16 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO node_public_keys (
-                node_small_id, 
-                epoch, 
-                key_rotation_counter, 
-                public_key, 
-                evidence_bytes, 
-                device_type, 
+                node_small_id,
+                epoch,
+                key_rotation_counter,
+                public_key,
+                evidence_bytes,
+                device_type,
                 is_valid
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (node_small_id, device_type)
-            DO UPDATE SET 
+            DO UPDATE SET
                 epoch = EXCLUDED.epoch,
                 key_rotation_counter = EXCLUDED.key_rotation_counter,
                 public_key = EXCLUDED.public_key,
