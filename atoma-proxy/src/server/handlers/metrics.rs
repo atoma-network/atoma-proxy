@@ -538,6 +538,7 @@ pub static CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER: LazyLock<Counter<u64>> 
 /// - Name: `atoma_cancelled_stream_chat_completion_requests_per_user`
 /// - Type: Counter
 /// - Labels: `user_id`
+/// - Model `model`
 /// - Unit: requests (count)
 pub static CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER: LazyLock<Counter<u64>> =
     LazyLock::new(|| {
