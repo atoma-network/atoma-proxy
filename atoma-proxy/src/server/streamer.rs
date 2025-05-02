@@ -555,8 +555,13 @@ impl Drop for Streamer {
             CHAT_COMPLETION_REQUESTS_PER_USER.add(1, &[KeyValue::new("user_id", self.user_id)]);
             return;
         }
-        CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER
-            .add(1, &[KeyValue::new("user_id", self.user_id)]);
+        CANCELLED_STREAM_CHAT_COMPLETION_REQUESTS_PER_USER.add(
+            1,
+            &[
+                KeyValue::new("user_id", self.user_id),
+                KeyValue::new("model", self.model_name.clone()),
+            ],
+        );
         match self.stack_small_id {
             Some(stack_small_id) => {
                 if let Err(e) = update_state_manager(
