@@ -7,6 +7,7 @@ pub mod config;
 pub mod errors;
 pub mod handlers;
 pub mod metrics;
+pub mod network;
 pub mod state_manager;
 #[cfg(test)]
 pub mod tests;
