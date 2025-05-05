@@ -16,7 +16,7 @@ atoma-proxy-service   = { path = "./atoma-proxy-service" }
 atoma-state           = { path = "./atoma-state" }
 atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
 atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
-axum                  = "0.8.3"
+axum                  = "0.8.4"
 base64                = "0.22.1"
 bcs                   = "0.1.6"
 blake2                = "0.10.6"
@@ -52,7 +52,7 @@ serde                 = "1.0.214"
 serde_json            = "1.0.140"
 serde_yaml            = "0.9.34"
 serial_test           = "3.1.1"
-shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.47.0" }
+shared-crypto         = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.48.0" }
 sqlx                  = { version = "0.8.5", features = [ "postgres", "runtime-tokio-native-tls" ] }
 sui-keys              = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.47.0" }
 sui-sdk               = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.47.0" }
