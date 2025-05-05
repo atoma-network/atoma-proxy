@@ -16,7 +16,7 @@ atoma-proxy-service   = { path = "./atoma-proxy-service" }
 atoma-state           = { path = "./atoma-state" }
 atoma-sui             = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-sui", branch = "main" }
 atoma-utils           = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-utils", branch = "main" }
-axum                  = "0.8.3"
+axum                  = "0.8.4"
 base64                = "0.22.1"
 bcs                   = "0.1.6"
 blake2                = "0.10.6"
