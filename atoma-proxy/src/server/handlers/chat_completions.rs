@@ -1239,7 +1239,6 @@ impl RequestModel for RequestModelChatCompletions {
                             MessageContentPart::Image { .. } => {
                                 // TODO: Ensure that for image content parts, we have a way to estimate the number of tokens,
                                 // which can depend on the size of the image and the output description.
-                                continue;
                             }
                         }
                     }
