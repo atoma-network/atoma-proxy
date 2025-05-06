@@ -40,7 +40,7 @@ paths:
         '200':
           description: Chat completions
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ChatCompletionResponse'
         '400':
