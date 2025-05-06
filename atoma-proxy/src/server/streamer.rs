@@ -4,6 +4,7 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
+use base64::engine::{general_purpose::STANDARD, Engine};
 use flume::{RecvError, Sender};
 use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
@@ -27,7 +28,9 @@ use super::handlers::metrics::{
     CHAT_COMPLETIONS_TOTAL_TOKENS, CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER,
     CHAT_COMPLETION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
 };
-use super::handlers::{update_state_manager_fiat, verify_response_hash_and_signature};
+use super::handlers::{
+    update_state_manager_fiat, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
+};
 use super::ONE_MILLION;
 
 /// The chunk that indicates the end of a streaming response
@@ -181,7 +184,11 @@ impl Streamer {
             estimated_total_tokens = self.estimated_total_tokens,
         )
     )]
-    fn handle_final_chunk(&mut self, usage: &Value) -> Result<(), Error> {
+    fn handle_final_chunk(
+        &mut self,
+        usage: &Value,
+        response_hash: Option<&Value>,
+    ) -> Result<(), Error> {
         let input_tokens = usage
             .get("prompt_tokens")
             .and_then(serde_json::Value::as_i64)
@@ -241,6 +248,27 @@ impl Streamer {
         );
         match self.stack_small_id {
             Some(stack_small_id) => {
+                if let Some(response_hash) = response_hash {
+                    let total_hash = response_hash
+                        .as_str()
+                        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
+                        .unwrap_or_default()
+                        .try_into()
+                        .map_err(|e: Vec<u8>| {
+                            Error::new(format!(
+                            "Error converting response hash to array, received array of length {}",
+                            e.len()
+                        ))
+                        })?;
+                    self.state_manager_sender
+                        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
+                            stack_small_id,
+                            total_hash,
+                        })
+                        .map_err(|err| {
+                            Error::new(format!("Error updating stack total hash: {err:?}"))
+                        })?;
+                }
                 if let Err(e) = update_state_manager(
                     &self.state_manager_sender,
                     stack_small_id,
@@ -473,23 +501,20 @@ impl Stream for Streamer {
                         ))));
                     };
 
-                    if choices.is_empty() {
-                        if let Some(usage) = chunk.get(USAGE) {
-                            self.status = StreamStatus::Completed;
-                            self.handle_final_chunk(usage)?;
-                        }
-                    } else if let Some(usage) = chunk.get(USAGE) {
-                        trace!(
-                            target = "atoma-service-streamer",
-                            level = "trace",
-                            "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
-                        );
+                    if let Some(usage) = chunk.get(USAGE) {
                         self.status = StreamStatus::Completed;
-                        self.handle_final_chunk(usage)?;
+                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        if !choices.is_empty() {
+                            trace!(
+                                target = "atoma-service-streamer",
+                                level = "trace",
+                                "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
+                            );
+                        }
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     self.status = StreamStatus::Completed;
-                    self.handle_final_chunk(usage)?;
+                    self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
                 }
                 self.num_generated_tokens += 1;
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))

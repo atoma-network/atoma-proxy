@@ -184,7 +184,10 @@ pub async fn chat_completions_create(
             .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                if !is_streaming {
+                    // The streaming metric is recorded in the streamer (final chunk)
+                    TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                }
                 Ok(response)
             }
             Err(e) => {
@@ -623,7 +626,10 @@ pub async fn confidential_chat_completions_create(
             .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                if !is_streaming {
+                    // The streaming metric is recorded in the streamer (final chunk)
+                    TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                }
                 Ok(response)
             }
             Err(e) => {
