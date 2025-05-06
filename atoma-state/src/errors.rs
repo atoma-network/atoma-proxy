@@ -1,5 +1,6 @@
 use atoma_utils::compression::CompressionError;
 use thiserror::Error;
+use topology::error::NvidiaRemoteAttestationError;
 use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
@@ -100,7 +101,17 @@ pub enum AtomaStateManagerError {
 #[derive(Error, Debug)]
 pub enum AtomaStateRemoteAttestationError {
     #[error("Failed to attest remote: {0}")]
-    FailedToAttestRemote(#[from] remote_attestation::AttestError),
+    FailedToAttestRemote(#[from] remote_attestation_verifier::AttestError),
     #[error("Failed to retrieve contract nonce")]
     FailedToRetrieveContractNonce,
+    #[error("Failed to decode {evidence_type} evidence data")]
+    FailedToDecode {
+        evidence_type: String,
+        error: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("{check_type} topology check failed")]
+    TopologyCheckFailed {
+        check_type: String,
+        error: Box<NvidiaRemoteAttestationError>,
+    },
 }
