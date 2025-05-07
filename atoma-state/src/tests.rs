@@ -330,7 +330,7 @@ async fn create_test_stack(
                 num_total_messages,
                 user_id,
                 acquired_timestamp
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(stack_small_id)
     .bind("test_owner") // Default test owner
