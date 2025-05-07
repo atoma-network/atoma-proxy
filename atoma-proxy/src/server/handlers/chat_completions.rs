@@ -1062,7 +1062,7 @@ async fn handle_streaming_response(
                                 tracing::error!(
                                     target = "atoma-service-chat-completions",
                                     level = "error",
-                                    "Error sending chunk for model {model_name}: {e}"
+                                    "Error sending chunk for model {model_name}: {e}",
                                 );
                                 // We continue the loop, to allow the streamer to finish with updated usage from the node
                             }
@@ -1080,7 +1080,7 @@ async fn handle_streaming_response(
                     }
                 }
                 Ok(()) = kill_signal_receiver.recv_async() => {
-                    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS.add(1, &[KeyValue::new("user_id", user_id)]);
+                    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS.add(1, &[KeyValue::new("user_id", user_id), KeyValue::new("model", model_name.clone())]);
                     tracing::info!(target = "atoma-service-streamer", "Received kill signal, stopping streamer");
                     let stop_response = client_clone
                         .post(format!("{node_address_clone}{STOP_STREAMER_PATH}"))
