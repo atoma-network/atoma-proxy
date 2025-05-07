@@ -218,6 +218,42 @@ services:
       - atoma-network
     user: "0"
 
+  postgres-maintenance:
+    image: postgres:13
+    platform: ${PLATFORM:-}
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    volumes:
+      - ./scripts/db-maintenance:/scripts
+      - postgres-data:/var/lib/postgresql/data:ro
+      - ./s3-archives:/s3-archives
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGHOST=postgres-db
+      - PGPORT=5432
+    env_file: .env
+    networks:
+      - atoma-network
+    command: /bin/bash -c "sleep 30 && /scripts/run-maintenance.sh"
+    profiles:
+      - maintenance
+
+  postgres-cron:
+    image: mcuadros/ofelia:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: daemon --docker
+    environment:
+      - DOCKER_COMPOSE_PROJECT=atoma-network
+    networks:
+      - atoma-network
+    restart: always
+    depends_on:
+      - postgres-db
+
 volumes:
   postgres-data:
   sui-config-volume:

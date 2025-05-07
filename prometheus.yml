@@ -16,3 +16,12 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:8889"] # Local development scraping
 
+  - job_name: "postgres_archival"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["postgres-db:5432"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: "(.*):.*"
+        replacement: "$1"
