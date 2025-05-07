@@ -748,7 +748,7 @@ impl Auth {
                     );
                 }
             }
-        };
+        }
         let sui_address = SuiAddress::from(
             &public_key
                 .ok_or_else(|| AuthError::FailedToParseSignature("No public key".to_string()))?,
