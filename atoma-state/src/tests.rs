@@ -327,7 +327,6 @@ async fn create_test_stack(
                 price_per_one_million_compute_units,
                 already_computed_units,
                 in_settle_period,
-                total_hash,
                 num_total_messages,
                 user_id,
                 acquired_timestamp
@@ -342,7 +341,6 @@ async fn create_test_stack(
     .bind(price)
     .bind(0i64) // Default already_computed_units
     .bind(false) // Default in_settle_period
-    .bind(vec![0u8; 32]) // Default total_hash (32 bytes of zeros)
     .bind(0i64) // Default num_total_messages
     .bind(user_id)
     .bind(chrono::Utc::now()) // Acquired timestamp

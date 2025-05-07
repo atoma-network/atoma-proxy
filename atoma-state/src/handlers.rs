@@ -1015,21 +1015,6 @@ pub async fn handle_state_manager_event(
                 .update_stack_num_tokens(stack_small_id, estimated_total_tokens, total_tokens)
                 .await?;
         }
-        AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-            stack_small_id,
-            total_hash,
-        } => {
-            trace!(
-                target = "atoma-state-handlers",
-                event = "handle-state-manager-event",
-                "Updating stack total hash for stack with id: {}",
-                stack_small_id
-            );
-            state_manager
-                .state
-                .update_stack_total_hash(stack_small_id, total_hash)
-                .await?;
-        }
         AtomaAtomaStateManagerEvent::GetStacksForModel {
             model,
             free_compute_units,
@@ -1755,7 +1740,7 @@ pub mod remote_attestation_verification {
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
     #[instrument(
-        level = "info", 
+        level = "info",
         skip_all,
         fields(
             device_type = device_type,
