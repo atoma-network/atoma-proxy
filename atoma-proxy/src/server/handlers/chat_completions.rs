@@ -195,25 +195,22 @@ pub async fn chat_completions_create(
                 TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
                 UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
-                match metadata.selected_stack_small_id {
-                    Some(stack_small_id) => {
-                        update_state_manager(
-                            &state.state_manager_sender,
-                            stack_small_id,
-                            metadata.max_total_num_compute_units as i64,
-                            0,
-                            &metadata.endpoint,
-                        )?;
-                    }
-                    None => {
-                        update_state_manager_fiat(
-                            &state.state_manager_sender,
-                            metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
-                            0,
-                            &metadata.endpoint,
-                        )?;
-                    }
+                if let Some(stack_small_id) = metadata.selected_stack_small_id {
+                    update_state_manager(
+                        &state.state_manager_sender,
+                        stack_small_id,
+                        metadata.max_total_num_compute_units as i64,
+                        0,
+                        &metadata.endpoint,
+                    )?;
+                } else {
+                    update_state_manager_fiat(
+                        &state.state_manager_sender,
+                        metadata.user_id,
+                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        0,
+                        &metadata.endpoint,
+                    )?;
                 }
                 Err(e)
             }
@@ -641,25 +638,22 @@ pub async fn confidential_chat_completions_create(
                 UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
 
-                match metadata.selected_stack_small_id {
-                    Some(stack_small_id) => {
-                        update_state_manager(
-                            &state.state_manager_sender,
-                            stack_small_id,
-                            metadata.max_total_num_compute_units as i64,
-                            0,
-                            &metadata.endpoint,
-                        )?;
-                    }
-                    None => {
-                        update_state_manager_fiat(
-                            &state.state_manager_sender,
-                            metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
-                            0,
-                            &metadata.endpoint,
-                        )?;
-                    }
+                if let Some(stack_small_id) = metadata.selected_stack_small_id {
+                    update_state_manager(
+                        &state.state_manager_sender,
+                        stack_small_id,
+                        metadata.max_total_num_compute_units as i64,
+                        0,
+                        &metadata.endpoint,
+                    )?;
+                } else {
+                    update_state_manager_fiat(
+                        &state.state_manager_sender,
+                        metadata.user_id,
+                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        0,
+                        &metadata.endpoint,
+                    )?;
                 }
                 Err(e)
             }
