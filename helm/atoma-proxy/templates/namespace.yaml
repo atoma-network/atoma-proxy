@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: { { .Release.Namespace } }
+  labels:
+    name: { { .Release.Namespace } }
+    app.kubernetes.io/part-of: atoma-proxy
+    app.kubernetes.io/managed-by: helm
