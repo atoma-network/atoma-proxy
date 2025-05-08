@@ -2136,13 +2136,15 @@ impl AtomaState {
         let result = sqlx::query(
             "UPDATE stacks
                 SET already_computed_units = already_computed_units + $2,
-                    locked_compute_units = locked_compute_units - $1
+                    locked_compute_units = locked_compute_units - $1,
+                    num_total_messages = num_total_messages + $4
                 WHERE stack_small_id = $3
            ",
         )
         .bind(estimated_total_tokens)
         .bind(total_tokens)
         .bind(stack_small_id)
+        .bind(i64::from(total_tokens > 0)) // If total amount is greater than 0 then the request was successful
         .execute(&self.db)
         .await?;
 
@@ -4448,11 +4450,16 @@ impl AtomaState {
         amount: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE fiat_balance SET already_debited_amount = already_debited_amount + $3, overcharged_unsettled_amount = overcharged_unsettled_amount - $2 WHERE user_id = $1",
+            "UPDATE fiat_balance 
+                SET already_debited_amount = already_debited_amount + $3,
+                    overcharged_unsettled_amount = overcharged_unsettled_amount - $2,
+                    num_requests = num_requests + $4
+                WHERE user_id = $1",
         )
         .bind(user_id)
         .bind(estimated_amount)
         .bind(amount)
+        .bind(i64::from(amount > 0)) // If total amount is greater than 0 then the request was successful
         .execute(&self.db)
         .await?;
 

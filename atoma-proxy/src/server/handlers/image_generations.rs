@@ -186,6 +186,26 @@ pub async fn image_generations_create(
         {
             Ok(response) => {
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            metadata.max_total_num_compute_units as i64,
+                            metadata.max_total_num_compute_units as i64,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            &metadata.endpoint,
+                        )?;
+                    }
+                }
                 Ok(response.into_response())
             }
             Err(e) => {

@@ -195,6 +195,26 @@ pub async fn embeddings_create(
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            num_input_compute_units as i64,
+                            num_input_compute_units as i64,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            &metadata.endpoint,
+                        )?;
+                    }
+                }
                 Ok(Json(response).into_response())
             }
             Err(e) => {
