@@ -2032,25 +2032,39 @@ impl AtomaState {
         acquired_timestamp: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO stacks
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, num_total_messages, user_id, acquired_timestamp)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+            "INSERT INTO stacks (
+                owner,
+                stack_small_id,
+                stack_id,
+                task_small_id,
+                selected_node_id,
+                num_compute_units,
+                price_per_one_million_compute_units,
+                already_computed_units,
+                locked_compute_units,
+                in_settle_period,
+                num_total_messages,
+                user_id,
+                acquired_timestamp
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+            )",
         )
-            .bind(stack.owner)
-            .bind(stack.stack_small_id)
-            .bind(stack.stack_id)
-            .bind(stack.task_small_id)
-            .bind(stack.selected_node_id)
-            .bind(stack.num_compute_units)
-            .bind(stack.price_per_one_million_compute_units)
-            .bind(stack.already_computed_units)
-            .bind(stack.locked_compute_units)
-            .bind(stack.in_settle_period)
-            .bind(stack.num_total_messages)
-            .bind(user_id)
-            .bind(acquired_timestamp)
-            .execute(&self.db)
-            .await?;
+        .bind(stack.owner)
+        .bind(stack.stack_small_id)
+        .bind(stack.stack_id)
+        .bind(stack.task_small_id)
+        .bind(stack.selected_node_id)
+        .bind(stack.num_compute_units)
+        .bind(stack.price_per_one_million_compute_units)
+        .bind(stack.already_computed_units)
+        .bind(stack.locked_compute_units)
+        .bind(stack.in_settle_period)
+        .bind(stack.num_total_messages)
+        .bind(user_id)
+        .bind(acquired_timestamp)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
