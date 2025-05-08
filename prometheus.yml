@@ -16,3 +16,9 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:8889"] # Local development scraping
 
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: "node-exporter"
+    metrics_path: /metrics
