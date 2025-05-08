@@ -2032,9 +2032,23 @@ impl AtomaState {
         acquired_timestamp: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO stacks
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, num_total_messages, user_id, acquired_timestamp)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            "INSERT INTO stacks (
+                owner,
+                stack_small_id,
+                stack_id,
+                task_small_id,
+                selected_node_id,
+                num_compute_units,
+                price_per_one_million_compute_units,
+                already_computed_units,
+                locked_compute_units,
+                in_settle_period,
+                num_total_messages,
+                user_id,
+                acquired_timestamp
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+            )",
         )
             .bind(stack.owner)
             .bind(stack.stack_small_id)
