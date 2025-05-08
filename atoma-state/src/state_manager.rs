@@ -2033,7 +2033,7 @@ impl AtomaState {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO stacks
-                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, total_hash, num_total_messages, user_id, acquired_timestamp)
+                (owner, stack_small_id, stack_id, task_small_id, selected_node_id, num_compute_units, price_per_one_million_compute_units, already_computed_units, locked_compute_units, in_settle_period, num_total_messages, user_id, acquired_timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
             .bind(stack.owner)
@@ -2046,7 +2046,6 @@ impl AtomaState {
             .bind(stack.already_computed_units)
             .bind(stack.locked_compute_units)
             .bind(stack.in_settle_period)
-            .bind(stack.total_hash)
             .bind(stack.num_total_messages)
             .bind(user_id)
             .bind(acquired_timestamp)
@@ -2344,164 +2343,6 @@ impl AtomaState {
         .await?;
         tx.commit().await?;
         Ok(())
-    }
-
-    /// Updates the total hash and increments the total number of messages for a stack.
-    ///
-    /// This method updates the `total_hash` field in the `stacks` table by appending a new hash
-    /// to the existing hash and increments the `num_total_messages` field by 1 for the specified `stack_small_id`.
-    ///
-    /// # Arguments
-    ///
-    /// * `stack_small_id` - The unique small identifier of the stack to update.
-    /// * `new_hash` - A 32-byte array representing the new hash to append to the existing total hash.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database transaction fails to begin, execute, or commit.
-    /// - The specified stack is not found.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn update_hash(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
-    ///     let stack_small_id = 1;
-    ///     let new_hash = [0u8; 32]; // Example hash
-    ///
-    ///     state_manager.update_stack_total_hash(stack_small_id, new_hash).await
-    /// }
-    /// ```
-    #[instrument(
-        level = "trace",
-        skip_all,
-        fields(%stack_small_id, ?new_hash)
-    )]
-    pub async fn update_stack_total_hash(
-        &self,
-        stack_small_id: i64,
-        new_hash: [u8; 32],
-    ) -> Result<()> {
-        let rows_affected = sqlx::query(
-            "UPDATE stacks
-            SET total_hash = total_hash || $1
-            WHERE stack_small_id = $2",
-        )
-        .bind(&new_hash[..])
-        .bind(stack_small_id)
-        .execute(&self.db)
-        .await?
-        .rows_affected();
-
-        if rows_affected == 0 {
-            return Err(AtomaStateManagerError::StackNotFound);
-        }
-
-        Ok(())
-    }
-
-    /// Retrieves the total hash for a specific stack.
-    ///
-    /// This method fetches the `total_hash` field from the `stacks` table for the given `stack_small_id`.
-    ///
-    /// # Arguments
-    ///
-    /// * `stack_small_id` - The unique small identifier of the stack whose total hash is to be retrieved.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Vec<u8>>`: A result containing either:
-    ///   - `Ok(Vec<u8>)`: A byte vector representing the total hash of the stack.
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_total_hash(state_manager: &AtomaStateManager, stack_small_id: i64) -> Result<Vec<u8>, AtomaStateManagerError> {
-    ///     state_manager.get_stack_total_hash(stack_small_id).await
-    /// }
-    /// ```
-    #[instrument(
-        level = "trace",
-        skip_all,
-        fields(%stack_small_id)
-    )]
-    pub async fn get_stack_total_hash(&self, stack_small_id: i64) -> Result<Vec<u8>> {
-        let total_hash = sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT total_hash FROM stacks WHERE stack_small_id = $1",
-        )
-        .bind(stack_small_id)
-        .fetch_one(&self.db)
-        .await?;
-        Ok(total_hash)
-    }
-
-    /// Retrieves the total hashes for multiple stacks in a single query.
-    ///
-    /// This method efficiently fetches the `total_hash` field from the `stacks` table for all
-    /// provided stack IDs in a single database query.
-    ///
-    /// # Arguments
-    ///
-    /// * `stack_small_ids` - A slice of stack IDs whose total hashes should be retrieved.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Vec<Vec<u8>>>`: A result containing either:
-    ///   - `Ok(Vec<Vec<u8>>)`: A vector of byte vectors, where each inner vector represents
-    ///     the total hash of a stack. The order corresponds to the order of results returned
-    ///     by the database query.
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    /// - There's an issue retrieving the hash data from the result rows.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_hashes(state_manager: &AtomaStateManager) -> Result<Vec<Vec<u8>>, AtomaStateManagerError> {
-    ///     let stack_ids = &[1, 2, 3]; // IDs of stacks to fetch hashes for
-    ///     state_manager.get_all_total_hashes(stack_ids).await
-    /// }
-    /// ```
-    #[instrument(
-        level = "trace",
-        skip_all,
-        fields(?stack_small_ids)
-    )]
-    pub async fn get_all_total_hashes(&self, stack_small_ids: &[i64]) -> Result<Vec<Vec<u8>>> {
-        let mut query_builder = build_query_with_in(
-            "SELECT total_hash FROM stacks",
-            "stack_small_id",
-            stack_small_ids,
-            None,
-        );
-
-        Ok(query_builder
-            .build()
-            .fetch_all(&self.db)
-            .await?
-            .iter()
-            .map(|row| row.get("total_hash"))
-            .collect())
     }
 
     /// Updates a stack settlement ticket with attestation commitments.

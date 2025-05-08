@@ -5,7 +5,6 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
-use base64::engine::{general_purpose::STANDARD, Engine};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,7 +27,7 @@ use super::request_model::ComputeUnitsEstimate;
 use super::{
     handle_status_code_error, update_state_manager_fiat, verify_response_hash_and_signature,
 };
-use super::{request_model::RequestModel, update_state_manager, RESPONSE_HASH_KEY};
+use super::{request_model::RequestModel, update_state_manager};
 use crate::server::{Result, MODEL};
 
 /// Path for the confidential image generations endpoint.
@@ -182,7 +181,6 @@ pub async fn image_generations_create(
             metadata.max_total_num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
-            metadata.selected_stack_small_id,
         )
         .await
         {
@@ -311,7 +309,6 @@ pub async fn confidential_image_generations_create(
             metadata.max_total_num_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
-            metadata.selected_stack_small_id,
         )
         .await
         {
@@ -411,7 +408,6 @@ async fn handle_image_generation_response(
     total_tokens: i64,
     endpoint: String,
     model_name: String,
-    stack_small_id: Option<i64>,
 ) -> Result<Response<Body>> {
     // Record the request in the image generations num requests metric
     let model_label: String = model_name.clone();
@@ -470,35 +466,6 @@ async fn handle_image_generation_response(
             client_message: None,
             endpoint: endpoint.to_string(),
         })?;
-
-    let total_hash = response
-        .get(RESPONSE_HASH_KEY)
-        .and_then(|hash| hash.as_str())
-        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
-        .unwrap_or_default()
-        .try_into()
-        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
-            message: format!(
-                "Error converting response hash to array, received array of length {}",
-                e.len()
-            ),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
-
-    if let Some(stack_small_id) = stack_small_id {
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-                stack_small_id,
-                total_hash,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Error updating stack total hash: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-    }
 
     IMAGE_GEN_LATENCY_METRICS.record(
         time.elapsed().as_secs_f64(),

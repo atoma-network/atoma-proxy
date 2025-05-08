@@ -14,7 +14,6 @@ use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::Extension;
 use axum::{extract::State, http::HeaderMap, Json};
-use base64::engine::{general_purpose::STANDARD, Engine};
 use futures::StreamExt;
 use openai_api::message::Role;
 use openai_api::tools::ToolFunction;
@@ -54,10 +53,7 @@ use super::metrics::{
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
-use super::{
-    handle_status_code_error, update_state_manager, verify_response_hash_and_signature,
-    RESPONSE_HASH_KEY,
-};
+use super::{handle_status_code_error, update_state_manager, verify_response_hash_and_signature};
 use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS, MODEL};
 
 /// Path for the confidential chat completions endpoint.
@@ -858,36 +854,6 @@ async fn handle_non_streaming_response(
             endpoint: endpoint.to_string(),
         })?;
 
-    // NOTE: It is not very secure to rely on the node's computed response hash,
-    // if the node is not running in a TEE, but for now it suffices
-    let total_hash = response
-        .get(RESPONSE_HASH_KEY)
-        .and_then(|hash| hash.as_str())
-        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
-        .unwrap_or_default()
-        .try_into()
-        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
-            message: format!(
-                "Error converting response hash to array, received array of length {}",
-                e.len()
-            ),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
-
-    if let Some(stack_small_id) = selected_stack_small_id {
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-                stack_small_id,
-                total_hash,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Error updating stack total hash: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-    }
     // NOTE: We need to update the stack num tokens, because the inference response might have produced
     // less tokens than estimated what we initially estimated, from the middleware.
     match selected_stack_small_id {
