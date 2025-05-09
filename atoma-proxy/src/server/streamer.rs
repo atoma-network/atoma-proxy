@@ -16,7 +16,9 @@ use std::{
 };
 use tracing::{error, instrument, trace};
 
-use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, completions::COMPLETIONS_PATH, update_state_manager};
+use crate::server::handlers::{
+    chat_completions::CHAT_COMPLETIONS_PATH, completions::COMPLETIONS_PATH, update_state_manager,
+};
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
