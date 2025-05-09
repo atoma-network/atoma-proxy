@@ -20,6 +20,7 @@ use openai_api_completions::{
     Usage,
 };
 use opentelemetry::KeyValue;
+use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::instrument;
@@ -693,7 +694,7 @@ impl RequestModel for RequestModelCompletions {
 
         let prompt = request
             .get(PROMPT)
-            .map(|p| serde_json::from_value::<CompletionsPrompt>(p.clone()))
+            .map(CompletionsPrompt::deserialize)
             .transpose()
             .map_err(|e| AtomaProxyError::RequestError {
                 message: format!("Invalid 'prompt' field for `RequestModelCompletions`: {e}"),
