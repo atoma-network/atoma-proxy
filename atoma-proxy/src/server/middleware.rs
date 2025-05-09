@@ -895,6 +895,8 @@ pub mod auth {
 
     use crate::server::handlers::chat_completions::RequestModelChatCompletions;
     use crate::server::handlers::chat_completions::CHAT_COMPLETIONS_PATH;
+    use crate::server::handlers::completions::RequestModelCompletions;
+    use crate::server::handlers::completions::COMPLETIONS_PATH;
     use crate::server::handlers::embeddings::RequestModelEmbeddings;
     use crate::server::handlers::embeddings::EMBEDDINGS_PATH;
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
@@ -988,6 +990,7 @@ pub mod auth {
     /// # Supported Endpoints
     ///
     /// * `CHAT_COMPLETIONS_PATH` - For chat completion requests
+    /// * `COMPLETIONS_PATH` - For completions requests
     /// * `EMBEDDINGS_PATH` - For text embedding requests
     /// * `IMAGE_GENERATIONS_PATH` - For image generation requests
     ///
@@ -1016,6 +1019,15 @@ pub mod auth {
         endpoint: &str,
     ) -> Result<StackMetadata> {
         match endpoint {
+            COMPLETIONS_PATH => {
+                let request_model = RequestModelCompletions::new(body_json).map_err(|e| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse body as completions request model: {e}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                authenticate_and_lock_compute_units(state, headers, request_model, endpoint).await
+            }
             CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
                     AtomaProxyError::RequestError {
@@ -1753,6 +1765,7 @@ pub mod auth {
     ///
     /// # Supported Endpoints
     /// * `CHAT_COMPLETIONS_PATH` - Handles chat completion requests
+    /// * `COMPLETIONS_PATH` - Handles completions requests
     /// * `EMBEDDINGS_PATH` - Handles embedding generation requests
     /// * `IMAGE_GENERATIONS_PATH` - Handles image generation requests
     ///
@@ -1769,7 +1782,7 @@ pub mod auth {
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
-            CHAT_COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
+            CHAT_COMPLETIONS_PATH | COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
@@ -2173,7 +2186,7 @@ pub mod utils {
     use crate::server::{
         handlers::{
             chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-            embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
+            completions::CONFIDENTIAL_COMPLETIONS_PATH, embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
             image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, update_state_manager,
         },
         http_server::{LockedComputeUnits, StackSmallId},
@@ -2798,6 +2811,7 @@ pub mod utils {
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             CONFIDENTIAL_EMBEDDINGS_PATH,
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+            CONFIDENTIAL_COMPLETIONS_PATH,
         ]
         .contains(&endpoint)
     }

@@ -6,15 +6,13 @@ use utoipa::{
 };
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::server::handlers::embeddings::{
-    ConfidentialEmbeddingsOpenApi, CONFIDENTIAL_EMBEDDINGS_PATH,
-};
 use crate::server::handlers::image_generations::{
     ConfidentialImageGenerationsOpenApi, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use crate::server::handlers::{
-    chat_completions::{ChatCompletionsOpenApi, CompletionsOpenApi},
-    chat_completions::{CHAT_COMPLETIONS_PATH, COMPLETIONS_PATH},
+    chat_completions::ChatCompletionsOpenApi,
+    chat_completions::CHAT_COMPLETIONS_PATH,
+    completions::{CompletionsOpenApi, COMPLETIONS_PATH},
     embeddings::EmbeddingsOpenApi,
     embeddings::EMBEDDINGS_PATH,
     image_generations::ImageGenerationsOpenApi,
@@ -26,6 +24,10 @@ use crate::server::handlers::{
     chat_completions::{ConfidentialChatCompletionsOpenApi, CONFIDENTIAL_CHAT_COMPLETIONS_PATH},
     nodes::NODES_PATH,
 };
+use crate::server::handlers::{
+    completions::{ConfidentialCompletionsOpenApi, CONFIDENTIAL_COMPLETIONS_PATH},
+    embeddings::{ConfidentialEmbeddingsOpenApi, CONFIDENTIAL_EMBEDDINGS_PATH},
+};
 use crate::server::http_server::{HealthOpenApi, HEALTH_PATH};
 
 #[allow(clippy::too_many_lines)]
@@ -34,7 +36,8 @@ pub fn openapi_routes() -> Router {
     #[openapi(
         modifiers(&SpeakeasyExtension, &SecurityAddon),
         nest(
-            (path = COMPLETIONS_PATH, api = CompletionsOpenApi, tags = ["Chat"]),
+            (path = COMPLETIONS_PATH, api = CompletionsOpenApi, tags = ["Completions"]),
+            (path = CONFIDENTIAL_COMPLETIONS_PATH, api = ConfidentialCompletionsOpenApi, tags = ["Confidential Completions"]),
             (path = CHAT_COMPLETIONS_PATH, api = ChatCompletionsOpenApi, tags = ["Chat"]),
             (path = CONFIDENTIAL_CHAT_COMPLETIONS_PATH, api = ConfidentialChatCompletionsOpenApi, tags = ["Confidential Chat"]),
             (path = CONFIDENTIAL_EMBEDDINGS_PATH, api = ConfidentialEmbeddingsOpenApi, tags = ["Confidential Embeddings"]),
@@ -47,6 +50,8 @@ pub fn openapi_routes() -> Router {
             (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
         tags(
+            (name = "Completions", description = "OpenAI's API completions v1 endpoint"),
+            (name = "Confidential Completions", description = "Atoma's API confidential completions v1 endpoint"),
             (name = "Chat", description = "OpenAI's API chat completions v1 endpoint"),
             (name = "Confidential Chat", description = "Atoma's API confidential chat completions v1 endpoint"),
             (name = "Confidential Embeddings", description = "Atoma's API confidential embeddings v1 endpoint"),
