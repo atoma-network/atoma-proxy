@@ -2,6 +2,9 @@ use std::time::{Duration, Instant};
 
 use crate::server::handlers::{update_state_manager_fiat, STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS};
 use crate::server::streamer::ClientStreamer;
+use crate::server::types::{
+    ConfidentialComputeRequest, ConfidentialComputeResponse, ConfidentialComputeStreamResponse,
+};
 use crate::server::{
     error::AtomaProxyError, http_server::ProxyState, middleware::RequestMetadataExtension,
     streamer::Streamer,
@@ -54,6 +57,7 @@ pub const CONFIDENTIAL_COMPLETIONS_PATH: &str = "/v1/completions";
 /// The key for the prompt in the request.
 const PROMPT: &str = "prompt";
 
+/// The OpenAPI schema for the completions endpoint.
 #[derive(OpenApi)]
 #[openapi(
     paths(completions_create),
@@ -278,6 +282,189 @@ pub fn completions_create_stream(
     State(_state): State<ProxyState>,
     _headers: HeaderMap,
     Json(_payload): Json<CompletionsStreamResponse>,
+) -> Result<Response<Body>> {
+    // This endpoint exists only for OpenAPI documentation
+    // Actual streaming is handled by chat_completions_create
+    Err(AtomaProxyError::NotImplemented {
+        message: "This is a mock endpoint for OpenAPI documentation".to_string(),
+        endpoint: COMPLETIONS_PATH.to_string(),
+    })
+}
+
+/// OpenAPI documentation structure for confidential chat completions endpoint.
+///
+/// This structure defines the OpenAPI (Swagger) documentation for the confidential chat completions
+/// API endpoint. It includes all the relevant request/response schemas and path definitions for
+/// secure, confidential chat interactions.
+///
+/// The confidential chat completions endpoint provides the same functionality as the regular
+/// chat completions endpoint but with additional encryption and security measures for
+/// sensitive data processing.
+///
+/// # Components
+///
+/// Includes schemas for:
+/// * `ChatCompletionRequest` - The structure of incoming chat completion requests
+/// * `ChatCompletionMessage` - Individual messages in the chat history
+/// * `ChatCompletionResponse` - The response format for completed requests
+/// * `ChatCompletionChoice` - Available completion choices in responses
+/// * `CompletionUsage` - Token usage statistics
+/// * `ChatCompletionChunk` - Streaming response chunks
+/// * `ChatCompletionChunkChoice` - Choices within streaming chunks
+/// * `ChatCompletionChunkDelta` - Incremental updates in streaming responses
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        confidential_completions_create,
+        confidential_completions_create_stream
+    ),
+    components(schemas(ConfidentialComputeRequest))
+)]
+pub struct ConfidentialCompletionsOpenApi;
+
+/// Confidential completions request handler.
+///
+/// This handler processes completions requests in a confidential manner, providing additional
+/// encryption and security measures for sensitive data processing. It supports both streaming and
+/// non-streaming responses while maintaining data confidentiality through AEAD encryption and TEE hardware,
+/// for full private AI compute.
+///
+/// ## Returns
+///
+/// Returns a `Result` containing either:
+/// * An HTTP response with the completions result
+/// * A streaming SSE connection for real-time completions
+/// * An `AtomaProxyError` error if the request processing fails
+///
+/// ## Errors
+///
+/// Returns `AtomaProxyError::InvalidBody` if:
+/// * The 'stream' field is missing or invalid in the payload
+///
+/// Returns `AtomaProxyError::InternalError` if:
+/// * The inference service request fails
+/// * Response processing encounters errors
+/// * State manager updates fail
+///
+/// ## Security Features
+///
+/// * Utilizes AEAD encryption for request/response data
+/// * Supports TEE (Trusted Execution Environment) processing
+/// * Implements secure key exchange using X25519
+/// * Maintains confidentiality throughout the request lifecycle
+#[utoipa::path(
+    post,
+    path = "",
+    request_body = ConfidentialComputeRequest,
+    security(
+        ("bearerAuth" = [])
+    ),
+    responses(
+        (status = OK, description = "Confidential chat completions", body = ConfidentialComputeResponse),
+        (status = BAD_REQUEST, description = "Bad request"),
+        (status = UNAUTHORIZED, description = "Unauthorized"),
+        (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
+    )
+)]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        path = metadata.endpoint,
+    )
+)]
+pub async fn confidential_completions_create(
+    Extension(metadata): Extension<RequestMetadataExtension>,
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Response<Body>> {
+    let endpoint = metadata.endpoint.clone();
+    tokio::spawn(async move {
+        // TODO: We should allow cancelling the request if the client disconnects
+        let is_streaming = payload
+            .get(STREAM)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or_default();
+
+        match handle_completions_request(&state, &metadata, headers, payload, is_streaming).await {
+            Ok(response) => {
+                if !is_streaming {
+                    // The streaming metric is recorded in the streamer (final chunk)
+                    TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                }
+                Ok(response)
+            }
+            Err(e) => {
+                let model_label: String = metadata.model_name.clone();
+                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+
+                // Record the failed request in the total failed requests metric
+                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+
+                if let Some(stack_small_id) = metadata.selected_stack_small_id {
+                    update_state_manager(
+                        &state.state_manager_sender,
+                        stack_small_id,
+                        metadata.max_total_num_compute_units as i64,
+                        0,
+                        &metadata.endpoint,
+                    )?;
+                } else {
+                    update_state_manager_fiat(
+                        &state.state_manager_sender,
+                        metadata.user_id,
+                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        0,
+                        &metadata.endpoint,
+                    )?;
+                }
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Failed to spawn image generation task: {e:?}"),
+        client_message: None,
+        endpoint,
+    })?
+}
+
+/// Placeholder for the OpenAPI documentation for the confidential completions endpoint.
+///
+/// This is a placeholder for the OpenAPI documentation for the confidential completions endpoint.
+/// It is used to generate the OpenAPI documentation for the confidential completions endpoint.
+///
+/// # Components
+///
+/// Includes schemas for:
+/// * `ConfidentialComputeRequest` - The structure of incoming confidential completion requests
+/// * `ConfidentialComputeStreamResponse` - The response format for completed requests
+#[utoipa::path(
+    post,
+    path = "#stream",
+    security(
+        ("bearerAuth" = [])
+    ),
+    request_body = ConfidentialComputeRequest,
+    responses(
+        (status = OK, description = "Chat completions", content(
+            (ConfidentialComputeStreamResponse = "text/event-stream")
+        )),
+        (status = BAD_REQUEST, description = "Bad request"),
+        (status = UNAUTHORIZED, description = "Unauthorized"),
+        (status = INTERNAL_SERVER_ERROR, description = "Internal server error")
+    )
+)]
+#[allow(dead_code)]
+pub fn confidential_completions_create_stream(
+    Extension(_metadata): Extension<RequestMetadataExtension>,
+    State(_state): State<ProxyState>,
+    _headers: HeaderMap,
+    Json(_payload): Json<ConfidentialComputeStreamResponse>,
 ) -> Result<Response<Body>> {
     // This endpoint exists only for OpenAPI documentation
     // Actual streaming is handled by chat_completions_create

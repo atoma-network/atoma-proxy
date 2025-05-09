@@ -41,7 +41,10 @@ use super::components;
 use super::handlers::chat_completions::{
     confidential_chat_completions_create, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
 };
-use super::handlers::completions::{completions_create, COMPLETIONS_PATH};
+use super::handlers::completions::{
+    completions_create, confidential_completions_create, COMPLETIONS_PATH,
+    CONFIDENTIAL_COMPLETIONS_PATH,
+};
 use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
 use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
@@ -208,6 +211,10 @@ pub fn create_router(state: &ProxyState) -> Router {
         .route(
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             post(confidential_chat_completions_create),
+        )
+        .route(
+            CONFIDENTIAL_COMPLETIONS_PATH,
+            post(confidential_completions_create),
         )
         .route(
             CONFIDENTIAL_EMBEDDINGS_PATH,
