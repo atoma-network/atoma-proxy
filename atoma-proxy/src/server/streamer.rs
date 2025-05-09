@@ -468,6 +468,15 @@ impl Stream for Streamer {
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
+                if self.endpoint == COMPLETIONS_PATH {
+                    tracing::info!(
+                        target = "atoma-service-streamer",
+                        level = "info",
+                        "Completions endpoint, logging chunk: {}",
+                        chunk
+                    );
+                }
+
                 if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
                     else {
