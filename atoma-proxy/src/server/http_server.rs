@@ -133,9 +133,6 @@ pub struct ProxyState {
 
     /// Open router models file.
     pub open_router_models_file: String,
-
-    /// The address and port on which the service is running.
-    pub port: u16,
 }
 
 #[derive(OpenApi)]
@@ -299,7 +296,6 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
         open_router_models_file: config.open_router_models_file,
-        port: tcp_listener.local_addr().unwrap().port(),
     };
     let router = create_router(&proxy_state);
     let server =
