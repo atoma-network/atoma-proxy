@@ -482,15 +482,16 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
-                        self.status = StreamStatus::Completed;
-
-                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
-                        if !choices.is_empty() {
-                            trace!(
+                        if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                            if !choices.is_empty() {
+                                trace!(
                                 target = "atoma-service-streamer",
                                 level = "trace",
                                 "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
                             );
+                            }
                         }
                     }
                 } else if self.endpoint == COMPLETIONS_PATH {
@@ -507,9 +508,8 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
-                        self.status = StreamStatus::Completed;
-
                         if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
                         }
                         if !choices.is_empty() {
@@ -521,8 +521,10 @@ impl Stream for Streamer {
                         }
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
-                    self.status = StreamStatus::Completed;
-                    self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    if !usage.is_null() {
+                        self.status = StreamStatus::Completed;
+                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    }
                 }
                 self.num_generated_tokens += 1;
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))
