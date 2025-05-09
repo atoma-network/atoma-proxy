@@ -1309,14 +1309,3 @@ pub mod openai_api_completions {
         pub system_fingerprint: String,
     }
 }
-
-
-curl -X POST https://api.atoma.network/v1/completions \
--H "Content-Type: application/json" \
--H "Authorization: Bearer rfX0qHL5wMPL5WR2MBLtDjmJPxyEq1" \
--d '{
-  "model": "Infermatic/Llama-3.3-70B-Instruct-FP8-Dynamic",
-  "prompt": "Hello, world!",
-  "max_tokens": 50,
-  "stream": true
-}'
