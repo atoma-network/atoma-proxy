@@ -39,9 +39,9 @@ use crate::server::{
 
 use super::components;
 use super::handlers::chat_completions::{
-    completions_create, confidential_chat_completions_create, COMPLETIONS_PATH,
-    CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
+    confidential_chat_completions_create, CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
 };
+use super::handlers::completions::{completions_create, COMPLETIONS_PATH};
 use super::handlers::embeddings::{confidential_embeddings_create, CONFIDENTIAL_EMBEDDINGS_PATH};
 use super::handlers::image_generations::{
     confidential_image_generations_create, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
@@ -223,6 +223,7 @@ pub fn create_router(state: &ProxyState) -> Router {
 
     let regular_routes = Router::new()
         .route(MODELS_PATH, get(models_list))
+        .route(COMPLETIONS_PATH, post(completions_create))
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions_create))
         .route(EMBEDDINGS_PATH, post(embeddings_create))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations_create));
@@ -233,8 +234,7 @@ pub fn create_router(state: &ProxyState) -> Router {
 
     let public_routes = Router::new()
         .route(HEALTH_PATH, get(health))
-        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list))
-        .route(COMPLETIONS_PATH, post(completions_create));
+        .route(OPEN_ROUTER_MODELS_PATH, get(open_router_models_list));
 
     Router::new()
         .merge(

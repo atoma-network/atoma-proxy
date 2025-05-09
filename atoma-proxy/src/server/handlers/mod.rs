@@ -18,6 +18,7 @@ use super::error::AtomaProxyError;
 use crate::server::Result;
 
 pub mod chat_completions;
+pub mod completions;
 pub mod embeddings;
 pub mod image_generations;
 pub mod metrics;
@@ -30,6 +31,30 @@ pub const RESPONSE_HASH_KEY: &str = "response_hash";
 
 /// Key for the signature in the payload
 pub const SIGNATURE_KEY: &str = "signature";
+
+/// The stream field in the request payload.
+pub const STREAM: &str = "stream";
+
+/// The usage field in the response payload.
+pub const USAGE: &str = "usage";
+
+/// The total number of tokens field in the response payload.
+pub const TOTAL_TOKENS: &str = "total_tokens";
+
+/// The output tokens field in the response payload.
+pub const COMPLETION_TOKENS: &str = "completion_tokens";
+
+/// The prompt tokens field in the response payload.
+pub const PROMPT_TOKENS: &str = "prompt_tokens";
+
+/// The user id field in the response payload.
+pub const USER_ID: &str = "user_id";
+
+/// The path for the stop streamer endpoint.
+const STOP_STREAMER_PATH: &str = "/v1/stop-streamer";
+
+/// The interval for the keep-alive message in the SSE stream.
+const STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS: u64 = 15;
 
 /// Updates the state manager with token usage and hash information for a stack.
 ///

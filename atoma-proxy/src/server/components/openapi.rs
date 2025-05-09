@@ -13,8 +13,9 @@ use crate::server::handlers::image_generations::{
     ConfidentialImageGenerationsOpenApi, CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
 };
 use crate::server::handlers::{
-    chat_completions::{ChatCompletionsOpenApi, CompletionsOpenApi},
-    chat_completions::{CHAT_COMPLETIONS_PATH, COMPLETIONS_PATH},
+    chat_completions::ChatCompletionsOpenApi,
+    chat_completions::CHAT_COMPLETIONS_PATH,
+    completions::{CompletionsOpenApi, COMPLETIONS_PATH},
     embeddings::EmbeddingsOpenApi,
     embeddings::EMBEDDINGS_PATH,
     image_generations::ImageGenerationsOpenApi,
@@ -34,7 +35,7 @@ pub fn openapi_routes() -> Router {
     #[openapi(
         modifiers(&SpeakeasyExtension, &SecurityAddon),
         nest(
-            (path = COMPLETIONS_PATH, api = CompletionsOpenApi, tags = ["Chat"]),
+            (path = COMPLETIONS_PATH, api = CompletionsOpenApi, tags = ["Completions"]),
             (path = CHAT_COMPLETIONS_PATH, api = ChatCompletionsOpenApi, tags = ["Chat"]),
             (path = CONFIDENTIAL_CHAT_COMPLETIONS_PATH, api = ConfidentialChatCompletionsOpenApi, tags = ["Confidential Chat"]),
             (path = CONFIDENTIAL_EMBEDDINGS_PATH, api = ConfidentialEmbeddingsOpenApi, tags = ["Confidential Embeddings"]),
@@ -47,6 +48,7 @@ pub fn openapi_routes() -> Router {
             (path = NODES_PATH, api = NodesOpenApi, tags = ["Nodes"]),
         ),
         tags(
+            (name = "Completions", description = "OpenAI's API completions v1 endpoint"),
             (name = "Chat", description = "OpenAI's API chat completions v1 endpoint"),
             (name = "Confidential Chat", description = "Atoma's API confidential chat completions v1 endpoint"),
             (name = "Confidential Embeddings", description = "Atoma's API confidential embeddings v1 endpoint"),
