@@ -52,7 +52,7 @@ use crate::server::{Result, DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKEN
 pub const COMPLETIONS_PATH: &str = "/v1/completions";
 
 /// Path for the confidential completions endpoint.
-pub const CONFIDENTIAL_COMPLETIONS_PATH: &str = "/v1/completions";
+pub const CONFIDENTIAL_COMPLETIONS_PATH: &str = "/v1/confidential/completions";
 
 /// The key for the prompt in the request.
 const PROMPT: &str = "prompt";
