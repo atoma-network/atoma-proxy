@@ -468,7 +468,7 @@ impl Stream for Streamer {
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
-                if self.endpoint == CHAT_COMPLETIONS_PATH {
+                if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
                     else {
                         error!(
@@ -482,6 +482,7 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
+<<<<<<< HEAD
                         if !usage.is_null() {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
@@ -512,6 +513,11 @@ impl Stream for Streamer {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
                         }
+=======
+                        self.status = StreamStatus::Completed;
+
+                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+>>>>>>> main
                         if !choices.is_empty() {
                             trace!(
                                 target = "atoma-service-streamer",
