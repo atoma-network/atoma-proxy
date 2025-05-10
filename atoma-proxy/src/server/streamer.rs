@@ -482,7 +482,6 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
-<<<<<<< HEAD
                         if !usage.is_null() {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
@@ -513,11 +512,6 @@ impl Stream for Streamer {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
                         }
-=======
-                        self.status = StreamStatus::Completed;
-
-                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
->>>>>>> main
                         if !choices.is_empty() {
                             trace!(
                                 target = "atoma-service-streamer",
