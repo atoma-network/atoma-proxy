@@ -82,6 +82,22 @@ pub fn openapi_routes() -> Router {
                 "x-speakeasy-name-override".to_string(),
                 json!([
                     {
+                        "operationId": "completions_create",
+                        "methodNameOverride": "create"
+                    },
+                    {
+                        "operationId": "completions_create_stream",
+                        "methodNameOverride": "create_stream"
+                    },
+                    {
+                        "operationId": "confidential_completions_create",
+                        "methodNameOverride": "create"
+                    },
+                    {
+                        "operationId": "confidential_completions_create_stream",
+                        "methodNameOverride": "create_stream"
+                    },
+                    {
                         "operationId": "chat_completions_create",
                         "methodNameOverride": "create"
                     },
@@ -145,10 +161,41 @@ pub fn openapi_routes() -> Router {
         let mut spec_value: serde_yaml::Value =
             serde_yaml::from_str(&spec).expect("Failed to parse OpenAPI spec");
 
-        // Add x-speakeasy-sse-sentinel to the chat completions stream endpoint
+        // Add x-speakeasy-sse-sentinel to the completions and chat completions stream endpoints
         if let serde_yaml::Value::Mapping(ref mut paths) = spec_value["paths"] {
             if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
                 serde_yaml::Value::String("/v1/chat/completions#stream".to_string()),
+            ) {
+                if let Some(serde_yaml::Value::Mapping(ref mut post)) =
+                    endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
+                {
+                    if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
+                        post.get_mut(serde_yaml::Value::String("responses".to_string()))
+                    {
+                        if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
+                            responses.get_mut(serde_yaml::Value::String("200".to_string()))
+                        {
+                            if let Some(serde_yaml::Value::Mapping(ref mut content)) = ok_response
+                                .get_mut(serde_yaml::Value::String("content".to_string()))
+                            {
+                                if let Some(serde_yaml::Value::Mapping(ref mut event_stream)) =
+                                    content.get_mut(serde_yaml::Value::String(
+                                        "text/event-stream".to_string(),
+                                    ))
+                                {
+                                    event_stream.insert(
+                                        serde_yaml::Value::String(
+                                            "x-speakeasy-sse-sentinel".to_string(),
+                                        ),
+                                        serde_yaml::Value::String("[DONE]".to_string()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
+                serde_yaml::Value::String("/v1/completions#stream".to_string()),
             ) {
                 if let Some(serde_yaml::Value::Mapping(ref mut post)) =
                     endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
