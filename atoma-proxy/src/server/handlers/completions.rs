@@ -60,10 +60,7 @@ const PROMPT: &str = "prompt";
 /// The OpenAPI schema for the completions endpoint.
 #[derive(OpenApi)]
 #[openapi(
-    paths(
-        completions_create, 
-        completions_create_stream
-    ),
+    paths(completions_create, completions_create_stream),
     components(schemas(
         CompletionsRequest,
         CompletionsResponse,
