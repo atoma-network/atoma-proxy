@@ -9,3 +9,4 @@ config.test.toml
 /config.toml
 local_key
 .rest/
+open_router.json
