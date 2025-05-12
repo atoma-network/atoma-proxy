@@ -60,7 +60,10 @@ const PROMPT: &str = "prompt";
 /// The OpenAPI schema for the completions endpoint.
 #[derive(OpenApi)]
 #[openapi(
-    paths(completions_create),
+    paths(
+        completions_create, 
+        completions_create_stream
+    ),
     components(schemas(
         CompletionsRequest,
         CompletionsResponse,
@@ -268,7 +271,7 @@ async fn handle_completions_request(
     ),
     request_body = CreateCompletionsStreamRequest,
     responses(
-        (status = OK, description = "Chat completions", content(
+        (status = OK, description = "Completions", content(
             (CompletionsStreamResponse = "text/event-stream")
         )),
         (status = BAD_REQUEST, description = "Bad request"),
