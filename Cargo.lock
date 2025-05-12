@@ -707,7 +707,7 @@ dependencies = [
  "rsa 0.9.8",
  "serde",
  "serde_json",
- "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.0)",
+ "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.1)",
  "sui-keys",
  "sui-sdk",
  "sui-sdk-types 0.0.2",
@@ -6874,7 +6874,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
@@ -8275,7 +8275,7 @@ dependencies = [
 [[package]]
 name = "shared-crypto"
 version = "0.0.0"
-source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.0#1d646f736c8b4fdb8f5a3a35e3a3a1a0d193ff25"
+source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.1#406f619fd59015e21267916bebfe58727ffcd78a"
 dependencies = [
  "bcs",
  "eyre",
