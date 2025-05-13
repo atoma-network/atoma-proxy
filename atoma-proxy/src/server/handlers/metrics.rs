@@ -115,7 +115,7 @@ pub static CHAT_COMPLETIONS_STREAMING_LATENCY_METRICS: LazyLock<Histogram<f64>> 
 /// # Metric Details
 /// - Name: `atoma_intentionally_cancelled_chat_completion_streaming_requests`
 /// - Type: Counter
-/// - Labels: `model`
+/// - Labels: `model`, `user_id`
 /// - Unit: requests (count)
 pub static INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS: LazyLock<Counter<u64>> =
     LazyLock::new(|| {

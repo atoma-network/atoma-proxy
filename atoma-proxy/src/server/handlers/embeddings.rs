@@ -8,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use base64::engine::{general_purpose::STANDARD, Engine};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,7 +34,6 @@ use super::{
     },
     request_model::{ComputeUnitsEstimate, RequestModel},
     update_state_manager, update_state_manager_fiat, verify_response_hash_and_signature,
-    RESPONSE_HASH_KEY,
 };
 use crate::server::Result;
 
@@ -190,7 +188,6 @@ pub async fn embeddings_create(
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
-            metadata.selected_stack_small_id,
         )
         .await
         {
@@ -198,6 +195,26 @@ pub async fn embeddings_create(
                 TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
                 SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                match metadata.selected_stack_small_id {
+                    Some(stack_small_id) => {
+                        update_state_manager(
+                            &state.state_manager_sender,
+                            stack_small_id,
+                            num_input_compute_units as i64,
+                            num_input_compute_units as i64,
+                            &metadata.endpoint,
+                        )?;
+                    }
+                    None => {
+                        update_state_manager_fiat(
+                            &state.state_manager_sender,
+                            metadata.user_id,
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            &metadata.endpoint,
+                        )?;
+                    }
+                }
                 Ok(Json(response).into_response())
             }
             Err(e) => {
@@ -304,7 +321,6 @@ pub async fn confidential_embeddings_create(
             num_input_compute_units as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
-            metadata.selected_stack_small_id,
         )
         .await
         {
@@ -426,7 +442,6 @@ async fn handle_embeddings_response(
     num_input_compute_units: i64,
     endpoint: String,
     model_name: String,
-    stack_small_id: Option<i64>,
 ) -> Result<Value> {
     // Record the request in the total text embedding requests metric
     let model_label: String = model_name.clone();
@@ -495,37 +510,6 @@ async fn handle_embeddings_response(
             client_message: None,
             endpoint: endpoint.to_string(),
         })?;
-
-    // NOTE: It is not very secure to rely on the node's computed response hash,
-    // if the node is not running in a TEE, but for now it suffices
-    let total_hash = response
-        .get(RESPONSE_HASH_KEY)
-        .and_then(|hash| hash.as_str())
-        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
-        .unwrap_or_default()
-        .try_into()
-        .map_err(|e: Vec<u8>| AtomaProxyError::InternalError {
-            message: format!(
-                "Error converting response hash to array, received array of length {}",
-                e.len()
-            ),
-            client_message: None,
-            endpoint: endpoint.to_string(),
-        })?;
-
-    if let Some(stack_small_id) = stack_small_id {
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-                stack_small_id,
-                total_hash,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Error updating stack total hash: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-    }
 
     TEXT_EMBEDDINGS_LATENCY_METRICS.record(
         time.elapsed().as_secs_f64(),

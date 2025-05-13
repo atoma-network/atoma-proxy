@@ -4,7 +4,6 @@
 use atoma_state::types::AtomaAtomaStateManagerEvent;
 use axum::body::Bytes;
 use axum::{response::sse::Event, Error};
-use base64::engine::{general_purpose::STANDARD, Engine};
 use flume::{RecvError, Sender};
 use futures::{FutureExt, Stream};
 use opentelemetry::KeyValue;
@@ -17,7 +16,9 @@ use std::{
 };
 use tracing::{error, instrument, trace};
 
-use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
+use crate::server::handlers::{
+    chat_completions::CHAT_COMPLETIONS_PATH, completions::COMPLETIONS_PATH, update_state_manager,
+};
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
@@ -248,27 +249,6 @@ impl Streamer {
         );
         match self.stack_small_id {
             Some(stack_small_id) => {
-                if let Some(response_hash) = response_hash {
-                    let total_hash = response_hash
-                        .as_str()
-                        .map(|hash| STANDARD.decode(hash).unwrap_or_default())
-                        .unwrap_or_default()
-                        .try_into()
-                        .map_err(|e: Vec<u8>| {
-                            Error::new(format!(
-                            "Error converting response hash to array, received array of length {}",
-                            e.len()
-                        ))
-                        })?;
-                    self.state_manager_sender
-                        .send(AtomaAtomaStateManagerEvent::UpdateStackTotalHash {
-                            stack_small_id,
-                            total_hash,
-                        })
-                        .map_err(|err| {
-                            Error::new(format!("Error updating stack total hash: {err:?}"))
-                        })?;
-                }
                 if let Err(e) = update_state_manager(
                     &self.state_manager_sender,
                     stack_small_id,
@@ -488,7 +468,7 @@ impl Stream for Streamer {
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
-                if self.endpoint == CHAT_COMPLETIONS_PATH {
+                if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
                     else {
                         error!(
@@ -502,8 +482,36 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
-                        self.status = StreamStatus::Completed;
-                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                            if !choices.is_empty() {
+                                trace!(
+                                target = "atoma-service-streamer",
+                                level = "trace",
+                                "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
+                            );
+                            }
+                        }
+                    }
+                } else if self.endpoint == COMPLETIONS_PATH {
+                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
+                    else {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error getting choices from chunk"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(
+                            "Error getting choices from chunk",
+                        ))));
+                    };
+
+                    if let Some(usage) = chunk.get(USAGE) {
+                        if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        }
                         if !choices.is_empty() {
                             trace!(
                                 target = "atoma-service-streamer",
@@ -513,8 +521,10 @@ impl Stream for Streamer {
                         }
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
-                    self.status = StreamStatus::Completed;
-                    self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    if !usage.is_null() {
+                        self.status = StreamStatus::Completed;
+                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    }
                 }
                 self.num_generated_tokens += 1;
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))
