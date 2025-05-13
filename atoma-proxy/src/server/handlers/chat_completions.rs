@@ -191,8 +191,10 @@ pub async fn chat_completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.max_total_num_compute_units as i64,
                         0,
+                        metadata.price_per_million.unwrap_or_default(),
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -278,7 +280,6 @@ async fn handle_chat_completions_request(
             &payload,
             metadata.num_input_tokens.map(|v| v as i64),
             metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
             metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
@@ -293,7 +294,7 @@ async fn handle_chat_completions_request(
             headers,
             &payload,
             metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
+            metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -460,8 +461,10 @@ pub async fn confidential_chat_completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.max_total_num_compute_units as i64,
                         0,
+                        metadata.price_per_million.unwrap_or_default(),
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -567,7 +570,7 @@ async fn handle_non_streaming_response(
     headers: HeaderMap,
     payload: &Value,
     estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
+    price_per_million: Option<i64>,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -656,7 +659,7 @@ async fn handle_non_streaming_response(
         .send(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
+                model_name: model_name.clone(),
                 input_tokens,
                 output_tokens,
                 time: time.elapsed().as_secs_f64(),
@@ -690,8 +693,10 @@ async fn handle_non_streaming_response(
             if let Err(e) = update_state_manager_fiat(
                 &state.state_manager_sender,
                 user_id,
-                fiat_estimated_amount.unwrap_or(0),
+                estimated_total_tokens,
                 total_tokens,
+                price_per_million.unwrap_or_default(),
+                model_name,
                 &endpoint,
             ) {
                 return Err(AtomaProxyError::InternalError {
@@ -765,7 +770,6 @@ async fn handle_streaming_response(
     payload: &Value,
     num_input_tokens: Option<i64>,
     estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
     price_per_million: Option<i64>,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
@@ -819,7 +823,6 @@ async fn handle_streaming_response(
             selected_stack_small_id,
             num_input_tokens.unwrap_or(0),
             estimated_total_tokens,
-            fiat_estimated_amount,
             price_per_million,
             start,
             user_id,

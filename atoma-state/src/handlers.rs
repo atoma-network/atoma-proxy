@@ -1444,6 +1444,7 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
+            model_name,
             estimated_amount,
             amount,
         } => {
@@ -1451,6 +1452,12 @@ pub async fn handle_state_manager_event(
                 .state
                 .update_real_amount_fiat_balance(user_id, estimated_amount, amount)
                 .await?;
+            if amount > 0 {
+                state_manager
+                    .state
+                    .update_usage_per_model(user_id, model_name, amount)
+                    .await?;
+            }
         }
     }
     Ok(())

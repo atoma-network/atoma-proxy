@@ -81,9 +81,6 @@ pub struct RequestMetadataExtension {
     /// Selected stack small id for this request.
     pub selected_stack_small_id: Option<i64>,
 
-    /// Estimated amount for fiat currency.
-    pub fiat_estimated_amount: Option<i64>,
-
     /// Price per million tokens for this request.
     pub price_per_million: Option<i64>,
 
@@ -341,7 +338,6 @@ pub async fn authenticate_middleware(
             stack_small_id,
             selected_node_id,
             tx_digest,
-            fiat_locked_amount,
             price_per_million,
         } = auth::get_selected_node(GetSelectedNodeArgs {
             model: &model,
@@ -396,7 +392,6 @@ pub async fn authenticate_middleware(
                     &body_json,
                     &mut req_parts,
                     selected_node_id,
-                    fiat_locked_amount.unwrap(),
                     price_per_million.unwrap(),
                     num_input_compute_units,
                     max_total_compute_units,
@@ -410,8 +405,10 @@ pub async fn authenticate_middleware(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             user_id,
-                            fiat_locked_amount.unwrap(),
+                            max_total_compute_units as i64,
                             0,
+                            price_per_million.unwrap_or_default(),
+                            model,
                             &endpoint,
                         )?;
                         return Err(e);
@@ -795,7 +792,6 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
-                    fiat_locked_amount: None,
                     price_per_million: None,
                 },
                 None => {
@@ -1262,7 +1258,6 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
                 price_per_million: None,
             }))
         } else {
@@ -1373,8 +1368,6 @@ pub mod auth {
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
-        /// The amount locked for fiat request
-        pub fiat_locked_amount: Option<i64>,
         /// The price per million compute units (this is used for the fiat request)
         pub price_per_million: Option<i64>,
     }
@@ -1620,7 +1613,6 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
-            fiat_locked_amount: None,
             price_per_million: None,
         })
     }
@@ -1937,7 +1929,6 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
                 price_per_million: None,
             });
         }
@@ -2084,7 +2075,6 @@ pub mod auth {
                 stack_small_id: None,
                 selected_node_id: node.node_small_id,
                 tx_digest: None,
-                fiat_locked_amount: Some(fiat_locked_amount),
                 price_per_million: Some(node.price_per_one_million_compute_units),
             })
         } else {
@@ -2170,7 +2160,6 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
-            fiat_locked_amount: None,
             price_per_million: None,
         }))
     }
@@ -2341,7 +2330,6 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
-            fiat_estimated_amount: None,
             price_per_million: None,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
@@ -2414,7 +2402,6 @@ pub mod utils {
     /// * Model name
     #[instrument(level = "info", skip_all, fields(
         %endpoint,
-        %fiat_estimated_amount,
         %user_id
     ), err)]
     #[allow(clippy::too_many_arguments)]
@@ -2423,7 +2410,6 @@ pub mod utils {
         body_json: &Value,
         req_parts: &mut Parts,
         selected_node_id: i64,
-        fiat_estimated_amount: i64,
         price_per_million: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
@@ -2468,7 +2454,6 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: None,
-            fiat_estimated_amount: Some(fiat_estimated_amount),
             price_per_million: Some(price_per_million),
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
