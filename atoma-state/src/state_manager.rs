@@ -4483,6 +4483,55 @@ impl AtomaState {
 
         Ok(())
     }
+
+    /// Updates the usage per model for a user.
+    ///
+    /// This method updates the `usage_per_model` table for the specified user and model.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `model_name` - The name of the model.
+    /// * `total_tokens` - The total tokens used by the user for the model.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_usage(state_manager: &AtomaStateManager, user_id: i64, model_name: String, total_tokens: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.update_usage_per_model(user_id, model_name, total_tokens).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn update_usage_per_model(
+        &self,
+        user_id: i64,
+        model_name: String,
+        total_tokens: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO usage_per_model (user_id, model, total_number_processed_tokens)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, model) DO UPDATE SET
+                    total_number_processed_tokens = usage_per_model.total_number_processed_tokens + EXCLUDED.total_number_processed_tokens",
+        )
+        .bind(user_id)
+        .bind(model_name)
+        .bind(total_tokens)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
 }
 
 pub mod validation {

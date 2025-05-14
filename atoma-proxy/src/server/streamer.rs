@@ -16,7 +16,9 @@ use std::{
 };
 use tracing::{error, instrument, trace};
 
-use crate::server::handlers::{chat_completions::CHAT_COMPLETIONS_PATH, update_state_manager};
+use crate::server::handlers::{
+    chat_completions::CHAT_COMPLETIONS_PATH, completions::COMPLETIONS_PATH, update_state_manager,
+};
 
 use super::handlers::chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH;
 use super::handlers::metrics::{
@@ -30,7 +32,6 @@ use super::handlers::metrics::{
 use super::handlers::{
     update_state_manager_fiat, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
 };
-use super::ONE_MILLION;
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -58,10 +59,8 @@ pub struct Streamer {
     status: StreamStatus,
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
-    /// Estimated amount for fiat currency.
-    fiat_estimated_amount: Option<i64>,
     /// Price per million tokens for this request.
-    price_per_million: Option<i64>,
+    price_per_million: i64,
     /// Stack small id
     stack_small_id: Option<i64>,
     /// State manager sender
@@ -117,8 +116,7 @@ impl Streamer {
         stack_small_id: Option<i64>,
         num_input_tokens: i64,
         estimated_total_tokens: i64,
-        fiat_estimated_amount: Option<i64>,
-        price_per_million: Option<i64>,
+        price_per_million: i64,
         start: Instant,
         user_id: i64,
         model_name: String,
@@ -140,7 +138,6 @@ impl Streamer {
             inter_stream_token_latency_timer: None,
             is_final_chunk_handled: false,
             num_generated_tokens: num_input_tokens,
-            fiat_estimated_amount,
             price_per_million,
         }
     }
@@ -269,8 +266,10 @@ impl Streamer {
                 if let Err(e) = update_state_manager_fiat(
                     &self.state_manager_sender,
                     self.user_id,
-                    self.fiat_estimated_amount.unwrap_or_default(),
-                    total_tokens * self.price_per_million.unwrap_or_default() / ONE_MILLION as i64,
+                    self.estimated_total_tokens,
+                    total_tokens,
+                    self.price_per_million,
+                    self.model_name.clone(),
                     &self.endpoint,
                 ) {
                     error!(
@@ -466,7 +465,7 @@ impl Stream for Streamer {
                     Error::new(format!("Error verifying and signing response: {e:?}"))
                 })?;
 
-                if self.endpoint == CHAT_COMPLETIONS_PATH {
+                if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
                     let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
                     else {
                         error!(
@@ -480,8 +479,36 @@ impl Stream for Streamer {
                     };
 
                     if let Some(usage) = chunk.get(USAGE) {
-                        self.status = StreamStatus::Completed;
-                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                            if !choices.is_empty() {
+                                trace!(
+                                target = "atoma-service-streamer",
+                                level = "trace",
+                                "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
+                            );
+                            }
+                        }
+                    }
+                } else if self.endpoint == COMPLETIONS_PATH {
+                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
+                    else {
+                        error!(
+                            target = "atoma-service-streamer",
+                            level = "error",
+                            "Error getting choices from chunk"
+                        );
+                        return Poll::Ready(Some(Err(Error::new(
+                            "Error getting choices from chunk",
+                        ))));
+                    };
+
+                    if let Some(usage) = chunk.get(USAGE) {
+                        if !usage.is_null() {
+                            self.status = StreamStatus::Completed;
+                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        }
                         if !choices.is_empty() {
                             trace!(
                                 target = "atoma-service-streamer",
@@ -491,8 +518,10 @@ impl Stream for Streamer {
                         }
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
-                    self.status = StreamStatus::Completed;
-                    self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    if !usage.is_null() {
+                        self.status = StreamStatus::Completed;
+                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                    }
                 }
                 self.num_generated_tokens += 1;
                 Poll::Ready(Some(Ok(Event::default().json_data(&chunk)?)))
@@ -586,9 +615,10 @@ impl Drop for Streamer {
                 if let Err(e) = update_state_manager_fiat(
                     &self.state_manager_sender,
                     self.user_id,
-                    self.fiat_estimated_amount.unwrap_or_default(),
-                    self.num_generated_tokens * self.price_per_million.unwrap_or_default()
-                        / ONE_MILLION as i64,
+                    self.estimated_total_tokens,
+                    self.num_generated_tokens,
+                    self.price_per_million,
+                    self.model_name.clone(),
                     &self.endpoint,
                 ) {
                     error!(

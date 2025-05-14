@@ -910,6 +910,8 @@ pub enum AtomaAtomaStateManagerEvent {
     UpdateStackNumTokensFiat {
         /// The user ID
         user_id: i64,
+        /// Model name
+        model_name: String,
         /// The original estimated amount
         estimated_amount: i64,
         /// The actual amount

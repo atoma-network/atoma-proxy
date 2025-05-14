@@ -14,10 +14,11 @@ use reqwest::StatusCode;
 use sui_sdk::types::crypto::{PublicKey, Signature, SignatureScheme, SuiSignature};
 use tracing::instrument;
 
-use super::error::AtomaProxyError;
+use super::{error::AtomaProxyError, ONE_MILLION};
 use crate::server::Result;
 
 pub mod chat_completions;
+pub mod completions;
 pub mod embeddings;
 pub mod image_generations;
 pub mod metrics;
@@ -30,6 +31,30 @@ pub const RESPONSE_HASH_KEY: &str = "response_hash";
 
 /// Key for the signature in the payload
 pub const SIGNATURE_KEY: &str = "signature";
+
+/// The stream field in the request payload.
+pub const STREAM: &str = "stream";
+
+/// The usage field in the response payload.
+pub const USAGE: &str = "usage";
+
+/// The total number of tokens field in the response payload.
+pub const TOTAL_TOKENS: &str = "total_tokens";
+
+/// The output tokens field in the response payload.
+pub const COMPLETION_TOKENS: &str = "completion_tokens";
+
+/// The prompt tokens field in the response payload.
+pub const PROMPT_TOKENS: &str = "prompt_tokens";
+
+/// The user id field in the response payload.
+pub const USER_ID: &str = "user_id";
+
+/// The path for the stop streamer endpoint.
+const STOP_STREAMER_PATH: &str = "/v1/stop-streamer";
+
+/// The interval for the keep-alive message in the SSE stream.
+const STREAM_KEEP_ALIVE_INTERVAL_IN_SECONDS: u64 = 15;
 
 /// Updates the state manager with token usage and hash information for a stack.
 ///
@@ -112,14 +137,34 @@ pub fn update_state_manager_fiat(
     user_id: i64,
     estimated_amount: i64,
     amount: i64,
+    price_per_one_million_compute_units: i64,
+    model_name: String,
     endpoint: &str,
 ) -> Result<()> {
+    let estimated_amount = i64::try_from(
+        estimated_amount as u128 * price_per_one_million_compute_units as u128
+            / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting estimated amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
+    let amount = i64::try_from(
+        amount as u128 * price_per_one_million_compute_units as u128 / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
     // Update stack num tokens
     state_manager_sender
         .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
             estimated_amount,
             amount,
+            model_name,
         })
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Error updating fiat balance: {e}"),

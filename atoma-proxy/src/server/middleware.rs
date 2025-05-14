@@ -81,11 +81,8 @@ pub struct RequestMetadataExtension {
     /// Selected stack small id for this request.
     pub selected_stack_small_id: Option<i64>,
 
-    /// Estimated amount for fiat currency.
-    pub fiat_estimated_amount: Option<i64>,
-
     /// Price per million tokens for this request.
-    pub price_per_million: Option<i64>,
+    pub price_per_million: i64,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -341,7 +338,6 @@ pub async fn authenticate_middleware(
             stack_small_id,
             selected_node_id,
             tx_digest,
-            fiat_locked_amount,
             price_per_million,
         } = auth::get_selected_node(GetSelectedNodeArgs {
             model: &model,
@@ -371,6 +367,7 @@ pub async fn authenticate_middleware(
                     stack_small_id,
                     num_input_compute_units,
                     max_total_compute_units,
+                    price_per_million,
                     tx_digest,
                     user_id,
                     &endpoint,
@@ -396,8 +393,7 @@ pub async fn authenticate_middleware(
                     &body_json,
                     &mut req_parts,
                     selected_node_id,
-                    fiat_locked_amount.unwrap(),
-                    price_per_million.unwrap(),
+                    price_per_million,
                     num_input_compute_units,
                     max_total_compute_units,
                     user_id,
@@ -410,8 +406,10 @@ pub async fn authenticate_middleware(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             user_id,
-                            fiat_locked_amount.unwrap(),
+                            max_total_compute_units as i64,
                             0,
+                            price_per_million,
+                            model,
                             &endpoint,
                         )?;
                         return Err(e);
@@ -795,8 +793,7 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
-                    fiat_locked_amount: None,
-                    price_per_million: None,
+                    price_per_million: stack.price_per_million,
                 },
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
@@ -847,6 +844,7 @@ pub async fn handle_locked_stack_middleware(
                 })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
+                selected_node_metadata.price_per_million,
                 selected_node_metadata.tx_digest,
                 user_id,
                 &endpoint,
@@ -895,6 +893,8 @@ pub mod auth {
 
     use crate::server::handlers::chat_completions::RequestModelChatCompletions;
     use crate::server::handlers::chat_completions::CHAT_COMPLETIONS_PATH;
+    use crate::server::handlers::completions::RequestModelCompletions;
+    use crate::server::handlers::completions::COMPLETIONS_PATH;
     use crate::server::handlers::embeddings::RequestModelEmbeddings;
     use crate::server::handlers::embeddings::EMBEDDINGS_PATH;
     use crate::server::handlers::image_generations::RequestModelImageGenerations;
@@ -988,6 +988,7 @@ pub mod auth {
     /// # Supported Endpoints
     ///
     /// * `CHAT_COMPLETIONS_PATH` - For chat completion requests
+    /// * `COMPLETIONS_PATH` - For completions requests
     /// * `EMBEDDINGS_PATH` - For text embedding requests
     /// * `IMAGE_GENERATIONS_PATH` - For image generation requests
     ///
@@ -1016,6 +1017,15 @@ pub mod auth {
         endpoint: &str,
     ) -> Result<StackMetadata> {
         match endpoint {
+            COMPLETIONS_PATH => {
+                let request_model = RequestModelCompletions::new(body_json).map_err(|e| {
+                    AtomaProxyError::RequestError {
+                        message: format!("Failed to parse body as completions request model: {e}"),
+                        endpoint: endpoint.to_string(),
+                    }
+                })?;
+                authenticate_and_lock_compute_units(state, headers, request_model, endpoint).await
+            }
             CHAT_COMPLETIONS_PATH => {
                 let request_model = RequestModelChatCompletions::new(body_json).map_err(|e| {
                     AtomaProxyError::RequestError {
@@ -1250,8 +1260,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             }))
         } else {
             Ok(None)
@@ -1361,10 +1370,8 @@ pub mod auth {
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
-        /// The amount locked for fiat request
-        pub fiat_locked_amount: Option<i64>,
         /// The price per million compute units (this is used for the fiat request)
-        pub price_per_million: Option<i64>,
+        pub price_per_million: i64,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1608,8 +1615,7 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
-            fiat_locked_amount: None,
-            price_per_million: None,
+            price_per_million: price_per_million_compute_units as i64,
         })
     }
 
@@ -1753,6 +1759,7 @@ pub mod auth {
     ///
     /// # Supported Endpoints
     /// * `CHAT_COMPLETIONS_PATH` - Handles chat completion requests
+    /// * `COMPLETIONS_PATH` - Handles completions requests
     /// * `EMBEDDINGS_PATH` - Handles embedding generation requests
     /// * `IMAGE_GENERATIONS_PATH` - Handles image generation requests
     ///
@@ -1769,7 +1776,7 @@ pub mod auth {
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
         match endpoint {
-            CHAT_COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
+            CHAT_COMPLETIONS_PATH | COMPLETIONS_PATH | EMBEDDINGS_PATH | IMAGE_GENERATIONS_PATH => {
                 get_stack_if_locked_with_request_model(
                     state,
                     user_id,
@@ -1924,8 +1931,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -2071,8 +2077,7 @@ pub mod auth {
                 stack_small_id: None,
                 selected_node_id: node.node_small_id,
                 tx_digest: None,
-                fiat_locked_amount: Some(fiat_locked_amount),
-                price_per_million: Some(node.price_per_one_million_compute_units),
+                price_per_million: node.price_per_one_million_compute_units,
             })
         } else {
             // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
@@ -2157,8 +2162,7 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
-            fiat_locked_amount: None,
-            price_per_million: None,
+            price_per_million: stack.price_per_one_million_compute_units,
         }))
     }
 }
@@ -2173,7 +2177,7 @@ pub mod utils {
     use crate::server::{
         handlers::{
             chat_completions::CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
-            embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
+            completions::CONFIDENTIAL_COMPLETIONS_PATH, embeddings::CONFIDENTIAL_EMBEDDINGS_PATH,
             image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, update_state_manager,
         },
         http_server::{LockedComputeUnits, StackSmallId},
@@ -2264,6 +2268,7 @@ pub mod utils {
         selected_stack_small_id: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
+        price_per_million: i64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
         endpoint: &str,
@@ -2328,8 +2333,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
-            fiat_estimated_amount: None,
-            price_per_million: None,
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
@@ -2401,7 +2405,6 @@ pub mod utils {
     /// * Model name
     #[instrument(level = "info", skip_all, fields(
         %endpoint,
-        %fiat_estimated_amount,
         %user_id
     ), err)]
     #[allow(clippy::too_many_arguments)]
@@ -2410,7 +2413,6 @@ pub mod utils {
         body_json: &Value,
         req_parts: &mut Parts,
         selected_node_id: i64,
-        fiat_estimated_amount: i64,
         price_per_million: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
@@ -2455,8 +2457,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: None,
-            fiat_estimated_amount: Some(fiat_estimated_amount),
-            price_per_million: Some(price_per_million),
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
@@ -2798,6 +2799,7 @@ pub mod utils {
             CONFIDENTIAL_CHAT_COMPLETIONS_PATH,
             CONFIDENTIAL_EMBEDDINGS_PATH,
             CONFIDENTIAL_IMAGE_GENERATIONS_PATH,
+            CONFIDENTIAL_COMPLETIONS_PATH,
         ]
         .contains(&endpoint)
     }
