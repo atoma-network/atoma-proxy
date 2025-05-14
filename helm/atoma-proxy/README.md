@@ -10,23 +10,67 @@ This Helm chart deploys the Atoma Proxy application along with its dependencies,
 - nginx-ingress-controller
 - kubectl configured to communicate with your cluster
 
-## Quick Start
+## Installation
 
-1. Add the required Helm repositories:
-```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo update
-```
+### Step-by-Step Installation
 
-2. Install the chart:
+1. **Start Minikube** (if using Minikube):
+   ```bash
+   minikube start -p atoma-proxy \
+     --driver=docker \
+     --cpus=4 \
+     --memory=8g \
+     --disk-size=50g \
+     --force \
+     --addons=ingress,metrics-server
+   ```
+
+2. **Create the namespace**:
+   ```bash
+   kubectl create namespace atoma-proxy
+   ```
+
+3. **Add required Helm repositories**:
+   ```bash
+   helm repo add bitnami https://charts.bitnami.com/bitnami
+   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm repo add grafana https://grafana.github.io/helm-charts
+   helm repo update
+   ```
+
+4. **Navigate to the Helm chart directory and build dependencies**:
+   ```bash
+   cd helm/atoma-proxy
+   helm dependency build
+   ```
+
+5. **Install the chart with development values**:
+   ```bash
+   helm install atoma-proxy . -f values-dev.yaml -n atoma-proxy
+   ```
+
+6. **Start Minikube tunnel** (in a separate terminal) for ingress access:
+   ```bash
+   minikube tunnel -p atoma-proxy
+   ```
+
+7. **Verify the installation**:
+   ```bash
+   # Check all pods are running
+   kubectl get pods -n atoma-proxy
+
+   # Check ingress resources
+   kubectl get ingress -n atoma-proxy
+
+   # Check services
+   kubectl get svc -n atoma-proxy
+   ```
+
+### Quick Installation
+
+Alternatively, you can use the deployment script:
 ```bash
-# For development
 ./scripts/deploy.sh -e dev -p your-password
-
-# For production
-./scripts/deploy.sh -e prod -p your-secure-password
 ```
 
 ## Configuration
@@ -204,3 +248,116 @@ Access the monitoring tools at:
 ## License
 
 This chart is licensed under the same license as the Atoma Proxy application.
+
+## Quickstart Checklist (including Apple Silicon/M1/M2/M3)
+
+1. **Build and Push a Multi-Arch Image (if on Apple Silicon):**
+   ```bash
+   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/atoma-network/atoma-proxy:latest --push .
+   ```
+   > If you are on an M1/M2/M3 Mac, you must use a multi-arch image or an arm64 image. Otherwise, your pod will fail with `rosetta error: failed to open elf at /lib64/ld-linux-x86-64.so.2`.
+
+2. **Start Minikube:**
+   ```bash
+   minikube start -p atoma-proxy \
+     --driver=docker \
+     --cpus=4 \
+     --memory=8g \
+     --disk-size=50g \
+     --force \
+     --addons=ingress,metrics-server
+   ```
+
+3. **Create the namespace:**
+   ```bash
+   kubectl create namespace atoma-proxy
+   ```
+
+4. **Add required Helm repositories:**
+   ```bash
+   helm repo add bitnami https://charts.bitnami.com/bitnami
+   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm repo add grafana https://grafana.github.io/helm-charts
+   helm repo update
+   ```
+
+5. **Build Helm dependencies:**
+   ```bash
+   cd helm/atoma-proxy
+   helm dependency build
+   ```
+
+6. **Install the chart with development values:**
+   ```bash
+   helm install atoma-proxy . -f values-dev.yaml -n atoma-proxy
+   ```
+
+7. **Start Minikube tunnel (for ingress):**
+   ```bash
+   minikube tunnel -p atoma-proxy
+   ```
+
+8. **Verify all pods are running:**
+   ```bash
+   kubectl get pods -n atoma-proxy
+   ```
+
+9. **If using OTEL Collector, ensure the deployment and service are present:**
+   ```bash
+   kubectl get deployment,svc -n atoma-proxy | grep otel-collector
+   ```
+
+10. **If Atoma Proxy pod is not running, check logs and describe:**
+    ```bash
+    kubectl logs -n atoma-proxy -l app.kubernetes.io/name=atoma-proxy --tail=50
+    kubectl describe pod -n atoma-proxy -l app.kubernetes.io/name=atoma-proxy
+    ```
+
+11. **If you see `ImagePullBackOff`, ensure your image tag is correct and public, or use an image pull secret for private images.**
+
+12. **If you see `rosetta error: failed to open elf at /lib64/ld-linux-x86-64.so.2`, you need a multi-arch image. See step 1.**
+
+13. **Check Prometheus targets:**
+    ```bash
+    kubectl port-forward svc/atoma-proxy-prometheus-server 9090:80 -n atoma-proxy
+    # Then open http://localhost:9090/targets in your browser
+    ```
+
+14. **Check for Atoma metrics in Prometheus/Grafana:**
+    - In Prometheus or Grafana, search for metrics with the prefix `atoma_`.
+
+---
+
+## Debugging & Verification
+
+- **Check all pods in the namespace:**
+  ```bash
+  kubectl get pods -n atoma-proxy
+  ```
+- **Check logs for a specific pod:**
+  ```bash
+  kubectl logs -n atoma-proxy <pod-name>
+  ```
+- **Describe a pod for events and status:**
+  ```bash
+  kubectl describe pod -n atoma-proxy <pod-name>
+  ```
+- **Check OTEL Collector deployment and service:**
+  ```bash
+  kubectl get deployment,svc -n atoma-proxy | grep otel-collector
+  ```
+- **Check if Atoma Proxy pod is running:**
+  ```bash
+  kubectl get pods -n atoma-proxy -l app.kubernetes.io/name=atoma-proxy
+  ```
+- **Check for image pull errors:**
+  ```bash
+  kubectl describe pod -n atoma-proxy -l app.kubernetes.io/name=atoma-proxy
+  ```
+- **Check Prometheus targets:**
+  ```bash
+  kubectl port-forward svc/atoma-proxy-prometheus-server 9090:80 -n atoma-proxy
+  # Open http://localhost:9090/targets
+  ```
+- **Check for Atoma metrics in Prometheus/Grafana:**
+  - In Prometheus or Grafana, search for metrics with the prefix `atoma_`.

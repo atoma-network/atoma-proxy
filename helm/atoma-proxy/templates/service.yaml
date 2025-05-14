@@ -1,23 +1,23 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: { { .Release.Name } }
-  namespace: { { .Release.Namespace } }
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
   labels:
-    app.kubernetes.io/name: { { .Release.Name } }
-    app.kubernetes.io/instance: { { .Release.Name } }
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   selector:
-    app.kubernetes.io/name: { { .Release.Name } }
-    app.kubernetes.io/instance: { { .Release.Name } }
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - name: http
-      port: { { .Values.atomaProxy.service.http.port } }
-      targetPort: { { .Values.atomaProxy.service.http.port } }
+      port: {{ .Values.atomaProxy.service.http.port }}
+      targetPort: {{ .Values.atomaProxy.service.http.port }}
     - name: credentials
-      port: { { .Values.atomaProxy.service.credentials.port } }
-      targetPort: { { .Values.atomaProxy.service.credentials.port } }
+      port: {{ .Values.atomaProxy.service.credentials.port }}
+      targetPort: {{ .Values.atomaProxy.service.credentials.port }}
     - name: p2p
-      port: { { .Values.atomaProxy.service.p2p.port } }
-      targetPort: { { .Values.atomaProxy.service.p2p.port } }
+      port: {{ .Values.atomaProxy.service.p2p.port }}
+      targetPort: {{ .Values.atomaProxy.service.p2p.port }}
   type: ClusterIP

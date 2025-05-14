@@ -6,7 +6,7 @@ global:
 atomaProxy:
   image:
     repository: ghcr.io/atoma-network/atoma-proxy
-    tag: dev-latest
+    tag: latest
     pullPolicy: Always
   replicas: 1
   resources:
@@ -41,6 +41,9 @@ atomaProxy:
   config:
     logLevel: "debug"
     environment: "development"
+  extraEnv:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: http://otel-collector:4317
 
 # PostgreSQL settings
 postgresql:
@@ -70,20 +73,47 @@ grafana:
   persistence:
     size: 5Gi
   admin:
-    password: "admin" # Change this in production
+    existingSecret: "grafana-admin"
+    userKey: admin-user
+    passwordKey: admin-password
+  security:
+    adminPassword: "admin123"
   ingress:
     enabled: true
     hosts:
       - grafana-dev.atoma.network
 
 loki:
-  enabled: true
+  enabled: false # Temporarily disable Loki
   persistence:
     size: 5Gi
   ingress:
     enabled: true
     hosts:
       - loki-dev.atoma.network
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+  auth_enabled: false
+  schemaConfig:
+    configs:
+      - from: 2022-01-11
+        store: boltdb-shipper
+        object_store: filesystem
+        schema: v12
+        index:
+          prefix: loki_index_
+          period: 24h
+  commonConfig:
+    replication_factor: 1
+    path_prefix: /var/loki
+  limits_config:
+    retention_period: 744h
+  memberlist:
+    join_members:
+      - loki-memberlist
 
 tempo:
   enabled: true
