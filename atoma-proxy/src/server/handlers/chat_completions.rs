@@ -831,7 +831,10 @@ async fn handle_streaming_response(
                 event = streamer.next() => {
                     match event {
                         Some(Ok(maybe_chunk)) => {
-                            tracing::info!(target = "atoma-service-chat-completions", "Sending chunk to event sender");
+                            tracing::debug!(
+                                target = "atoma-service-chat-completions",
+                                "Sending chunk to event sender"
+                            );
                             if let Err(e) = event_sender.send(maybe_chunk) {
                                 tracing::error!(
                                     target = "atoma-service-chat-completions",
