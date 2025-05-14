@@ -108,7 +108,7 @@ const MESSAGES: &str = "messages";
 )]
 pub struct ChatCompletionsOpenApi;
 
-/// Create chat completion
+/// Create chat completions
 ///
 /// This function processes chat completion requests by determining whether to use streaming
 /// or non-streaming response handling based on the request payload. For streaming requests,
@@ -364,7 +364,7 @@ pub fn chat_completions_create_stream(
 )]
 pub struct ConfidentialChatCompletionsOpenApi;
 
-/// Create confidential chat completion
+/// Create confidential chat completions
 ///
 /// This handler processes chat completion requests in a confidential manner, providing additional
 /// encryption and security measures for sensitive data processing. It supports both streaming and
