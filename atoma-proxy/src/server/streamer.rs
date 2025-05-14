@@ -60,7 +60,7 @@ pub struct Streamer {
     /// Estimated total tokens for the stream
     estimated_total_tokens: i64,
     /// Price per million tokens for this request.
-    price_per_million: Option<i64>,
+    price_per_million: i64,
     /// Stack small id
     stack_small_id: Option<i64>,
     /// State manager sender
@@ -116,7 +116,7 @@ impl Streamer {
         stack_small_id: Option<i64>,
         num_input_tokens: i64,
         estimated_total_tokens: i64,
-        price_per_million: Option<i64>,
+        price_per_million: i64,
         start: Instant,
         user_id: i64,
         model_name: String,
@@ -268,7 +268,7 @@ impl Streamer {
                     self.user_id,
                     self.estimated_total_tokens,
                     total_tokens,
-                    self.price_per_million.unwrap_or_default(),
+                    self.price_per_million,
                     self.model_name.clone(),
                     &self.endpoint,
                 ) {
@@ -617,7 +617,7 @@ impl Drop for Streamer {
                     self.user_id,
                     self.estimated_total_tokens,
                     self.num_generated_tokens,
-                    self.price_per_million.unwrap_or_default(),
+                    self.price_per_million,
                     self.model_name.clone(),
                     &self.endpoint,
                 ) {

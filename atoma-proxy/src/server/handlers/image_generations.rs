@@ -203,7 +203,7 @@ pub async fn image_generations_create(
                             metadata.user_id,
                             metadata.max_total_num_compute_units as i64,
                             metadata.max_total_num_compute_units as i64,
-                            metadata.price_per_million.unwrap_or_default(),
+                            metadata.price_per_million,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -236,7 +236,7 @@ pub async fn image_generations_create(
                             metadata.user_id,
                             metadata.max_total_num_compute_units as i64,
                             0,
-                            metadata.price_per_million.unwrap_or_default(),
+                            metadata.price_per_million,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -350,7 +350,7 @@ pub async fn confidential_image_generations_create(
                             metadata.user_id,
                             metadata.max_total_num_compute_units as i64,
                             0,
-                            metadata.price_per_million.unwrap_or_default(),
+                            metadata.price_per_million,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;

@@ -82,7 +82,7 @@ pub struct RequestMetadataExtension {
     pub selected_stack_small_id: Option<i64>,
 
     /// Price per million tokens for this request.
-    pub price_per_million: Option<i64>,
+    pub price_per_million: i64,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -367,6 +367,7 @@ pub async fn authenticate_middleware(
                     stack_small_id,
                     num_input_compute_units,
                     max_total_compute_units,
+                    price_per_million,
                     tx_digest,
                     user_id,
                     &endpoint,
@@ -392,7 +393,7 @@ pub async fn authenticate_middleware(
                     &body_json,
                     &mut req_parts,
                     selected_node_id,
-                    price_per_million.unwrap(),
+                    price_per_million,
                     num_input_compute_units,
                     max_total_compute_units,
                     user_id,
@@ -407,7 +408,7 @@ pub async fn authenticate_middleware(
                             user_id,
                             max_total_compute_units as i64,
                             0,
-                            price_per_million.unwrap_or_default(),
+                            price_per_million,
                             model,
                             &endpoint,
                         )?;
@@ -792,7 +793,7 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
-                    price_per_million: None,
+                    price_per_million: stack.price_per_million,
                 },
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
@@ -843,6 +844,7 @@ pub async fn handle_locked_stack_middleware(
                 })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
+                selected_node_metadata.price_per_million,
                 selected_node_metadata.tx_digest,
                 user_id,
                 &endpoint,
@@ -1258,7 +1260,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             }))
         } else {
             Ok(None)
@@ -1369,7 +1371,7 @@ pub mod auth {
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
         /// The price per million compute units (this is used for the fiat request)
-        pub price_per_million: Option<i64>,
+        pub price_per_million: i64,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1613,7 +1615,7 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
-            price_per_million: None,
+            price_per_million: price_per_million_compute_units as i64,
         })
     }
 
@@ -1929,7 +1931,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -2075,7 +2077,7 @@ pub mod auth {
                 stack_small_id: None,
                 selected_node_id: node.node_small_id,
                 tx_digest: None,
-                price_per_million: Some(node.price_per_one_million_compute_units),
+                price_per_million: node.price_per_one_million_compute_units,
             })
         } else {
             // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
@@ -2160,7 +2162,7 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
-            price_per_million: None,
+            price_per_million: stack.price_per_one_million_compute_units,
         }))
     }
 }
@@ -2266,6 +2268,7 @@ pub mod utils {
         selected_stack_small_id: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
+        price_per_million: i64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
         endpoint: &str,
@@ -2330,7 +2333,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
-            price_per_million: None,
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
@@ -2454,7 +2457,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: None,
-            price_per_million: Some(price_per_million),
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
