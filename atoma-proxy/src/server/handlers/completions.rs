@@ -60,7 +60,7 @@ const PROMPT: &str = "prompt";
 /// The OpenAPI schema for the completions endpoint.
 #[derive(OpenApi)]
 #[openapi(
-    paths(completions_create),
+    paths(completions_create, completions_create_stream),
     components(schemas(
         CompletionsRequest,
         CompletionsResponse,
@@ -245,21 +245,6 @@ async fn handle_completions_request(
     }
 }
 
-/// Creates a streaming response for completions.
-///
-/// This function processes streaming completion requests by using the chat completions endpoint.
-///
-/// # Arguments
-///
-/// * `state` - Reference to the application's shared state containing service configuration
-/// * `metadata` - Request metadata containing:
-/// * `headers` - HTTP request headers to forward to the inference service
-/// * `payload` - The JSON payload containing the chat completion request
-/// * `is_streaming` - Boolean flag indicating whether to use streaming response
-///
-/// # Returns
-///
-/// An error, as this endpoint is just a placeholder for OpenAPI documentation
 #[utoipa::path(
     post,
     path = "#stream",
@@ -268,7 +253,7 @@ async fn handle_completions_request(
     ),
     request_body = CreateCompletionsStreamRequest,
     responses(
-        (status = OK, description = "Chat completions", content(
+        (status = OK, description = "Completions", content(
             (CompletionsStreamResponse = "text/event-stream")
         )),
         (status = BAD_REQUEST, description = "Bad request"),
@@ -433,16 +418,6 @@ pub async fn confidential_completions_create(
     })?
 }
 
-/// Placeholder for the OpenAPI documentation for the confidential completions endpoint.
-///
-/// This is a placeholder for the OpenAPI documentation for the confidential completions endpoint.
-/// It is used to generate the OpenAPI documentation for the confidential completions endpoint.
-///
-/// # Components
-///
-/// Includes schemas for:
-/// * `ConfidentialComputeRequest` - The structure of incoming confidential completion requests
-/// * `ConfidentialComputeStreamResponse` - The response format for completed requests
 #[utoipa::path(
     post,
     path = "#stream",
