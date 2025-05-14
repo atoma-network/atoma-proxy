@@ -2014,6 +2014,38 @@ pub mod auth {
         get_cheapest_node_and_acquire_new_stack(state, user_id, model, endpoint, total_tokens).await
     }
 
+    /// Gets the cheapest node for a model.
+    ///
+    /// This function sends a request to the state manager to retrieve the cheapest node for the given model.
+    /// It returns a `CheapestNode` if successful.
+    ///
+    /// # Arguments
+    /// * `state` - The proxy state containing models, and other shared state
+    /// * `model` - The name/identifier of the AI model being requested
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// Returns a `CheapestNode` containing:
+    /// * `task_small_id` - The small ID of the task
+    /// * `selected_node_id` - The small ID of the selected node
+    /// * `price_per_one_million_compute_units` - The price per one million compute units
+    ///
+    /// # Errors
+    /// Returns an `AtomaProxyError` error in the following cases:
+    /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager
+    /// * `NOT_FOUND` - No available node address found
+    /// * `BAD_REQUEST` - Invalid model name or unsupported model
+    ///
+    /// # Example
+    /// ```no_run
+    /// let node = get_cheapest_node(
+    ///     &state,
+    ///     "gpt-4",
+    ///     "/v1/chat/completions"
+    /// ).await?;
+    /// println!("Cheapest node ID: {}", node.selected_node_id);
+    /// ```
+    #[instrument(level = "info", skip_all, fields(model =%model), err)]
     async fn get_cheapest_node(
         state: &ProxyState,
         model: &str,
@@ -2044,7 +2076,6 @@ pub mod auth {
                 client_message: None,
                 endpoint: endpoint.to_string(),
             })?;
-        // node.map_or_else(, f)
         node.map_or_else(
             || {
                 Err(AtomaProxyError::RequestError {
