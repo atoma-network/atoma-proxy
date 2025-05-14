@@ -72,7 +72,7 @@ const PROMPT: &str = "prompt";
 )]
 pub struct CompletionsOpenApi;
 
-/// Create completion
+/// Create completions
 ///
 /// This function processes completion requests by using the chat completions endpoint.
 ///
@@ -307,7 +307,7 @@ pub fn completions_create_stream(
 )]
 pub struct ConfidentialCompletionsOpenApi;
 
-/// Confidential completions request handler.
+/// Create confidential completions
 ///
 /// This handler processes completions requests in a confidential manner, providing additional
 /// encryption and security measures for sensitive data processing. It supports both streaming and
