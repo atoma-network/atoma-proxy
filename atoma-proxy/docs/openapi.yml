@@ -1602,8 +1602,6 @@ components:
         usage:
           $ref: '#/components/schemas/Usage'
           description: The usage information for the request
-<<<<<<< HEAD
-=======
     CompletionsStreamResponse:
       type: object
       required:
@@ -1645,7 +1643,6 @@ components:
           type: string
           description: The system fingerprint
           example: system-fingerprint
->>>>>>> main
     ConfidentialComputeRequest:
       type: object
       description: A request for confidential computation that includes encrypted data and associated cryptographic parameters
