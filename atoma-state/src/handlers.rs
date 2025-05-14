@@ -14,7 +14,6 @@ use tracing::{error, info, instrument, trace};
 
 use crate::{
     state_manager::Result,
-    timestamp_to_datetime_or_now,
     types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
     AtomaStateManager, AtomaStateManagerError,
 };
@@ -101,27 +100,14 @@ pub async fn handle_atoma_event(
         AtomaEvent::NodeUnsubscribedFromTaskEvent(event) => {
             handle_node_task_unsubscription_event(state_manager, event).await
         }
-        AtomaEvent::StackCreatedEvent((event, timestamp)) => {
-            handle_create_stack_stats(
-                state_manager,
-                event,
-                timestamp_to_datetime_or_now(timestamp),
-            )
-            .await?;
-            Ok(())
-        }
+        AtomaEvent::StackCreatedEvent(_event) => Ok(()),
         AtomaEvent::StackCreateAndUpdateEvent(event) => {
             // NOTE: Don't handle creation here. It's handled when the stack is created right away.
             info!("Stack creates and update event: {:?}", event);
             Ok(())
         }
-        AtomaEvent::StackTrySettleEvent((event, timestamp)) => {
-            handle_stack_try_settle_event(
-                state_manager,
-                event,
-                timestamp_to_datetime_or_now(timestamp),
-            )
-            .await
+        AtomaEvent::StackTrySettleEvent(event) => {
+            handle_stack_try_settle_event(state_manager, event).await
         }
         AtomaEvent::ClaimedStackEvent(event) => {
             handle_claimed_stack_event(state_manager, event).await
@@ -589,40 +575,6 @@ pub async fn handle_stack_created_event(
     Ok(())
 }
 
-/// Handles create stack for stats.
-///
-/// This function processes a stack created event by parsing the event data,
-///
-/// # Arguments
-///
-/// * `state_manager` - A reference to the `AtomaStateManager` for database operations.
-/// * `event` - A `StackCreatedEvent` containing the details of the stack creation event.
-/// * `timestamp` - The timestamp of the event.
-///
-/// # Returns
-///
-/// * `Result<()>` - Ok(()) if the event was processed successfully, or an error if something went wrong.
-///
-/// # Errors
-///
-/// This function will return an error if:
-/// * The event data cannot be deserialized into a `StackCreatedEvent`.
-/// * The database operation to insert the new stack fails.
-///
-#[instrument(level = "trace", skip_all)]
-pub async fn handle_create_stack_stats(
-    state_manager: &AtomaStateManager,
-    event: StackCreatedEvent,
-    timestamp: DateTime<Utc>,
-) -> Result<()> {
-    let stack = event.into();
-    state_manager
-        .state
-        .new_stats_stack(stack, timestamp)
-        .await?;
-    Ok(())
-}
-
 /// Handles a stack try settle event.
 ///
 /// This function processes a stack try settle event by parsing the event data,
@@ -652,7 +604,6 @@ pub async fn handle_create_stack_stats(
 pub async fn handle_stack_try_settle_event(
     state_manager: &AtomaStateManager,
     event: StackTrySettleEvent,
-    timestamp: DateTime<Utc>,
 ) -> Result<()> {
     trace!(
         target = "atoma-state-handlers",
@@ -662,7 +613,7 @@ pub async fn handle_stack_try_settle_event(
     let stack_settlement_ticket = StackSettlementTicket::try_from(event)?;
     state_manager
         .state
-        .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
+        .insert_new_stack_settlement_ticket(stack_settlement_ticket)
         .await?;
     Ok(())
 }
@@ -1212,23 +1163,6 @@ pub async fn handle_state_manager_event(
             result_sender
                 .send(result)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
-        }
-        AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
-            timestamp,
-            model_name,
-            input_tokens,
-            output_tokens,
-            time,
-        } => {
-            state_manager
-                .state
-                .add_compute_units_processed(
-                    timestamp,
-                    model_name,
-                    input_tokens + output_tokens,
-                    time,
-                )
-                .await?;
         }
         AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
             email,

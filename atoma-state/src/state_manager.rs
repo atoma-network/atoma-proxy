@@ -3,16 +3,15 @@ use std::time::Duration;
 use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager_event};
 use crate::network::NetworkMetrics;
 use crate::types::{
-    AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task, TokenResponse, UserProfile,
+    AtomaAtomaStateManagerEvent, CheapestNode, NodeDistribution, NodePublicKey, NodeSubscription,
+    Stack, StackAttestationDispute, StackSettlementTicket, Task, TokenResponse, UserProfile,
 };
 use crate::{build_query_with_in, AtomaStateManagerError};
 
 use atoma_p2p::broadcast_metrics::NodeMetrics;
 use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::AtomaEvent;
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use flume::{Receiver as FlumeReceiver, Sender as FlumeSender};
 use sqlx::PgPool;
 use sqlx::{FromRow, Row};
@@ -1106,48 +1105,6 @@ impl AtomaState {
         stacks
             .into_iter()
             .map(|stack| Stack::from_row(&stack).map_err(AtomaStateManagerError::from))
-            .collect()
-    }
-
-    /// Get stacks created/settled for the last `last_hours` hours.
-    ///
-    /// This method fetches the stacks created/settled for the last `last_hours` hours from the `stats_stacks` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `last_hours` - The number of hours to fetch the stacks stats.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Vec<StatsStackResponse>>`: A result containing either:
-    ///   - `Ok(Vec<StatsStackResponse>)`: The stacks stats for the last `last_hours` hours.
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
-    ///
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_current_stacks(state_manager: &AtomaStateManager) -> Result<Vec<StatsStackResponse>, AtomaStateManagerError> {
-    ///    state_manager.get_stats_stacks(5).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip_all)]
-    pub async fn get_stats_stacks(&self, last_hours: usize) -> Result<Vec<StatsStackResponse>> {
-        let timestamp = Utc::now();
-        let start_timestamp = timestamp
-            .checked_sub_signed(chrono::Duration::hours(last_hours as i64))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        let stats_stacks =
-            sqlx::query("SELECT * FROM stats_stacks WHERE timestamp >= $1 ORDER BY timestamp ASC")
-                .bind(start_timestamp)
-                .fetch_all(&self.db)
-                .await?;
-        stats_stacks
-            .into_iter()
-            .map(|stack| StatsStackResponse::from_row(&stack).map_err(AtomaStateManagerError::from))
             .collect()
     }
 
@@ -2306,9 +2263,7 @@ impl AtomaState {
     pub async fn insert_new_stack_settlement_ticket(
         &self,
         stack_settlement_ticket: StackSettlementTicket,
-        timestamp: DateTime<Utc>,
     ) -> Result<()> {
-        let mut tx = self.db.begin().await?;
         sqlx::query(
             "INSERT INTO stack_settlement_tickets
                 (
@@ -2336,26 +2291,8 @@ impl AtomaState {
         .bind(stack_settlement_ticket.is_in_dispute)
         .bind(stack_settlement_ticket.user_refund_amount)
         .bind(stack_settlement_ticket.is_claimed)
-        .execute(&mut *tx)
+        .execute(&self.db)
         .await?;
-
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        // Also update the stack to set in_settle_period to true
-        sqlx::query(
-            "INSERT into stats_stacks (timestamp,settled_num_compute_units) VALUES ($1,$2)
-             ON CONFLICT (timestamp)
-             DO UPDATE SET
-                settled_num_compute_units = stats_stacks.settled_num_compute_units + EXCLUDED.settled_num_compute_units"
-        )
-        .bind(timestamp)
-        .bind(stack_settlement_ticket.num_claimed_compute_units)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
         Ok(())
     }
 
@@ -3755,56 +3692,6 @@ impl AtomaState {
             .collect()
     }
 
-    /// Get compute units processed for the last `last_hours` hours.
-    ///
-    /// This method fetches the compute units processed for the last `last_hours` hours from the `stats_compute_units_processed` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `last_hours` - The number of hours to fetch the compute units processed for.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Vec<ComputedUnitsProcessedResponse>>`: A result containing either:
-    ///   - `Ok(Vec<ComputedUnitsProcessedResponse>)`: The compute units processed for the last `last_hours` hours.
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_compute_units_processed(state_manager: &AtomaStateManager, last_hours: usize) -> Result<Vec<ComputedUnitsProcessedResponse>, AtomaStateManagerError> {
-    ///    state_manager.get_compute_units_processed(last_hours).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip(self))]
-    pub async fn get_compute_units_processed(
-        &self,
-        last_hours: usize,
-    ) -> Result<Vec<ComputedUnitsProcessedResponse>> {
-        let timestamp = Utc::now();
-        let start_timestamp = timestamp
-            .checked_sub_signed(chrono::Duration::hours(last_hours as i64))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        let performances_per_hour = sqlx::query("SELECT timestamp, model_name, amount, requests, time FROM stats_compute_units_processed WHERE timestamp >= $1 ORDER BY timestamp ASC, model_name ASC")
-                        .bind(start_timestamp)
-                        .fetch_all(&self.db)
-                        .await?;
-        performances_per_hour
-            .into_iter()
-            .map(|performance| {
-                ComputedUnitsProcessedResponse::from_row(&performance)
-                    .map_err(AtomaStateManagerError::from)
-            })
-            .collect()
-    }
-
     /// Get balance for a user.
     ///
     /// This method fetches the balance for a user from the `crypto_balances` table.
@@ -3881,214 +3768,6 @@ impl AtomaState {
             .await?;
 
         UserProfile::from_row(&user).map_err(AtomaStateManagerError::from)
-    }
-
-    /// Get latency performance for the last `last_hours` hours.
-    ///
-    /// This method fetches the latency performance for the last `last_hours` hours from the `stats_latency` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `last_hours` - The number of hours to fetch the latency performance for.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Vec<LatencyResponse>>`: A result containing either:
-    ///   - `Ok(Vec<LatencyResponse>)`: The latency performance for the last `last_hours` hours.
-    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    ///
-    /// async fn get_latency_performance(state_manager: &AtomaStateManager, last_hours: usize) -> Result<Vec<LatencyResponse>, AtomaStateManagerError> {
-    ///   state_manager.get_latency_performance(last_hours).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip(self))]
-    pub async fn get_latency_performance(&self, last_hours: usize) -> Result<Vec<LatencyResponse>> {
-        let timestamp = Utc::now();
-        let start_timestamp = timestamp
-            .checked_sub_signed(chrono::Duration::hours(last_hours as i64))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        let performances_per_hour = sqlx::query(
-            "SELECT timestamp, latency, requests FROM stats_latency WHERE timestamp >= $1 ORDER BY timestamp ASC",
-        )
-        .bind(start_timestamp)
-        .fetch_all(&self.db)
-        .await?;
-        performances_per_hour
-            .into_iter()
-            .map(|performance| {
-                LatencyResponse::from_row(&performance).map_err(AtomaStateManagerError::from)
-            })
-            .collect()
-    }
-
-    /// Add compute units processed to the database.
-    ///
-    /// This method inserts the compute units processed into the `stats_compute_units_processed` table.
-    ///
-    /// # Arguments
-    ///
-    /// * `timestamp` - The timestamp of the data.
-    /// * `compute_units_processed` - The number of compute units processed.
-    /// * `time` - The time taken to process the compute units.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    /// use chrono::{DateTime, Utc};
-    ///
-    /// async fn add_compute_units_processed(state_manager: &AtomaStateManager, timestamp: DateTime<Utc>, compute_units_processed: i64, time: f64) -> Result<(), AtomaStateManagerError> {
-    ///   state_manager.add_compute_units_processed(timestamp, compute_units_processed, time).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip(self))]
-    pub async fn add_compute_units_processed(
-        &self,
-        timestamp: DateTime<Utc>,
-        model_name: String,
-        compute_units_processed: i64,
-        time: f64,
-    ) -> Result<()> {
-        // We want the table to gather data in hourly intervals
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        sqlx::query(
-            "INSERT INTO stats_compute_units_processed (timestamp, model_name, amount, time) VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (timestamp, model_name) DO UPDATE SET
-                    amount = stats_compute_units_processed.amount + EXCLUDED.amount,
-                    time = stats_compute_units_processed.time + EXCLUDED.time,
-                    requests = stats_compute_units_processed.requests + 1",
-        )
-        .bind(timestamp)
-        .bind(model_name)
-        .bind(compute_units_processed)
-        .bind(time)
-        .execute(&self.db)
-        .await?;
-        Ok(())
-    }
-
-    /// Add latency to the database.
-    ///
-    /// This method inserts the latency into the `stats_latency` table. This measure the time from the request to first generated token.
-    ///
-    /// # Arguments
-    ///
-    /// * `timestamp` - The timestamp of the data.
-    /// * `latency` - The latency of the data.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::AtomaStateManager;
-    /// use chrono::{DateTime, Utc};
-    ///
-    /// async fn add_latency(state_manager: &AtomaStateManager, timestamp: DateTime<Utc>, latency: f64) -> Result<(), AtomaStateManagerError> {
-    ///    state_manager.add_latency(timestamp, latency).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip(self))]
-    pub async fn add_latency(&self, timestamp: DateTime<Utc>, latency: f64) -> Result<()> {
-        // We want the table to gather data in hourly intervals
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        sqlx::query(
-            "INSERT INTO stats_latency (timestamp, latency) VALUES ($1, $2)
-                 ON CONFLICT (timestamp) DO UPDATE SET
-                    latency = stats_latency.latency + EXCLUDED.latency,
-                    requests = stats_latency.requests + 1",
-        )
-        .bind(timestamp)
-        .bind(latency)
-        .execute(&self.db)
-        .await?;
-        Ok(())
-    }
-
-    /// Records statistics about a new stack in the database.
-    ///
-    /// This method inserts or updates hourly statistics about stack compute units in the `stats_stacks` table.
-    /// The timestamp is rounded down to the nearest hour, and if an entry already exists for that hour,
-    /// the compute units are added to the existing total.
-    ///
-    /// # Arguments
-    ///
-    /// * `stack` - The `Stack` object containing information about the new stack.
-    /// * `timestamp` - The timestamp when the stack was created.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The database query fails to execute.
-    /// - The timestamp cannot be normalized to an hour boundary.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use atoma_node::atoma_state::{AtomaStateManager, Stack};
-    /// use chrono::{DateTime, Utc};
-    ///
-    /// async fn record_stack_stats(state_manager: &AtomaStateManager, stack: Stack) -> Result<(), AtomaStateManagerError> {
-    ///     let timestamp = Utc::now();
-    ///     state_manager.new_stats_stack(stack, timestamp).await
-    /// }
-    /// ```
-    #[instrument(level = "trace", skip(self))]
-    pub async fn new_stats_stack(&self, stack: Stack, timestamp: DateTime<Utc>) -> Result<()> {
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
-        sqlx::query(
-            "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
-                 ON CONFLICT (timestamp)
-                 DO UPDATE SET
-                    num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",
-        )
-        .bind(timestamp)
-        .bind(stack.num_compute_units)
-        .execute(&self.db)
-        .await?;
-        Ok(())
     }
 
     /// Updates the sui address for the user.
