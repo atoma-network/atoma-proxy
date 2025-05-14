@@ -13,7 +13,7 @@ paths:
     post:
       tags:
       - Completions
-      summary: Create completion
+      summary: Create completions
       description: |-
         This function processes completion requests by using the chat completions endpoint.
 
@@ -81,7 +81,7 @@ paths:
     post:
       tags:
       - Confidential Completions
-      summary: Confidential completions request handler.
+      summary: Create confidential completions
       description: |-
         This handler processes completions requests in a confidential manner, providing additional
         encryption and security measures for sensitive data processing. It supports both streaming and
@@ -163,7 +163,7 @@ paths:
     post:
       tags:
       - Chat
-      summary: Create chat completion
+      summary: Create chat completions
       description: |-
         This function processes chat completion requests by determining whether to use streaming
         or non-streaming response handling based on the request payload. For streaming requests,
@@ -234,7 +234,7 @@ paths:
     post:
       tags:
       - Confidential Chat
-      summary: Create confidential chat completion
+      summary: Create confidential chat completions
       description: |-
         This handler processes chat completion requests in a confidential manner, providing additional
         encryption and security measures for sensitive data processing. It supports both streaming and
