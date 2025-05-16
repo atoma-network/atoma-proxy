@@ -135,14 +135,16 @@ pub fn update_state_manager(
 pub fn update_state_manager_fiat(
     state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
     user_id: i64,
-    estimated_amount: i64,
-    amount: i64,
+    estimated_input_tokens: i64,
+    input_tokens: i64,
+    estimated_output_tokens: i64,
+    output_tokens: i64,
     price_per_one_million_compute_units: i64,
     model_name: String,
     endpoint: &str,
 ) -> Result<()> {
-    let estimated_amount = i64::try_from(
-        estimated_amount as u128 * price_per_one_million_compute_units as u128
+    let estimated_input_amount = i64::try_from(
+        estimated_input_tokens as u128 * price_per_one_million_compute_units as u128
             / u128::from(ONE_MILLION),
     )
     .map_err(|e| AtomaProxyError::InternalError {
@@ -150,8 +152,27 @@ pub fn update_state_manager_fiat(
         client_message: None,
         endpoint: endpoint.to_string(),
     })?;
-    let amount = i64::try_from(
-        amount as u128 * price_per_one_million_compute_units as u128 / u128::from(ONE_MILLION),
+    let estimated_output_amount = i64::try_from(
+        estimated_output_tokens as u128 * price_per_one_million_compute_units as u128
+            / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting estimated amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
+    let input_amount = i64::try_from(
+        input_tokens as u128 * price_per_one_million_compute_units as u128
+            / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
+    let output_amount = i64::try_from(
+        output_tokens as u128 * price_per_one_million_compute_units as u128
+            / u128::from(ONE_MILLION),
     )
     .map_err(|e| AtomaProxyError::InternalError {
         message: format!("Error converting amount: {e}"),
@@ -162,8 +183,10 @@ pub fn update_state_manager_fiat(
     state_manager_sender
         .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
-            estimated_amount,
-            amount,
+            estimated_input_amount,
+            input_amount,
+            estimated_output_amount,
+            output_amount,
             model_name,
         })
         .map_err(|e| AtomaProxyError::InternalError {

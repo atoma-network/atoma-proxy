@@ -1431,12 +1431,13 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::LockUserFiatBalance {
             user_id,
-            amount,
+            input_amount,
+            output_amount,
             result_sender,
         } => {
             let result = state_manager
                 .state
-                .lock_user_fiat_balance(user_id, amount)
+                .lock_user_fiat_balance(user_id, input_amount, output_amount)
                 .await;
             result_sender
                 .send(result)
@@ -1445,17 +1446,25 @@ pub async fn handle_state_manager_event(
         AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
             model_name,
-            estimated_amount,
-            amount,
+            estimated_input_amount,
+            input_amount,
+            estimated_output_amount,
+            output_amount,
         } => {
             state_manager
                 .state
-                .update_real_amount_fiat_balance(user_id, estimated_amount, amount)
+                .update_real_amount_fiat_balance(
+                    user_id,
+                    estimated_input_amount,
+                    input_amount,
+                    estimated_output_amount,
+                    output_amount,
+                )
                 .await?;
-            if amount > 0 {
+            if output_amount > 0 {
                 state_manager
                     .state
-                    .update_usage_per_model(user_id, model_name, amount)
+                    .update_usage_per_model(user_id, model_name, input_amount, output_amount)
                     .await?;
             }
         }
