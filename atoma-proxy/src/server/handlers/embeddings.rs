@@ -21,7 +21,7 @@ use crate::server::{
     http_server::ProxyState,
     middleware::RequestMetadataExtension,
     types::{ConfidentialComputeRequest, ConfidentialComputeResponse},
-    MODEL, ONE_MILLION,
+    MODEL,
 };
 
 use super::{
@@ -192,7 +192,8 @@ pub async fn embeddings_create(
         .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                TOTAL_COMPLETED_REQUESTS
+                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
                 SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                     .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
                 match metadata.selected_stack_small_id {
@@ -209,8 +210,10 @@ pub async fn embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            num_input_compute_units as i64,
+                            num_input_compute_units as i64,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }
@@ -237,8 +240,10 @@ pub async fn embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            num_input_compute_units as i64,
                             0,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }
@@ -347,9 +352,10 @@ pub async fn confidential_embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
-                            total_tokens * metadata.price_per_million.unwrap_or_default()
-                                / ONE_MILLION as i64,
+                            num_input_compute_units as i64,
+                            total_tokens,
+                            metadata.price_per_million,
+                            metadata.model_name.clone(),
                             &metadata.endpoint,
                         )?;
                     }
@@ -380,8 +386,10 @@ pub async fn confidential_embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            num_input_compute_units as i64,
                             0,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }

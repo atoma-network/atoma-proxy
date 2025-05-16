@@ -14,7 +14,7 @@ use reqwest::StatusCode;
 use sui_sdk::types::crypto::{PublicKey, Signature, SignatureScheme, SuiSignature};
 use tracing::instrument;
 
-use super::error::AtomaProxyError;
+use super::{error::AtomaProxyError, ONE_MILLION};
 use crate::server::Result;
 
 pub mod chat_completions;
@@ -137,14 +137,34 @@ pub fn update_state_manager_fiat(
     user_id: i64,
     estimated_amount: i64,
     amount: i64,
+    price_per_one_million_compute_units: i64,
+    model_name: String,
     endpoint: &str,
 ) -> Result<()> {
+    let estimated_amount = i64::try_from(
+        estimated_amount as u128 * price_per_one_million_compute_units as u128
+            / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting estimated amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
+    let amount = i64::try_from(
+        amount as u128 * price_per_one_million_compute_units as u128 / u128::from(ONE_MILLION),
+    )
+    .map_err(|e| AtomaProxyError::InternalError {
+        message: format!("Error converting amount: {e}"),
+        client_message: None,
+        endpoint: endpoint.to_string(),
+    })?;
     // Update stack num tokens
     state_manager_sender
         .send(AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
             estimated_amount,
             amount,
+            model_name,
         })
         .map_err(|e| AtomaProxyError::InternalError {
             message: format!("Error updating fiat balance: {e}"),

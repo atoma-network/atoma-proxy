@@ -81,11 +81,8 @@ pub struct RequestMetadataExtension {
     /// Selected stack small id for this request.
     pub selected_stack_small_id: Option<i64>,
 
-    /// Estimated amount for fiat currency.
-    pub fiat_estimated_amount: Option<i64>,
-
     /// Price per million tokens for this request.
-    pub price_per_million: Option<i64>,
+    pub price_per_million: i64,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -323,6 +320,9 @@ pub async fn authenticate_middleware(
             max_total_compute_units,
             model,
             user_id,
+            selected_node_id,
+            price_per_million,
+            is_fiat_request,
         } = auth::handle_authenticate_and_lock_compute_units(
             &state,
             &req_parts.headers,
@@ -341,17 +341,25 @@ pub async fn authenticate_middleware(
             stack_small_id,
             selected_node_id,
             tx_digest,
-            fiat_locked_amount,
             price_per_million,
-        } = auth::get_selected_node(GetSelectedNodeArgs {
-            model: &model,
-            state: &state,
-            optional_stack,
-            total_tokens: max_total_compute_units,
-            user_id,
-            endpoint: &endpoint,
-        })
-        .await?;
+        } = if is_fiat_request {
+            SelectedNodeMetadata {
+                stack_small_id: None,
+                selected_node_id,
+                tx_digest: None,
+                price_per_million,
+            }
+        } else {
+            auth::get_selected_node(GetSelectedNodeArgs {
+                model: &model,
+                state: &state,
+                optional_stack,
+                total_tokens: max_total_compute_units,
+                user_id,
+                endpoint: &endpoint,
+            })
+            .await?
+        };
 
         if let Some(stack_small_id) = &stack_small_id {
             STACK_NUM_REQUESTS_COUNTER.add(1, &[KeyValue::new("stack_small_id", *stack_small_id)]);
@@ -371,6 +379,7 @@ pub async fn authenticate_middleware(
                     stack_small_id,
                     num_input_compute_units,
                     max_total_compute_units,
+                    price_per_million,
                     tx_digest,
                     user_id,
                     &endpoint,
@@ -396,8 +405,7 @@ pub async fn authenticate_middleware(
                     &body_json,
                     &mut req_parts,
                     selected_node_id,
-                    fiat_locked_amount.unwrap(),
-                    price_per_million.unwrap(),
+                    price_per_million,
                     num_input_compute_units,
                     max_total_compute_units,
                     user_id,
@@ -410,8 +418,10 @@ pub async fn authenticate_middleware(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             user_id,
-                            fiat_locked_amount.unwrap(),
+                            max_total_compute_units as i64,
                             0,
+                            price_per_million,
+                            model,
                             &endpoint,
                         )?;
                         return Err(e);
@@ -795,8 +805,7 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
-                    fiat_locked_amount: None,
-                    price_per_million: None,
+                    price_per_million: stack.price_per_million,
                 },
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
@@ -847,6 +856,7 @@ pub async fn handle_locked_stack_middleware(
                 })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_total_num_compute_units,
+                selected_node_metadata.price_per_million,
                 selected_node_metadata.tx_digest,
                 user_id,
                 &endpoint,
@@ -883,6 +893,7 @@ pub mod auth {
 
     use atoma_auth::StackEntryResponse;
     use atoma_auth::Sui;
+    use atoma_state::types::CheapestNode;
     use atoma_state::types::Stack;
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
@@ -936,6 +947,12 @@ pub mod auth {
         pub model: String,
         /// The user ID that made the request.
         pub user_id: i64,
+        /// Node ID that was selected for fiat request.
+        pub selected_node_id: i64,
+        /// Price per million tokens for fiat request.
+        pub price_per_million: i64,
+        /// Is fiat request.
+        pub is_fiat_request: bool,
     }
 
     /// Handles authentication and compute unit locking for incoming API requests.
@@ -1161,6 +1178,51 @@ pub mod auth {
             request_model.get_compute_units_estimate(Some(&tokenizer))?
         };
 
+        let node = get_cheapest_node(state, &model, endpoint).await?;
+        // We don't have a stack for the user, lets check if the user is using fiat currency.
+        let (result_sender, result_receiver) = oneshot::channel();
+        let fiat_locked_amount = max_total_compute_units as i64
+            * node.price_per_one_million_compute_units
+            / ONE_MILLION as i64;
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
+                user_id,
+                amount: fiat_locked_amount,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send LockUserFiatBalance event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        let locked_fiat = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive LockUserFiatBalance result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get LockUserFiatBalance result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        if locked_fiat {
+            return Ok(StackMetadata {
+                optional_stack: None,
+                num_input_compute_units,
+                max_total_compute_units,
+                model,
+                user_id,
+                selected_node_id: node.node_small_id,
+                price_per_million: node.price_per_one_million_compute_units,
+                is_fiat_request: true,
+            });
+        }
+
         let (result_sender, result_receiver) = oneshot::channel();
 
         state
@@ -1197,6 +1259,9 @@ pub mod auth {
             max_total_compute_units,
             model,
             user_id,
+            selected_node_id: node.node_small_id,
+            price_per_million: node.price_per_one_million_compute_units,
+            is_fiat_request: false,
         })
     }
 
@@ -1262,8 +1327,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             }))
         } else {
             Ok(None)
@@ -1373,10 +1437,8 @@ pub mod auth {
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
-        /// The amount locked for fiat request
-        pub fiat_locked_amount: Option<i64>,
         /// The price per million compute units (this is used for the fiat request)
-        pub price_per_million: Option<i64>,
+        pub price_per_million: i64,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1620,8 +1682,7 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
-            fiat_locked_amount: None,
-            price_per_million: None,
+            price_per_million: price_per_million_compute_units as i64,
         })
     }
 
@@ -1937,8 +1998,7 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                fiat_locked_amount: None,
-                price_per_million: None,
+                price_per_million: stack.price_per_one_million_compute_units,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -1954,6 +2014,78 @@ pub mod auth {
         get_cheapest_node_and_acquire_new_stack(state, user_id, model, endpoint, total_tokens).await
     }
 
+    /// Gets the cheapest node for a model.
+    ///
+    /// This function sends a request to the state manager to retrieve the cheapest node for the given model.
+    /// It returns a `CheapestNode` if successful.
+    ///
+    /// # Arguments
+    /// * `state` - The proxy state containing models, and other shared state
+    /// * `model` - The name/identifier of the AI model being requested
+    /// * `endpoint` - The API endpoint being accessed
+    ///
+    /// # Returns
+    /// Returns a `CheapestNode` containing:
+    /// * `task_small_id` - The small ID of the task
+    /// * `selected_node_id` - The small ID of the selected node
+    /// * `price_per_one_million_compute_units` - The price per one million compute units
+    ///
+    /// # Errors
+    /// Returns an `AtomaProxyError` error in the following cases:
+    /// * `INTERNAL_SERVER_ERROR` - Communication errors with state manager
+    /// * `NOT_FOUND` - No available node address found
+    /// * `BAD_REQUEST` - Invalid model name or unsupported model
+    ///
+    /// # Example
+    /// ```no_run
+    /// let node = get_cheapest_node(
+    ///     &state,
+    ///     "gpt-4",
+    ///     "/v1/chat/completions"
+    /// ).await?;
+    /// println!("Cheapest node ID: {}", node.selected_node_id);
+    /// ```
+    #[instrument(level = "info", skip_all, fields(model =%model), err)]
+    async fn get_cheapest_node(
+        state: &ProxyState,
+        model: &str,
+        endpoint: &str,
+    ) -> Result<CheapestNode> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        state
+            .state_manager_sender
+            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                model: model.to_string(),
+                is_confidential: false,
+                result_sender,
+            })
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send GetTasksForModel event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        let node = result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to get retrieve `CheapestNode` from the state manager with result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+        node.map_or_else(
+            || {
+                Err(AtomaProxyError::RequestError {
+                    message: format!("No node found for model {model}"),
+                    endpoint: endpoint.to_string(),
+                })
+            },
+            Ok,
+        )
+    }
     /// Gets the cheapest node for a model and acquires a new stack for the request.
     ///
     /// This function follows a two-step process:
@@ -1999,40 +2131,7 @@ pub mod auth {
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<SelectedNodeMetadata> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                model: model.to_string(),
-                is_confidential: false,
-                result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetTasksForModel event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let node = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get retrieve `CheapestNode` from the state manager with result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let node: atoma_state::types::CheapestNode = match node {
-            Some(node) => node,
-            None => {
-                return Err(AtomaProxyError::RequestError {
-                    message: format!("No node found for model {model}"),
-                    endpoint: endpoint.to_string(),
-                });
-            }
-        };
+        let node = get_cheapest_node(state, model, endpoint).await?;
         tracing::info!(
             "Attempting to acquire lock guard to buy a new stack for user {} with model {} and max compute units {}",
             user_id,
@@ -2049,57 +2148,17 @@ pub mod auth {
                 .await;
         };
 
-        // We don't have a stack for the user, lets check if the user is using fiat currency.
-        let (result_sender, result_receiver) = oneshot::channel();
-        let fiat_locked_amount =
-            total_tokens as i64 * node.price_per_one_million_compute_units / ONE_MILLION as i64;
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
-                user_id,
-                amount: fiat_locked_amount,
-                result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send LockUserFiatBalance event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-
-        let locked_fiat = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive LockUserFiatBalance result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get LockUserFiatBalance result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-
-        if locked_fiat {
-            Ok(SelectedNodeMetadata {
-                stack_small_id: None,
-                selected_node_id: node.node_small_id,
-                tx_digest: None,
-                fiat_locked_amount: Some(fiat_locked_amount),
-                price_per_million: Some(node.price_per_one_million_compute_units),
-            })
-        } else {
-            // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
-            acquire_new_stack(
-                state.state_manager_sender.clone(),
-                user_id,
-                lock_guard,
-                endpoint.to_string(),
-                total_tokens,
-                Arc::clone(&state.sui),
-                node,
-            )
-            .await
-        }
+        // NOTE: At this point, we have an acquired stack lock, so we can safely acquire a new stack.
+        acquire_new_stack(
+            state.state_manager_sender.clone(),
+            user_id,
+            lock_guard,
+            endpoint.to_string(),
+            total_tokens,
+            Arc::clone(&state.sui),
+            node,
+        )
+        .await
         // NOTE: The `acquire_new_stack` method will emit a stack creation event, and it will stored it
         // in the AtomaStateManager's internal state, therefore any new request querying the state manager after this
         // lock guard release will see the new stack.
@@ -2170,8 +2229,7 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
-            fiat_locked_amount: None,
-            price_per_million: None,
+            price_per_million: stack.price_per_one_million_compute_units,
         }))
     }
 }
@@ -2277,6 +2335,7 @@ pub mod utils {
         selected_stack_small_id: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
+        price_per_million: i64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
         endpoint: &str,
@@ -2341,8 +2400,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
-            fiat_estimated_amount: None,
-            price_per_million: None,
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
@@ -2414,7 +2472,6 @@ pub mod utils {
     /// * Model name
     #[instrument(level = "info", skip_all, fields(
         %endpoint,
-        %fiat_estimated_amount,
         %user_id
     ), err)]
     #[allow(clippy::too_many_arguments)]
@@ -2423,7 +2480,6 @@ pub mod utils {
         body_json: &Value,
         req_parts: &mut Parts,
         selected_node_id: i64,
-        fiat_estimated_amount: i64,
         price_per_million: i64,
         num_input_tokens: u64,
         total_compute_units: u64,
@@ -2468,8 +2524,7 @@ pub mod utils {
             max_total_num_compute_units: total_compute_units,
             user_id,
             selected_stack_small_id: None,
-            fiat_estimated_amount: Some(fiat_estimated_amount),
-            price_per_million: Some(price_per_million),
+            price_per_million,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
