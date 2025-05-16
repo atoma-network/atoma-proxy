@@ -385,7 +385,7 @@ pub async fn confidential_embeddings_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            num_input_tokens as i64,
+                            num_input_tokens,
                             0,
                             &metadata.endpoint,
                         )?;
@@ -394,7 +394,7 @@ pub async fn confidential_embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            num_input_tokens as i64,
+                            num_input_tokens,
                             0,
                             0,
                             0,

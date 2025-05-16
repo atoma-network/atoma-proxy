@@ -132,6 +132,7 @@ pub fn update_state_manager(
     skip_all,
     fields(user_id, estimated_amount, amount, endpoint)
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn update_state_manager_fiat(
     state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
     user_id: i64,

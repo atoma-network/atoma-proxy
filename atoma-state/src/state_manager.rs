@@ -4537,7 +4537,8 @@ impl AtomaState {
             "INSERT INTO usage_per_model (user_id, model, total_input_tokens, total_output_tokens)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (user_id, model) DO UPDATE SET
-                    total_number_processed_tokens = usage_per_model.total_number_processed_tokens + EXCLUDED.total_number_processed_tokens",
+                    total_input_tokens = usage_per_model.total_input_tokens + EXCLUDED.total_input_tokens,
+                    total_output_tokens = usage_per_model.total_output_tokens + EXCLUDED.total_output_tokens",
         )
         .bind(user_id)
         .bind(model_name)

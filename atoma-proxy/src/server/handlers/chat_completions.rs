@@ -681,45 +681,36 @@ async fn handle_non_streaming_response(
 
     // NOTE: We need to update the stack num tokens, because the inference response might have produced
     // less tokens than estimated what we initially estimated, from the middleware.
-    match selected_stack_small_id {
-        Some(stack_small_id) => {
-            if let Err(e) = update_state_manager(
-                &state.state_manager_sender,
-                stack_small_id,
-                num_input_tokens + estimated_output_tokens,
-                total_tokens,
-                &endpoint,
-            ) {
-                return Err(AtomaProxyError::InternalError {
-                    message: format!("Error updating state manager: {e:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                });
-            }
+    if let Some(stack_small_id) = selected_stack_small_id {
+        if let Err(e) = update_state_manager(
+            &state.state_manager_sender,
+            stack_small_id,
+            num_input_tokens + estimated_output_tokens,
+            total_tokens,
+            &endpoint,
+        ) {
+            return Err(AtomaProxyError::InternalError {
+                message: format!("Error updating state manager: {e:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            });
         }
-        None => {
-            dbg!(num_input_tokens);
-            dbg!(input_tokens);
-            dbg!(estimated_output_tokens);
-            dbg!(output_tokens);
-            if let Err(e) = update_state_manager_fiat(
-                &state.state_manager_sender,
-                user_id,
-                num_input_tokens,
-                input_tokens,
-                estimated_output_tokens,
-                output_tokens,
-                price_per_million,
-                model_name,
-                &endpoint,
-            ) {
-                return Err(AtomaProxyError::InternalError {
-                    message: format!("Error updating fiat state manager: {e:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                });
-            }
-        }
+    } else if let Err(e) = update_state_manager_fiat(
+        &state.state_manager_sender,
+        user_id,
+        num_input_tokens,
+        input_tokens,
+        estimated_output_tokens,
+        output_tokens,
+        price_per_million,
+        model_name,
+        &endpoint,
+    ) {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Error updating fiat state manager: {e:?}"),
+            client_message: None,
+            endpoint: endpoint.to_string(),
+        });
     }
 
     CHAT_COMPLETIONS_LATENCY_METRICS.record(
