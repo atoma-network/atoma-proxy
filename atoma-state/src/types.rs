@@ -721,19 +721,6 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Returns Ok(()) if the stack is valid or an error if it is not
         result_sender: oneshot::Sender<Result<()>>,
     },
-    /// Records statistics about a node's throughput performance
-    UpdateNodeThroughputPerformance {
-        /// Timestamp of the transaction that created the stack
-        timestamp: DateTime<Utc>,
-        /// The name/identifier of the model
-        model_name: String,
-        /// Number of input tokens
-        input_tokens: i64,
-        /// Number of output tokens
-        output_tokens: i64,
-        /// Time taken to process the tokens
-        time: f64,
-    },
     /// Registers a new user with a password
     RegisterUserWithPassword {
         /// The email of the user
