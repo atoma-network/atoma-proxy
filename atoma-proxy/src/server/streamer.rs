@@ -57,8 +57,10 @@ pub struct Streamer {
     stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     /// Current status of the stream
     status: StreamStatus,
-    /// Estimated total tokens for the stream
-    estimated_total_tokens: i64,
+    /// Estimated input tokens for the stream
+    estimated_input_tokens: i64,
+    /// Estimated output tokens for the stream
+    estimated_output_tokens: i64,
     /// Price per million tokens for this request.
     price_per_million: i64,
     /// Stack small id
@@ -114,8 +116,8 @@ impl Streamer {
         stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
         state_manager_sender: Sender<AtomaAtomaStateManagerEvent>,
         stack_small_id: Option<i64>,
-        num_input_tokens: i64,
-        estimated_total_tokens: i64,
+        estimated_input_tokens: i64,
+        estimated_output_tokens: i64,
         price_per_million: i64,
         start: Instant,
         user_id: i64,
@@ -125,7 +127,8 @@ impl Streamer {
         Self {
             stream: Box::pin(stream),
             status: StreamStatus::NotStarted,
-            estimated_total_tokens,
+            estimated_input_tokens,
+            estimated_output_tokens,
             stack_small_id,
             state_manager_sender,
             start,
@@ -137,7 +140,7 @@ impl Streamer {
             first_token_generation_timer: Some(start),
             inter_stream_token_latency_timer: None,
             is_final_chunk_handled: false,
-            num_generated_tokens: num_input_tokens,
+            num_generated_tokens: 0,
             price_per_million,
         }
     }
@@ -177,7 +180,7 @@ impl Streamer {
         skip(self, usage),
         fields(
             endpoint = "handle_final_chunk",
-            estimated_total_tokens = self.estimated_total_tokens,
+            estimated_total_tokens = self.estimated_input_tokens + self.estimated_output_tokens,
         )
     )]
     fn handle_final_chunk(
@@ -247,7 +250,7 @@ impl Streamer {
                 if let Err(e) = update_state_manager(
                     &self.state_manager_sender,
                     stack_small_id,
-                    self.estimated_total_tokens,
+                    self.estimated_input_tokens + self.estimated_output_tokens,
                     total_tokens,
                     &self.endpoint,
                 ) {
@@ -266,8 +269,10 @@ impl Streamer {
                 if let Err(e) = update_state_manager_fiat(
                     &self.state_manager_sender,
                     self.user_id,
-                    self.estimated_total_tokens,
-                    total_tokens,
+                    self.estimated_input_tokens,
+                    input_tokens,
+                    self.estimated_output_tokens,
+                    output_tokens,
                     self.price_per_million,
                     self.model_name.clone(),
                     &self.endpoint,
@@ -571,7 +576,7 @@ impl Drop for Streamer {
         fields(
             streamer = "drop-streamer",
             num_generated_tokens = self.num_generated_tokens,
-            estimated_total_tokens = self.estimated_total_tokens,
+            estimated_total_tokens = self.estimated_input_tokens + self.estimated_output_tokens,
             stack_small_id = self.stack_small_id,
             endpoint = self.endpoint,
         )
@@ -599,8 +604,8 @@ impl Drop for Streamer {
                 if let Err(e) = update_state_manager(
                     &self.state_manager_sender,
                     stack_small_id,
-                    self.estimated_total_tokens,
-                    self.num_generated_tokens,
+                    self.estimated_input_tokens + self.estimated_output_tokens,
+                    self.estimated_input_tokens + self.num_generated_tokens,
                     &self.endpoint,
                 ) {
                     error!(
@@ -615,7 +620,9 @@ impl Drop for Streamer {
                 if let Err(e) = update_state_manager_fiat(
                     &self.state_manager_sender,
                     self.user_id,
-                    self.estimated_total_tokens,
+                    self.estimated_input_tokens,
+                    self.estimated_input_tokens,
+                    self.estimated_output_tokens,
                     self.num_generated_tokens,
                     self.price_per_million,
                     self.model_name.clone(),

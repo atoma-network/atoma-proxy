@@ -7,9 +7,9 @@ use crate::server::Result;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComputeUnitsEstimate {
     /// The number of compute units needed for the input tokens.
-    pub num_input_compute_units: u64,
-    /// The maximum number of compute units that can be used for the request.
-    pub max_total_compute_units: u64,
+    pub num_input_tokens: u64,
+    /// The number of compute units needed for the output tokens.
+    pub max_output_tokens: u64,
 }
 
 /// A trait for parsing and handling AI model requests across different endpoints (chat, embeddings, images).

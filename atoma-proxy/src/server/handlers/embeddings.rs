@@ -125,8 +125,8 @@ impl RequestModel for RequestModelEmbeddings {
             .get_ids()
             .len() as u64;
         Ok(ComputeUnitsEstimate {
-            num_input_compute_units: num_tokens,
-            max_total_compute_units: num_tokens,
+            num_input_tokens: num_tokens,
+            max_output_tokens: 0,
         })
     }
 }
@@ -173,11 +173,12 @@ pub async fn embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            max_total_num_compute_units: num_input_compute_units,
+            num_input_tokens,
             ..
         } = metadata;
+        let num_input_tokens = num_input_tokens.unwrap_or_default() as i64;
         EMBEDDING_TOTAL_TOKENS_PER_USER.add(
-            num_input_compute_units,
+            num_input_tokens as u64,
             &[KeyValue::new("user_id", metadata.user_id)],
         );
         match handle_embeddings_response(
@@ -185,7 +186,7 @@ pub async fn embeddings_create(
             node_address,
             headers,
             payload,
-            num_input_compute_units as i64,
+            num_input_tokens,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
         )
@@ -201,8 +202,8 @@ pub async fn embeddings_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            num_input_compute_units as i64,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
+                            num_input_tokens,
                             &metadata.endpoint,
                         )?;
                     }
@@ -210,8 +211,10 @@ pub async fn embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            num_input_compute_units as i64,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
+                            num_input_tokens,
+                            0,
+                            0,
                             metadata.price_per_million,
                             metadata.model_name,
                             &metadata.endpoint,
@@ -231,7 +234,7 @@ pub async fn embeddings_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
                             0,
                             &metadata.endpoint,
                         )?;
@@ -240,7 +243,9 @@ pub async fn embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
+                            0,
+                            0,
                             0,
                             metadata.price_per_million,
                             metadata.model_name,
@@ -311,11 +316,12 @@ pub async fn confidential_embeddings_create(
         // TODO: We should allow cancelling the request if the client disconnects
         let RequestMetadataExtension {
             node_address,
-            max_total_num_compute_units: num_input_compute_units,
+            num_input_tokens,
             ..
         } = metadata;
+        let num_input_tokens = num_input_tokens.unwrap_or_default() as i64;
         EMBEDDING_TOTAL_TOKENS_PER_USER.add(
-            num_input_compute_units,
+            num_input_tokens as u64,
             &[KeyValue::new("user_id", metadata.user_id)],
         );
         match handle_embeddings_response(
@@ -323,7 +329,7 @@ pub async fn confidential_embeddings_create(
             node_address,
             headers,
             payload,
-            num_input_compute_units as i64,
+            num_input_tokens,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
         )
@@ -343,7 +349,7 @@ pub async fn confidential_embeddings_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
                             total_tokens,
                             &metadata.endpoint,
                         )?;
@@ -352,8 +358,10 @@ pub async fn confidential_embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
                             total_tokens,
+                            0,
+                            0,
                             metadata.price_per_million,
                             metadata.model_name.clone(),
                             &metadata.endpoint,
@@ -377,7 +385,7 @@ pub async fn confidential_embeddings_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
                             0,
                             &metadata.endpoint,
                         )?;
@@ -386,7 +394,9 @@ pub async fn confidential_embeddings_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            num_input_compute_units as i64,
+                            num_input_tokens,
+                            0,
+                            0,
                             0,
                             metadata.price_per_million,
                             metadata.model_name,
