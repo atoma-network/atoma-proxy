@@ -1,3 +1,4 @@
+# helm/atoma-proxy/templates/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,9 +8,13 @@ metadata:
     app.kubernetes.io/name: {{ .Release.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 data:
-  config.toml: {{ .Files.Get "../../config.toml" | nindent 4 }}
-  prometheus.yml: {{ .Files.Get "../../prometheus.yml" | nindent 4 }}
-  loki.yaml: {{ .Files.Get "../../loki.yaml" | nindent 4 }}
-  tempo.yaml: {{ .Files.Get "../../tempo.yaml" | nindent 4 }}
+  config.toml: |-
+{{ .Files.Get "files/config.toml" | indent 4 }}
+  prometheus.yml: |-
+{{ .Files.Get "files/prometheus.yml" | indent 4 }}
+  loki.yaml: |-
+{{ .Files.Get "files/loki.yaml" | indent 4 }}
+  tempo.yaml: |-
+{{ .Files.Get "files/tempo.yaml" | indent 4 }}
   environment: {{ .Values.atomaProxy.config.environment | quote }}
   log_level: {{ .Values.atomaProxy.config.logLevel | quote }}

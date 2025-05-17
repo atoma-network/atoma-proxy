@@ -68,8 +68,7 @@ This Helm chart deploys the Atoma Proxy application along with its dependencies,
 
 ### Quick Installation
 
-Alternatively, you can use the deployment script:
-```bash
+Alternatively, you can use the deployment script:```bash
 ./scripts/deploy.sh -e dev -p your-password
 ```
 
@@ -189,11 +188,27 @@ Access the monitoring tools at:
 
 ## Security Considerations
 
-1. **Passwords**: Always set secure passwords for production using:
+1. **Secret Management**: Always use Helm for managing secrets instead of direct kubectl commands. This ensures consistent deployment and better security practices:
+
    ```bash
-   --set postgresql.auth.password=your-secure-password \
-   --set grafana.admin.password=your-secure-password
+   # Update secrets using Helm
+   helm upgrade atoma-proxy-dev . \
+     -n atoma-proxy-dev \
+     -f values-dev.yaml \
+     --set postgresql.auth.password=your-secure-password \
+     --set grafana.admin.password=your-secure-password \
+     --set openRouter.apiKey=your-api-key
+
+   # For production environments
+   helm upgrade atoma-proxy-prod . \
+     -n atoma-proxy-prod \
+     -f values-prod.yaml \
+     --set postgresql.auth.password=your-secure-password \
+     --set grafana.admin.password=your-secure-password \
+     --set openRouter.apiKey=your-api-key
    ```
+
+   > **Important**: Never store sensitive values in values files. Always use `--set` or `--set-file` flags with Helm commands to manage secrets.
 
 2. **SSL Certificates**: The chart uses cert-manager for SSL certificate management:
    - Development: `letsencrypt-staging`
@@ -224,19 +239,44 @@ Access the monitoring tools at:
 
 ## Maintenance
 
-1. **Updating the Chart**:
+1. **Updating the Chart and Secrets**:
    ```bash
-   helm repo update
-   helm upgrade atoma-proxy-{env} . -f values-{env}.yaml
+   # Update chart and secrets for development
+   helm upgrade atoma-proxy-dev . \
+     -n atoma-proxy-dev \
+     -f values-dev.yaml \
+     --set postgresql.auth.password=your-secure-password \
+     --set grafana.admin.password=your-secure-password
+
+   # Update chart and secrets for production
+   helm upgrade atoma-proxy-prod . \
+     -n atoma-proxy-prod \
+     -f values-prod.yaml \
+     --set postgresql.auth.password=your-secure-password \
+     --set grafana.admin.password=your-secure-password
    ```
 
 2. **Backup**:
    - PostgreSQL data is stored in persistent volumes
    - Regular backups should be configured for production
+   - Use Helm to manage backup configurations:
+     ```bash
+     helm upgrade atoma-proxy-prod . \
+       -n atoma-proxy-prod \
+       -f values-prod.yaml \
+       --set postgresql.backup.enabled=true \
+       --set postgresql.backup.schedule="0 0 * * *"
+     ```
 
 3. **Scaling**:
-   - Adjust replicas in values file
-   - Scale horizontally: `kubectl scale deployment atoma-proxy-{env} --replicas=N`
+   - Use Helm to adjust replicas and resources:
+     ```bash
+     helm upgrade atoma-proxy-prod . \
+       -n atoma-proxy-prod \
+       -f values-prod.yaml \
+       --set atomaProxy.replicas=3 \
+       --set atomaProxy.resources.limits.memory=2Gi
+     ```
 
 ## Contributing
 
@@ -361,18 +401,3 @@ This chart is licensed under the same license as the Atoma Proxy application.
   ```
 - **Check for Atoma metrics in Prometheus/Grafana:**
   - In Prometheus or Grafana, search for metrics with the prefix `atoma_`.
-
-  **Create Grafana secrets**
-  ```
-  kubectl create secret generic grafana-admin \
-  --from-literal=admin-user=admin \
-  --from-literal=admin-password=admin \
-  -n atoma-proxy-dev
-  ```
-
-  **Create OpenRouter++
-  ```
-  kubectl create secret generic atoma-proxy-dev-open-router \
-  --from-literal=open_router.json='{"api_key": "your-api-key"}' \
-  -n atoma-proxy-dev
-  ```
