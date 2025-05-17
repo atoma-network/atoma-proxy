@@ -1,0 +1,95 @@
+# Production environment settings
+global:
+  environment: production
+  domain: atoma.network
+
+atomaProxy:
+  image:
+    repository: ghcr.io/atoma-network/atoma-proxy
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 3
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - host: api.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+      - host: credentials.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: credentials
+      - host: prover.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: prover
+  config:
+    logLevel: "info"
+    environment: "production"
+
+# PostgreSQL settings
+postgresql:
+  enabled: true
+  auth:
+    database: atoma_proxy
+    username: atoma_proxy
+    password: "" # Set this via --set or secrets management
+  primary:
+    persistence:
+      size: 50Gi
+  service:
+    port: 5432
+
+# Monitoring stack settings
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      size: 50Gi
+  alertmanager:
+    persistentVolume:
+      size: 10Gi
+
+grafana:
+  enabled: true
+  persistence:
+    size: 20Gi
+  admin:
+    password: "" # Set this via --set or secrets management
+  ingress:
+    enabled: true
+    hosts:
+      - grafana.atoma.network
+
+loki:
+  enabled: true
+  persistence:
+    size: 50Gi
+  ingress:
+    enabled: true
+    hosts:
+      - loki.atoma.network
+
+tempo:
+  enabled: true
+  persistence:
+    size: 50Gi
+  ingress:
+    enabled: true
+    hosts:
+      - tempo.atoma.network

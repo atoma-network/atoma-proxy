@@ -1,0 +1,141 @@
+# Global settings
+global:
+  environment: production
+  domain: atoma.network
+
+# Main application settings
+atomaProxy:
+  image:
+    repository: ghcr.io/atoma-network/atoma-proxy
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  service:
+    http:
+      port: 8080
+    credentials:
+      port: 8081
+    p2p:
+      port: 8083
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - host: api.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: http
+      - host: credentials.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: credentials
+      - host: prover.atoma.network
+        paths:
+          - path: /
+            pathType: Prefix
+            service: prover
+  config:
+    logLevel: "info"
+    environment: "production"
+
+# PostgreSQL settings
+postgresql:
+  enabled: true
+  auth:
+    database: atoma_proxy
+    username: atoma_proxy
+    password: ""
+  primary:
+    persistence:
+      size: 10Gi
+  service:
+    port: 5432
+
+# Monitoring stack settings
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      size: 10Gi
+  alertmanager:
+    persistentVolume:
+      size: 2Gi
+
+grafana:
+  adminUser: admin
+  adminPassword: admin
+  enabled: true
+  persistence:
+    size: 10Gi
+  ingress:
+    enabled: true
+    hosts:
+      - grafana.atoma.network
+
+openRouter:
+  apiKey: your-api-key
+
+loki:
+  enabled: true
+  persistence:
+    size: 10Gi
+  ingress:
+    enabled: true
+    hosts:
+      - loki.atoma.network
+
+tempo:
+  enabled: true
+  persistence:
+    size: 10Gi
+  ingress:
+    enabled: true
+    hosts:
+      - tempo.atoma.network
+
+# OpenTelemetry Collector settings
+otelCollector:
+  enabled: true
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch: {}
+    exporters:
+      prometheus:
+        endpoint: prometheus-server:9090
+      loki:
+        endpoint: loki:3100
+      otlp:
+        endpoint: tempo:4317
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus]
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [loki]
