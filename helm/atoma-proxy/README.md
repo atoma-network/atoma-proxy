@@ -361,3 +361,18 @@ This chart is licensed under the same license as the Atoma Proxy application.
   ```
 - **Check for Atoma metrics in Prometheus/Grafana:**
   - In Prometheus or Grafana, search for metrics with the prefix `atoma_`.
+
+  **Create Grafana secrets**
+  ```
+  kubectl create secret generic grafana-admin \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password=admin \
+  -n atoma-proxy-dev
+  ```
+
+  **Create OpenRouter++
+  ```
+  kubectl create secret generic atoma-proxy-dev-open-router \
+  --from-literal=open_router.json='{"api_key": "your-api-key"}' \
+  -n atoma-proxy-dev
+  ```

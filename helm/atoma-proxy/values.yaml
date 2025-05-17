@@ -74,15 +74,18 @@ prometheus:
       size: 2Gi
 
 grafana:
+  adminUser: admin
+  adminPassword: admin
   enabled: true
   persistence:
     size: 10Gi
-  admin:
-    password: ""
   ingress:
     enabled: true
     hosts:
       - grafana.atoma.network
+
+openRouter:
+  apiKey: your-api-key
 
 loki:
   enabled: true
