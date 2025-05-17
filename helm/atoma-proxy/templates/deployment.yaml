@@ -45,6 +45,8 @@ spec:
               mountPath: /app/logs
             - name: data
               mountPath: /app/data
+            - name: sui-config
+              mountPath: /root/.sui/sui_config
           resources:
             {{- toYaml .Values.atomaProxy.resources | nindent 12 }}
           livenessProbe:
@@ -70,3 +72,6 @@ spec:
           emptyDir: {}
         - name: data
           emptyDir: {}
+        - name: sui-config
+          secret:
+            secretName: {{ .Release.Name }}-sui-config
