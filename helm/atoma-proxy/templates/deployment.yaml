@@ -73,6 +73,5 @@ spec:
         - name: data
           emptyDir: {}
         - name: sui-config
-          hostPath:
-            path: ../../sui_config
-            type: Directory
+          configMap:
+            name: {{ .Release.Name }}-sui-config
