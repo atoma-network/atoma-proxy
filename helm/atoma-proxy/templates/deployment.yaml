@@ -18,6 +18,13 @@ spec:
         app.kubernetes.io/name: {{ .Release.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      initContainers:
+        - name: init-sui-config
+          image: busybox
+          command: ["sh", "-c", "chmod -R 777 /root/.sui/sui_config"]
+          volumeMounts:
+            - name: sui-config
+              mountPath: /root/.sui/sui_config
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.atomaProxy.image.repository }}:{{ .Values.atomaProxy.image.tag }}"
