@@ -64,6 +64,16 @@ prometheus:
   server:
     persistentVolume:
       size: 5Gi
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        cert-manager.io/cluster-issuer: "letsencrypt-staging"
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      hosts:
+        - prometheus-dev.atoma.network
+      service:
+        port: 9090
   alertmanager:
     persistentVolume:
       size: 1Gi
