@@ -1,0 +1,15 @@
+# metallb-config.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: public-ips
+  namespace: metallb-system
+spec:
+  addresses:
+    - 35.87.207.130/32 # Use your public IP or a range (e.g., 35.87.207.130-35.87.207.140)
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2
+  namespace: metallb-system
