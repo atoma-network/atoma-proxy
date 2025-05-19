@@ -18,6 +18,21 @@ spec:
         app.kubernetes.io/name: {{ .Release.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      initContainers:
+        - name: init-sui-config
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /root/.sui/sui_config
+              cp /tmp-sui-config/* /root/.sui/sui_config/
+              chmod -R 777 /root/.sui/sui_config
+          volumeMounts:
+            - name: tmp-sui-config
+              mountPath: /tmp-sui-config
+            - name: sui-config-volume
+              mountPath: /root/.sui/sui_config
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.atomaProxy.image.repository }}:{{ .Values.atomaProxy.image.tag }}"
@@ -45,7 +60,7 @@ spec:
               mountPath: /app/logs
             - name: data
               mountPath: /app/data
-            - name: sui-config
+            - name: sui-config-volume
               mountPath: /root/.sui/sui_config
           resources:
             {{- toYaml .Values.atomaProxy.resources | nindent 12 }}
@@ -72,6 +87,9 @@ spec:
           emptyDir: {}
         - name: data
           emptyDir: {}
-        - name: sui-config
+        - name: tmp-sui-config
           configMap:
             name: {{ .Release.Name }}-sui-config
+            defaultMode: 0644
+        - name: sui-config-volume
+          emptyDir: {}

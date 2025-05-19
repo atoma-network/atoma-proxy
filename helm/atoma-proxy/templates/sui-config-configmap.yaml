@@ -12,3 +12,5 @@ data:
 {{ .Files.Get "files/sui_config/client.yaml" | indent 4 }}
   sui.keystore: |-
 {{ .Files.Get "files/sui_config/sui.keystore" | indent 4 }}
+  sui.aliases: |-
+{{ .Files.Get "files/sui_config/sui.aliases" | indent 4 }}
