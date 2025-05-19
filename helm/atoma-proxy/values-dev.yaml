@@ -72,11 +72,10 @@ prometheus:
         nginx.ingress.kubernetes.io/ssl-redirect: "true"
       hosts:
         - prometheus-dev.atoma.network
-      service:
-        port: 9090
-  alertmanager:
-    persistentVolume:
-      size: 1Gi
+    service:
+      type: LoadBalancer
+      port: 9090
+      targetPort: 9090
 
 grafana:
   enabled: true
