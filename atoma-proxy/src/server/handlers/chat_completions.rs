@@ -108,6 +108,8 @@ const MESSAGES: &str = "messages";
 )]
 pub struct ChatCompletionsOpenApi;
 
+const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
+
 /// Create chat completions
 ///
 /// This function processes chat completion requests by determining whether to use streaming
@@ -972,7 +974,6 @@ impl RequestModel for RequestModelChatCompletions {
     ) -> Result<ComputeUnitsEstimate> {
         // In order to account for the possibility of not taking into account possible additional special tokens,
         // which might not be considered by the tokenizer, we add a small overhead to the total number of tokens, per message.
-        const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
         let Some(tokenizer) = tokenizer else {
             return Err(AtomaProxyError::InternalError {
                 client_message: Some("No available tokenizer found for current model, try again later or open a ticket".to_string()),
@@ -2068,7 +2069,7 @@ mod tests {
         let result = request
             .get_compute_units_estimate(Some(&tokenizer))
             .unwrap();
-        assert_eq!(result.num_input_tokens, 11); // 8 tokens + 3 overhead
+        assert_eq!(result.num_input_tokens, 8 + MESSAGE_OVERHEAD_TOKENS);
         assert_eq!(result.max_output_tokens, 10); // 10 completion
     }
 
@@ -2092,8 +2093,8 @@ mod tests {
         let result = request
             .get_compute_units_estimate(Some(&tokenizer))
             .unwrap();
-        assert_eq!(result.num_input_tokens, 22); // (8+8) tokens + (3+3) overhead
-        assert_eq!(result.max_output_tokens, 10); // 10 completion
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 2);
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2120,8 +2121,8 @@ mod tests {
         let result = request
             .get_compute_units_estimate(Some(&tokenizer))
             .unwrap();
-        assert_eq!(result.num_input_tokens, 22); // (8+8) tokens  (3 + 3) overhead
-        assert_eq!(result.max_output_tokens, 10); // 10 completion
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 2);
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2138,8 +2139,8 @@ mod tests {
         let result = request
             .get_compute_units_estimate(Some(&tokenizer))
             .unwrap();
-        assert_eq!(result.num_input_tokens, 4); // 1 tokens (special token) + 3 overhead
-        assert_eq!(result.max_output_tokens, 10); // 10 completion
+        assert_eq!(result.num_input_tokens, 1 + MESSAGE_OVERHEAD_TOKENS); // 1 tokens (special token) + overhead tokens
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2179,8 +2180,8 @@ mod tests {
             .unwrap();
         // System message: tokens + 15 completion
         // User message array: (2 text parts tokens) + (15 * 2 for text completion for parts)
-        assert_eq!(result.num_input_tokens, 33); // 3 * 8 + 3 * 3 overhead + 15
-        assert_eq!(result.max_output_tokens, 15); // 3 * 8 + 3 * 3 overhead + 15
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 3);
+        assert_eq!(result.max_output_tokens, 15);
     }
 
     #[tokio::test]
@@ -2235,6 +2236,6 @@ mod tests {
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         let tokens = result.unwrap();
-        assert!(tokens.max_output_tokens >= 10); // Should be more than minimum (3 overhead + 10 completion)
+        assert_eq!(tokens.max_output_tokens, 10); // Should be more than minimum (3 overhead + 10 completion)
     }
 }
