@@ -31,6 +31,7 @@ spec:
           volumeMounts:
             - name: tmp-sui-config
               mountPath: /tmp-sui-config
+              readOnly: true
             - name: sui-config-volume
               mountPath: /root/.sui/sui_config
       containers:
