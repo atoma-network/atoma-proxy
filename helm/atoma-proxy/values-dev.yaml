@@ -91,6 +91,10 @@ grafana:
     enabled: true
     hosts:
       - grafana-dev.atoma.network
+    service:
+      type: LoadBalancer
+      port: 3000
+      targetPort: 3000
 
 loki:
   enabled: false # Temporarily disable Loki
