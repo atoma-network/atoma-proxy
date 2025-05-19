@@ -91,12 +91,12 @@ grafana:
     enabled: true
     hosts:
       - grafana-dev.atoma.network
-    service:
-      type: LoadBalancer
-      port: 3000
-      targetPort: 3000
-      annotations:
-        metallb.universe.tf/address-pool: grafana-pool
+  service:
+    type: LoadBalancer
+    port: 3000
+    targetPort: 3000
+    annotations:
+      metallb.universe.tf/address-pool: grafana-pool
 
 loki:
   enabled: false # Temporarily disable Loki
