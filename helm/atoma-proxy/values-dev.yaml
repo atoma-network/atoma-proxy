@@ -73,8 +73,9 @@ prometheus:
       hosts:
         - prometheus-dev.atoma.network
     service:
-      type: LoadBalancer
-      port: 9090
+      type: NodePort
+      nodePort: 30259 # Or omit to let Kubernetes assign
+      port: 80
       targetPort: 9090
 
 grafana:
