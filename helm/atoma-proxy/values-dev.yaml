@@ -74,7 +74,7 @@ prometheus:
         - prometheus-dev.atoma.network
     service:
       type: LoadBalancer
-      port: 9090
+      servicePort: 9090
       targetPort: 9090
 
 grafana:
