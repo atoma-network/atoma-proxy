@@ -6,7 +6,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - 35.87.207.130/32 # Use your public IP or a range (e.g., 35.87.207.130-35.87.207.140)
+    - 10.0.235.50/32 # private ip
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
