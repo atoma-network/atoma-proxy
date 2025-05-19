@@ -10,12 +10,12 @@ atomaProxy:
     pullPolicy: Always
   replicas: 1
   resources:
-    requests:
-      memory: "256Mi"
-      cpu: "100m"
     limits:
-      memory: "512Mi"
-      cpu: "200m"
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
   ingress:
     enabled: true
     className: "nginx"
