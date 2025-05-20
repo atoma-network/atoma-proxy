@@ -76,6 +76,12 @@ pub struct AtomaServiceConfig {
     /// Heartbeat URL.
     #[validate(url(message = "heartbeat_url must be a valid URL"))]
     pub heartbeat_url: String,
+
+    /// Sentry DSN for error reporting
+    pub sentry_dsn: Option<String>,
+
+    /// Environment
+    pub environment: Option<String>,
 }
 
 fn validate_bind_address(addr: &str) -> Result<(), ValidationError> {
