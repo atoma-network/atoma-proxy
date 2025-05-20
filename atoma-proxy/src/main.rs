@@ -67,7 +67,8 @@ impl Config {
                 .context("failed to load state manager configuration")?,
             proxy_service: AtomaProxyServiceConfig::from_file_path(path.clone())
                 .context("Failed to load proxy configuration")?,
-            auth: AtomaAuthConfig::from_file_path(path.clone()),
+            auth: AtomaAuthConfig::from_file_path(path.clone())
+                .context("Failed to load auth configuration")?,
             p2p: AtomaP2pNodeConfig::from_file_path(path),
         })
     }
