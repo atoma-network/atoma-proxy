@@ -133,6 +133,11 @@ loki:
     retention_enabled: true
     retention_delete_delay: 2h
     retention_delete_worker_count: 150
+  server:
+    http_listen_port: 3100
+  memberlist:
+    join_members:
+      - loki-memberlist
 
 tempo:
   enabled: true
