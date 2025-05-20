@@ -108,9 +108,6 @@ loki:
       - loki-dev.atoma.network
   storage:
     type: filesystem
-    bucketNames:
-      chunks: loki-chunks
-      ruler: loki-ruler
   auth_enabled: false
   schemaConfig:
     configs:
@@ -126,9 +123,6 @@ loki:
     path_prefix: /var/loki
   limits_config:
     retention_period: 744h
-  memberlist:
-    join_members:
-      - loki-memberlist
 
 tempo:
   enabled: true
