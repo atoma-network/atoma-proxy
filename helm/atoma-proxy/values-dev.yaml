@@ -98,14 +98,14 @@ grafana:
     annotations:
       metallb.universe.tf/address-pool: grafana-pool
 
-  loki:
-    enabled: true
-    storage:
-      type: filesystem
-      bucketNames:
-        chunks: loki-chunks
-        ruler: loki-ruler
-        admin: loki-admin
+loki:
+  enabled: true
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
 
 tempo:
   enabled: true
