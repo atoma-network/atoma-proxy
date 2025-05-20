@@ -795,6 +795,7 @@ dependencies = [
  "utoipa",
  "utoipa-swagger-ui",
  "uuid",
+ "validator",
 ]
 
 [[package]]
@@ -820,6 +821,7 @@ dependencies = [
  "tower-http 0.6.4",
  "tracing",
  "tracing-subscriber",
+ "url",
  "utoipa",
  "utoipa-swagger-ui",
 ]
@@ -857,6 +859,7 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
+ "validator",
 ]
 
 [[package]]

@@ -1,6 +1,24 @@
 use config::{Config, File};
 use serde::Deserialize;
 use std::path::Path;
+use thiserror::Error;
+use url::Url;
+
+#[derive(Error, Debug)]
+pub enum ProxyServiceConfigError {
+    #[error("Invalid service bind address: {0}")]
+    InvalidBindAddress(String),
+
+    #[error("Invalid Grafana URL: {0}")]
+    InvalidGrafanaUrl(String),
+
+    #[error("Missing required field: {0}")]
+    MissingField(String),
+
+    #[error("Configuration file error: {0}")]
+    FileError(#[from] config::ConfigError),
+}
+
 /// Configuration for the Atoma proxy service
 ///
 /// This struct holds the configuration parameters needed to run the Atoma Proxy Service,
@@ -31,6 +49,64 @@ pub struct AtomaProxyServiceConfig {
 }
 
 impl AtomaProxyServiceConfig {
+    /// Validates the proxy service configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the configuration is valid, or a `ProxyServiceConfigError` if there are any validation errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ProxyServiceConfigError` if:
+    /// * The service bind address is empty
+    /// * The Grafana URL is empty or invalid
+    /// * The Grafana API token is empty
+    /// * The Grafana dashboard tag is empty
+    /// * The Grafana stats tag is empty
+    pub fn validate(&self) -> Result<(), ProxyServiceConfigError> {
+        // Validate service bind address
+        if self.service_bind_address.is_empty() {
+            return Err(ProxyServiceConfigError::MissingField(
+                "service_bind_address".to_string(),
+            ));
+        }
+
+        // Validate Grafana URL
+        if self.grafana_url.is_empty() {
+            return Err(ProxyServiceConfigError::MissingField(
+                "grafana_url".to_string(),
+            ));
+        }
+        if Url::parse(&self.grafana_url).is_err() {
+            return Err(ProxyServiceConfigError::InvalidGrafanaUrl(
+                self.grafana_url.clone(),
+            ));
+        }
+
+        // Validate Grafana API token
+        if self.grafana_api_token.is_empty() {
+            return Err(ProxyServiceConfigError::MissingField(
+                "grafana_api_token".to_string(),
+            ));
+        }
+
+        // Validate Grafana dashboard tag
+        if self.grafana_dashboard_tag.is_empty() {
+            return Err(ProxyServiceConfigError::MissingField(
+                "grafana_dashboard_tag".to_string(),
+            ));
+        }
+
+        // Validate Grafana stats tag
+        if self.grafana_stats_tag.is_empty() {
+            return Err(ProxyServiceConfigError::MissingField(
+                "grafana_stats_tag".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Creates a new AtomaProxyServiceConfig instance from a configuration file
     ///
     /// # Arguments
@@ -44,13 +120,20 @@ impl AtomaProxyServiceConfig {
     ///
     /// Returns a new `AtomaProxyServiceConfig` instance populated with values from the config file.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// This method will panic if:
+    /// Returns a `ProxyServiceConfigError` if:
     /// * The configuration file cannot be read or parsed
     /// * The "atoma-proxy-service" section is missing from the configuration
     /// * The configuration format doesn't match the expected structure
-    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Self {
+    /// * The configuration fails validation
+    ///
+    /// # Panics
+    ///
+    /// Panics if the path cannot be converted to a string.
+    pub fn from_file_path<P: AsRef<Path>>(
+        config_file_path: P,
+    ) -> Result<Self, ProxyServiceConfigError> {
         let builder = Config::builder()
             .add_source(File::with_name(config_file_path.as_ref().to_str().unwrap()))
             .add_source(
@@ -58,11 +141,12 @@ impl AtomaProxyServiceConfig {
                     .keep_prefix(true)
                     .separator("__"),
             );
-        let config = builder
-            .build()
-            .expect("Failed to generate atoma-proxy-service configuration file");
-        config
-            .get::<Self>("atoma_proxy_service")
-            .expect("Failed to generate configuration instance")
+        let config = builder.build()?;
+        let config = config.get::<Self>("atoma_proxy_service")?;
+
+        // Validate the configuration
+        config.validate()?;
+
+        Ok(config)
     }
 }
