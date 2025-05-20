@@ -98,31 +98,31 @@ grafana:
     annotations:
       metallb.universe.tf/address-pool: grafana-pool
 
-     loki:
-       enabled: true
-       persistence:
-         size: 5Gi
-       storage:
-         type: filesystem
-         bucketNames:
-           chunks: loki-chunks
-           ruler: loki-ruler
-           admin: loki-admin
-       auth_enabled: false
-       schemaConfig:
-         configs:
-           - from: 2022-01-11
-             store: boltdb-shipper
-             object_store: filesystem
-             schema: v12
-             index:
-               prefix: loki_index_
-               period: 24h
-       commonConfig:
-         replication_factor: 1
-         path_prefix: /var/loki
-       limits_config:
-         retention_period: 744h
+    loki:
+      enabled: true
+      persistence:
+        size: 5Gi
+      storage:
+        type: filesystem
+        bucketNames:
+          chunks: loki-chunks
+          ruler: loki-ruler
+          admin: loki-admin
+      auth_enabled: false
+      schemaConfig:
+        configs:
+          - from: 2022-01-11
+            store: boltdb-shipper
+            object_store: filesystem
+            schema: v12
+            index:
+              prefix: loki_index_
+              period: 24h
+      commonConfig:
+        replication_factor: 1
+        path_prefix: /var/loki
+      limits_config:
+        retention_period: 744h
 
 tempo:
   enabled: true
