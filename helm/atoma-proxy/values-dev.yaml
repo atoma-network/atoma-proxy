@@ -100,46 +100,15 @@ grafana:
 
 loki:
   enabled: true
-  auth_enabled: false
-  server:
-    http_listen_port: 3100
-  commonConfig:
-    path_prefix: /loki
-    replication_factor: 1
-    ring:
-      kvstore:
-        store: inmemory
   storage:
     type: filesystem
     bucketNames:
       chunks: loki-chunks
       ruler: loki-ruler
       admin: loki-admin
-  storage_config:
-    filesystem:
-      chunks_directory: /loki/chunks
-      rules_directory: /loki/rules
-  schemaConfig:
-    configs:
-      - from: 2020-10-24
-        store: boltdb-shipper
-        object_store: filesystem
-        schema: v11
-        index:
-          prefix: index_
-          period: 24h
-  ruler:
-    alertmanager_url: http://localhost:9093
-  limits_config:
-    enforce_metric_name: false
-    reject_old_samples: true
-    reject_old_samples_max_age: 168h
-    volume_enabled: true
-    retention_period: 96h
-  compactor:
-    retention_enabled: true
-    retention_delete_delay: 2h
-    retention_delete_worker_count: 150
+  commonConfig:
+    path_prefix: /loki
+    replication_factor: 1
 
 tempo:
   enabled: true
