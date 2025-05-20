@@ -24,7 +24,8 @@ mod server;
 mod telemetry;
 
 /// Command line arguments for the Atoma node
-#[derive(Parser)]
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the configuration file
     #[arg(short, long)]
@@ -36,36 +37,39 @@ struct Args {
 /// This struct holds the configuration settings for various components
 /// of the Atoma proxy, including the Sui, service, and state manager configurations.
 #[derive(Debug)]
-struct Config {
+pub struct Config {
     /// Configuration for the Sui component.
-    sui: AtomaSuiConfig,
+    pub sui: AtomaSuiConfig,
 
     /// Configuration for the service component.
-    service: AtomaServiceConfig,
+    pub service: AtomaServiceConfig,
 
     /// Configuration for the state manager component.
-    state: AtomaStateManagerConfig,
+    pub state: AtomaStateManagerConfig,
 
     /// Configuration for the proxy service component.
-    proxy_service: AtomaProxyServiceConfig,
+    pub proxy_service: AtomaProxyServiceConfig,
 
     /// Configuration for the authentication component.
-    auth: AtomaAuthConfig,
+    pub auth: AtomaAuthConfig,
 
     /// Configuration for the P2P component.
-    p2p: AtomaP2pNodeConfig,
+    pub p2p: AtomaP2pNodeConfig,
 }
 
 impl Config {
-    fn load(path: String) -> Self {
-        Self {
+    fn load(path: String) -> Result<Self> {
+        Ok(Self {
             sui: AtomaSuiConfig::from_file_path(path.clone()),
-            service: AtomaServiceConfig::from_file_path(path.clone()),
-            state: AtomaStateManagerConfig::from_file_path(path.clone()),
-            proxy_service: AtomaProxyServiceConfig::from_file_path(path.clone()),
+            service: AtomaServiceConfig::from_file_path(path.clone())
+                .context("failed to load service configuration")?,
+            state: AtomaStateManagerConfig::from_file_path(path.clone())
+                .context("failed to load state manager configuration")?,
+            proxy_service: AtomaProxyServiceConfig::from_file_path(path.clone())
+                .context("Failed to load proxy configuration")?,
             auth: AtomaAuthConfig::from_file_path(path.clone()),
             p2p: AtomaP2pNodeConfig::from_file_path(path),
-        }
+        })
     }
 }
 
@@ -81,7 +85,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     tracing::info!("Loading configuration from: {}", args.config_path);
 
-    let config = Config::load(args.config_path);
+    let config = Config::load(args.config_path).context("Failed to load configuration")?;
     tracing::info!("Configuration loaded successfully");
 
     // Initialize Sentry only if DSN is provided
