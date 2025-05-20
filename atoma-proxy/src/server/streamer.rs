@@ -471,29 +471,10 @@ impl Stream for Streamer {
                 })?;
 
                 if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
-                    let Some(choices) = chunk.get(CHOICES).and_then(|choices| choices.as_array())
-                    else {
-                        error!(
-                            target = "atoma-service-streamer",
-                            level = "error",
-                            "Error getting choices from chunk"
-                        );
-                        return Poll::Ready(Some(Err(Error::new(
-                            "Error getting choices from chunk",
-                        ))));
-                    };
-
                     if let Some(usage) = chunk.get(USAGE) {
                         if !usage.is_null() {
                             self.status = StreamStatus::Completed;
                             self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
-                            if !choices.is_empty() {
-                                trace!(
-                                target = "atoma-service-streamer",
-                                level = "trace",
-                                "Client disconnected before the final chunk was processed, using usage transmitted by the node last live chunk to update the stack num tokens"
-                            );
-                            }
                         }
                     }
                 } else if self.endpoint == COMPLETIONS_PATH {
