@@ -111,6 +111,10 @@ loki:
         store: inmemory
   storage:
     type: filesystem
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
   storage_config:
     filesystem:
       chunks_directory: /loki/chunks
