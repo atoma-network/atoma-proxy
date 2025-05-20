@@ -10,11 +10,5 @@ metadata:
 data:
   config.toml: |-
 {{ .Files.Get "files/config.toml" | indent 4 }}
-  prometheus.yml: |-
-{{ .Files.Get "files/prometheus.yml" | indent 4 }}
-  loki.yaml: |-
-{{ .Files.Get "files/loki.yaml" | indent 4 }}
-  tempo.yaml: |-
-{{ .Files.Get "files/tempo.yaml" | indent 4 }}
   environment: {{ .Values.atomaProxy.config.environment | quote }}
   log_level: {{ .Values.atomaProxy.config.logLevel | quote }}
