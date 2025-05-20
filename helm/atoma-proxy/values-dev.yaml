@@ -108,6 +108,10 @@ loki:
       - loki-dev.atoma.network
   storage:
     type: filesystem
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
   auth_enabled: false
   schemaConfig:
     configs:
