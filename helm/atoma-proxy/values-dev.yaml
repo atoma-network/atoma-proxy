@@ -104,12 +104,10 @@ loki:
   commonConfig:
     path_prefix: /loki
     replication_factor: 1
-  storage:
-    type: filesystem
-    bucketNames:
-      chunks: loki-chunks
-      ruler: loki-ruler
-      admin: loki-admin
+  storage_config:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
   persistence:
     size: 5Gi
   limits_config:
