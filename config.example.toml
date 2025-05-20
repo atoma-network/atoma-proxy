@@ -42,14 +42,14 @@ open_router_models_file = "/app/open_router.json" # Path to the Open Router JSON
 password = "password" # Authentication password for the service API
 revisions = [ "main", "main" ] # Model revision/version tags (must match models array length)
 service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
+environment           = "development"  # or "production" based on your deployment used in sentry
+sentry_dsn            = "sentry_dsn"   # Sentry DSN for error reporting
 
 [atoma_proxy_service]
-environment           = "development"  # or "production" based on your deployment used in sentry
 grafana_api_token     = ""             # Grafana API token (read-only permissions required)
 grafana_dashboard_tag = ""             # Tag to filter which Grafana dashboards to expose as graphs
 grafana_stats_tag     = ""             # Tag to filter which Grafana dashboards to expose as stats
 grafana_url           = ""             # Grafana instance URL for metrics visualization
-sentry_dsn            = "sentry_dsn"   # Sentry DSN for error reporting
 service_bind_address  = "0.0.0.0:8081" # Proxy service binding address and port (must match docker-compose.yml)
 
 

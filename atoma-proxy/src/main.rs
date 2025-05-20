@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
     tracing::info!("Configuration loaded successfully");
 
     // Initialize Sentry only if DSN is provided
-    let _guard = config.proxy_service.sentry_dsn.map_or_else(
+    let _guard = config.service.sentry_dsn.clone().map_or_else(
         || {
             info!("No Sentry DSN provided, skipping Sentry initialization");
             None
@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
                     send_default_pii: false,
                     environment: Some(std::borrow::Cow::Owned(
                         config
-                            .proxy_service
+                            .service
                             .environment
                             .clone()
                             .unwrap_or_else(|| "development".to_string()),
