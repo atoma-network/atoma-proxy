@@ -73,7 +73,7 @@ pub struct RequestMetadataExtension {
 
     /// Estimated compute units required for this request.
     /// This represents the total computational resources needed for both input and output processing.
-    pub max_total_num_compute_units: u64,
+    pub max_output_tokens: u64,
 
     /// The user id for this request.
     pub user_id: i64,
@@ -124,22 +124,19 @@ impl RequestMetadataExtension {
         self
     }
 
-    /// Adds a num compute units to the request metadata.
+    /// Adds a max output tokens to the request metadata.
     ///
     /// This method is used to set the num compute units that will be used for the request.
     ///
     /// # Arguments
     ///
-    /// * `num_compute_units` - The num compute units to set
+    /// * `max_output_tokens` - The max output tokens to set
     ///
     /// # Returns
     ///
     /// Returns self with the num compute units field populated, enabling method chaining
-    pub const fn with_max_total_num_compute_units(
-        mut self,
-        max_total_num_compute_units: u64,
-    ) -> Self {
-        self.max_total_num_compute_units = max_total_num_compute_units;
+    pub const fn with_max_output_tokens(mut self, max_output_tokens: u64) -> Self {
+        self.max_output_tokens = max_output_tokens;
         self
     }
 
@@ -316,8 +313,8 @@ pub async fn authenticate_middleware(
     tokio::spawn(async move {
         let StackMetadata {
             optional_stack,
-            num_input_compute_units,
-            max_total_compute_units,
+            num_input_tokens,
+            max_output_tokens,
             model,
             user_id,
             selected_node_id,
@@ -354,7 +351,7 @@ pub async fn authenticate_middleware(
                 model: &model,
                 state: &state,
                 optional_stack,
-                total_tokens: max_total_compute_units,
+                total_tokens: num_input_tokens + max_output_tokens,
                 user_id,
                 endpoint: &endpoint,
             })
@@ -377,8 +374,8 @@ pub async fn authenticate_middleware(
                     &mut req_parts,
                     selected_node_id,
                     stack_small_id,
-                    num_input_compute_units,
-                    max_total_compute_units,
+                    num_input_tokens,
+                    max_output_tokens,
                     price_per_million,
                     tx_digest,
                     user_id,
@@ -391,7 +388,7 @@ pub async fn authenticate_middleware(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            max_total_compute_units as i64,
+                            (num_input_tokens + max_output_tokens) as i64,
                             0,
                             &endpoint,
                         )?;
@@ -406,8 +403,8 @@ pub async fn authenticate_middleware(
                     &mut req_parts,
                     selected_node_id,
                     price_per_million,
-                    num_input_compute_units,
-                    max_total_compute_units,
+                    num_input_tokens,
+                    max_output_tokens,
                     user_id,
                     &endpoint,
                 )
@@ -418,7 +415,9 @@ pub async fn authenticate_middleware(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             user_id,
-                            max_total_compute_units as i64,
+                            num_input_tokens as i64,
+                            0,
+                            max_output_tokens as i64,
                             0,
                             price_per_million,
                             model,
@@ -616,7 +615,7 @@ pub async fn confidential_compute_middleware(
             .with_node_address(node_address)
             .with_node_small_id(node_small_id)
             .with_stack_small_id(confidential_compute_request.stack_small_id as i64)
-            .with_max_total_num_compute_units(num_compute_units as u64)
+            .with_max_output_tokens(num_compute_units as u64)
             .with_user_id(user_id)
             .with_model_name(confidential_compute_request.model_name.clone())
             .with_endpoint(endpoint);
@@ -789,13 +788,14 @@ pub async fn handle_locked_stack_middleware(
             }
             // We need to acquire a new stack for the request, to be able to retry
             let user_id = request_metadata.user_id;
-            let max_total_num_compute_units = request_metadata.max_total_num_compute_units;
+            let num_input_tokens = request_metadata.num_input_tokens.unwrap_or_default();
+            let max_output_tokens = request_metadata.max_output_tokens;
             // 1. Try to get a Stack from the state manager
             let maybe_stack = get_node_metadata_from_state_manager(
                 &state,
                 &request_metadata.model_name,
                 user_id,
-                max_total_num_compute_units as i64,
+                (num_input_tokens + max_output_tokens) as i64,
                 is_confidential_compute_endpoint(&endpoint),
                 &endpoint,
             )
@@ -814,7 +814,7 @@ pub async fn handle_locked_stack_middleware(
                         user_id,
                         &request_metadata.model_name,
                         &request_metadata.endpoint,
-                        max_total_num_compute_units,
+                        num_input_tokens + max_output_tokens,
                     )
                     .await?
                 }
@@ -855,7 +855,7 @@ pub async fn handle_locked_stack_middleware(
                     }
                 })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
-                max_total_num_compute_units,
+                max_output_tokens,
                 selected_node_metadata.price_per_million,
                 selected_node_metadata.tx_digest,
                 user_id,
@@ -874,7 +874,7 @@ pub async fn handle_locked_stack_middleware(
                                 endpoint: endpoint.to_string(),
                             }
                         })?,
-                        max_total_num_compute_units as i64,
+                        (num_input_tokens + max_output_tokens) as i64,
                         0,
                         &endpoint,
                     )?;
@@ -939,10 +939,10 @@ pub mod auth {
     pub struct StackMetadata {
         /// The stack that was selected for the request.
         pub optional_stack: Option<Stack>,
-        /// The number of input compute units for the request.
-        pub num_input_compute_units: u64,
-        /// The maximum total compute units for the request.
-        pub max_total_compute_units: u64,
+        /// The number of input tokens for the request.
+        pub num_input_tokens: u64,
+        /// The maximum number of output tokens for the request.
+        pub max_output_tokens: u64,
         /// The model that was selected for the request.
         pub model: String,
         /// The user ID that made the request.
@@ -1160,8 +1160,8 @@ pub mod auth {
         // Retrieve the model and the appropriate tokenizer
         let model = request_model.get_model();
         let ComputeUnitsEstimate {
-            num_input_compute_units,
-            max_total_compute_units,
+            num_input_tokens,
+            max_output_tokens,
         } = if [IMAGE_GENERATIONS_PATH, CONFIDENTIAL_IMAGE_GENERATIONS_PATH].contains(&endpoint) {
             request_model.get_compute_units_estimate(None)?
         } else {
@@ -1181,14 +1181,17 @@ pub mod auth {
         let node = get_cheapest_node(state, &model, endpoint).await?;
         // We don't have a stack for the user, lets check if the user is using fiat currency.
         let (result_sender, result_receiver) = oneshot::channel();
-        let fiat_locked_amount = max_total_compute_units as i64
+        let fiat_locked_input_amount =
+            num_input_tokens as i64 * node.price_per_one_million_compute_units / ONE_MILLION as i64;
+        let fiat_locked_output_amount = max_output_tokens as i64
             * node.price_per_one_million_compute_units
             / ONE_MILLION as i64;
         state
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
                 user_id,
-                amount: fiat_locked_amount,
+                input_amount: fiat_locked_input_amount,
+                output_amount: fiat_locked_output_amount,
                 result_sender,
             })
             .map_err(|err| AtomaProxyError::InternalError {
@@ -1213,8 +1216,8 @@ pub mod auth {
         if locked_fiat {
             return Ok(StackMetadata {
                 optional_stack: None,
-                num_input_compute_units,
-                max_total_compute_units,
+                num_input_tokens,
+                max_output_tokens,
                 model,
                 user_id,
                 selected_node_id: node.node_small_id,
@@ -1229,7 +1232,7 @@ pub mod auth {
             .state_manager_sender
             .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
                 model: model.to_string(),
-                free_compute_units: max_total_compute_units as i64,
+                free_compute_units: (num_input_tokens + max_output_tokens) as i64,
                 user_id,
                 is_confidential: false, // NOTE: This method is only used for non-confidential compute
                 result_sender,
@@ -1255,8 +1258,8 @@ pub mod auth {
 
         Ok(StackMetadata {
             optional_stack,
-            num_input_compute_units,
-            max_total_compute_units,
+            num_input_tokens,
+            max_output_tokens,
             model,
             user_id,
             selected_node_id: node.node_small_id,
@@ -2271,7 +2274,8 @@ pub mod utils {
     /// * `req_parts` - Mutable reference to request parts for header modification
     /// * `selected_node_id` - ID of the node selected to process this request
     /// * `selected_stack_small_id` - ID of the stack allocated for this request
-    /// * `total_compute_units` - Total compute units required for this request
+    /// * `num_input_tokens` - Number of input tokens in the request
+    /// * `max_output_tokens` - Max number of output tokens required for this request
     /// * `tx_digest` - Optional transaction digest if a new stack was created
     /// * `user_id` - ID of the user making the request
     /// * `endpoint` - API endpoint path being accessed
@@ -2323,7 +2327,7 @@ pub mod utils {
     /// * Model name
     #[instrument(level = "info", skip_all, fields(
         %endpoint,
-        %total_compute_units,
+        %max_output_tokens,
         %user_id
     ), err)]
     #[allow(clippy::too_many_arguments)]
@@ -2334,7 +2338,7 @@ pub mod utils {
         selected_node_id: i64,
         selected_stack_small_id: i64,
         num_input_tokens: u64,
-        total_compute_units: u64,
+        max_output_tokens: u64,
         price_per_million: i64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
@@ -2397,7 +2401,7 @@ pub mod utils {
             node_address,
             node_id: selected_node_id,
             num_input_tokens: Some(num_input_tokens),
-            max_total_num_compute_units: total_compute_units,
+            max_output_tokens,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
             price_per_million,
@@ -2424,7 +2428,8 @@ pub mod utils {
     /// * `req_parts` - Mutable reference to request parts for header modification
     /// * `selected_node_id` - ID of the node selected to process this request
     /// * `fiat_estimated_amount` - The amount of fiat that was locked
-    /// * `total_compute_units` - Total compute units required for this request
+    /// * `num_input_tokens` - Number of input tokens in the request
+    /// * `max_output_tokens` - Max number of output tokens required for this request
     /// * `user_id` - ID of the user making the request
     /// * `endpoint` - API endpoint path being accessed
     ///
@@ -2459,7 +2464,7 @@ pub mod utils {
     ///     compute_units,
     ///     user_id,
     ///     "/v1/chat/completions"
-    /// ).await?;
+    /// ).await?;ple
     /// ```
     ///
     /// # Request Metadata
@@ -2482,7 +2487,7 @@ pub mod utils {
         selected_node_id: i64,
         price_per_million: i64,
         num_input_tokens: u64,
-        total_compute_units: u64,
+        max_output_tokens: u64,
         user_id: i64,
         endpoint: &str,
     ) -> Result<Request<Body>> {
@@ -2521,7 +2526,7 @@ pub mod utils {
             node_address,
             node_id: selected_node_id,
             num_input_tokens: Some(num_input_tokens),
-            max_total_num_compute_units: total_compute_units,
+            max_output_tokens,
             user_id,
             selected_stack_small_id: None,
             price_per_million,

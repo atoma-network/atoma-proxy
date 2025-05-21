@@ -889,8 +889,10 @@ pub enum AtomaAtomaStateManagerEvent {
     LockUserFiatBalance {
         /// The user ID
         user_id: i64,
-        /// The amount to lock
-        amount: i64,
+        /// The amount to lock for input
+        input_amount: i64,
+        /// The amount to lock for output
+        output_amount: i64,
         /// The result sender to send back the success status
         result_sender: oneshot::Sender<Result<bool>>,
     },
@@ -899,9 +901,13 @@ pub enum AtomaAtomaStateManagerEvent {
         user_id: i64,
         /// Model name
         model_name: String,
-        /// The original estimated amount
-        estimated_amount: i64,
-        /// The actual amount
-        amount: i64,
+        /// The original estimated input amount
+        estimated_input_amount: i64,
+        /// The actual input amount
+        input_amount: i64,
+        /// The original estimated output amount
+        estimated_output_amount: i64,
+        /// The actual output amount
+        output_amount: i64,
     },
 }
