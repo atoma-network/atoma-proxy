@@ -83,7 +83,23 @@ pub struct AtomaServiceConfig {
     /// Environment
     pub environment: Option<String>,
 }
-
+/// Validates the bind address format.
+///
+/// This function checks if the provided bind address is valid by ensuring:
+/// - The address is not empty
+/// - The address follows the format "host:port"
+/// - The port is a valid number between 0 and 65535
+///
+/// # Arguments
+///
+/// * `addr` - The bind address string to validate
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the address is valid, or a `ValidationError` if:
+/// - The address is empty
+/// - The address format is invalid (not host:port)
+/// - The port is not a valid number
 fn validate_bind_address(addr: &str) -> Result<(), ValidationError> {
     if addr.is_empty() {
         return Err(ValidationError::new("empty_bind_address"));
@@ -103,6 +119,19 @@ fn validate_bind_address(addr: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// Validates the modalities configuration.
+///
+/// This function checks if the provided modalities configuration is valid by ensuring:
+/// - Each model has at least one modality specified
+///
+/// # Arguments
+///
+/// * `modalities` - A slice of vectors containing model modalities to validate
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the modalities configuration is valid, or a `ValidationError` if:
+/// - Any model has an empty modalities list
 fn validate_modalities(modalities: &[Vec<ModelModality>]) -> Result<(), ValidationError> {
     for model_modalities in modalities {
         if model_modalities.is_empty() {
