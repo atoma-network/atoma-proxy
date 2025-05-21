@@ -126,8 +126,8 @@ impl RequestModel for RequestModelImageGenerations {
 
         // Calculate compute units based on number of images and pixel count
         Ok(ComputeUnitsEstimate {
-            num_input_compute_units: self.n * width * height,
-            max_total_compute_units: self.n * width * height,
+            num_input_tokens: 0,
+            max_output_tokens: self.n * width * height,
         })
     }
 }
@@ -169,7 +169,7 @@ pub async fn image_generations_create(
     let endpoint = metadata.endpoint.clone();
     tokio::spawn(async move {
         IMAGE_GENERATION_TOTAL_TOKENS_PER_USER.add(
-            metadata.max_total_num_compute_units,
+            metadata.max_output_tokens,
             &[KeyValue::new("user_id", metadata.user_id)],
         );
         // TODO: We should allow cancelling the request if the client disconnects
@@ -178,21 +178,24 @@ pub async fn image_generations_create(
             metadata.node_address,
             headers,
             payload,
-            metadata.max_total_num_compute_units as i64,
+            metadata.max_output_tokens as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
         )
         .await
         {
             Ok(response) => {
-                TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                TOTAL_COMPLETED_REQUESTS
+                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            metadata.max_total_num_compute_units as i64,
-                            metadata.max_total_num_compute_units as i64,
+                            (metadata.num_input_tokens.unwrap_or_default()
+                                + metadata.max_output_tokens) as i64,
+                            (metadata.num_input_tokens.unwrap_or_default()
+                                + metadata.max_output_tokens) as i64,
                             &metadata.endpoint,
                         )?;
                     }
@@ -200,8 +203,12 @@ pub async fn image_generations_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.num_input_tokens.unwrap_or_default() as i64,
+                            metadata.num_input_tokens.unwrap_or_default() as i64,
+                            metadata.max_output_tokens as i64,
+                            metadata.max_output_tokens as i64,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }
@@ -222,7 +229,8 @@ pub async fn image_generations_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            metadata.max_total_num_compute_units as i64,
+                            (metadata.num_input_tokens.unwrap_or_default()
+                                + metadata.max_output_tokens) as i64,
                             0,
                             &metadata.endpoint,
                         )?;
@@ -231,8 +239,12 @@ pub async fn image_generations_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.num_input_tokens.unwrap_or_default() as i64,
                             0,
+                            metadata.max_output_tokens as i64,
+                            0,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }
@@ -298,7 +310,7 @@ pub async fn confidential_image_generations_create(
                 endpoint: metadata.endpoint.clone(),
             })?;
         IMAGE_GENERATION_TOTAL_TOKENS_PER_USER.add(
-            metadata.max_total_num_compute_units,
+            metadata.num_input_tokens.unwrap_or_default() + metadata.max_output_tokens,
             &[KeyValue::new("user_id", metadata.user_id)],
         );
         match handle_image_generation_response(
@@ -306,7 +318,7 @@ pub async fn confidential_image_generations_create(
             metadata.node_address,
             headers,
             payload,
-            metadata.max_total_num_compute_units as i64,
+            metadata.max_output_tokens as i64,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
         )
@@ -334,7 +346,8 @@ pub async fn confidential_image_generations_create(
                         update_state_manager(
                             &state.state_manager_sender,
                             stack_small_id,
-                            metadata.max_total_num_compute_units as i64,
+                            (metadata.num_input_tokens.unwrap_or_default()
+                                + metadata.max_output_tokens) as i64,
                             0,
                             &metadata.endpoint,
                         )?;
@@ -343,8 +356,12 @@ pub async fn confidential_image_generations_create(
                         update_state_manager_fiat(
                             &state.state_manager_sender,
                             metadata.user_id,
-                            metadata.fiat_estimated_amount.unwrap_or_default(),
+                            metadata.num_input_tokens.unwrap_or_default() as i64,
                             0,
+                            metadata.max_output_tokens as i64,
+                            0,
+                            metadata.price_per_million,
+                            metadata.model_name,
                             &metadata.endpoint,
                         )?;
                     }
@@ -405,7 +422,7 @@ async fn handle_image_generation_response(
     node_address: String,
     headers: HeaderMap,
     payload: Value,
-    total_tokens: i64,
+    output_tokens: i64,
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
@@ -457,7 +474,7 @@ async fn handle_image_generation_response(
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
                 model_name,
                 input_tokens: 0,
-                output_tokens: total_tokens,
+                output_tokens,
                 time: time.elapsed().as_secs_f64(),
             },
         )

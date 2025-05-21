@@ -108,6 +108,8 @@ const MESSAGES: &str = "messages";
 )]
 pub struct ChatCompletionsOpenApi;
 
+const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
+
 /// Create chat completions
 ///
 /// This function processes chat completion requests by determining whether to use streaming
@@ -183,7 +185,8 @@ pub async fn chat_completions_create(
                     update_state_manager(
                         &state.state_manager_sender,
                         stack_small_id,
-                        metadata.max_total_num_compute_units as i64,
+                        (metadata.num_input_tokens.unwrap_or_default() + metadata.max_output_tokens)
+                            as i64,
                         0,
                         &metadata.endpoint,
                     )?;
@@ -191,8 +194,12 @@ pub async fn chat_completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.num_input_tokens.unwrap_or_default() as i64,
                         0,
+                        metadata.max_output_tokens as i64,
+                        0,
+                        metadata.price_per_million,
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -276,9 +283,8 @@ async fn handle_chat_completions_request(
             metadata.user_id,
             headers,
             &payload,
-            metadata.num_input_tokens.map(|v| v as i64),
-            metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
+            metadata.num_input_tokens.unwrap_or_default() as i64,
+            metadata.max_output_tokens as i64,
             metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
@@ -292,8 +298,9 @@ async fn handle_chat_completions_request(
             metadata.user_id,
             headers,
             &payload,
-            metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
+            metadata.num_input_tokens.unwrap_or_default() as i64,
+            metadata.max_output_tokens as i64,
+            metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -452,7 +459,8 @@ pub async fn confidential_chat_completions_create(
                     update_state_manager(
                         &state.state_manager_sender,
                         stack_small_id,
-                        metadata.max_total_num_compute_units as i64,
+                        (metadata.num_input_tokens.unwrap_or_default() + metadata.max_output_tokens)
+                            as i64,
                         0,
                         &metadata.endpoint,
                     )?;
@@ -460,8 +468,12 @@ pub async fn confidential_chat_completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.num_input_tokens.unwrap_or_default() as i64,
                         0,
+                        metadata.max_output_tokens as i64,
+                        0,
+                        metadata.price_per_million,
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -566,8 +578,9 @@ async fn handle_non_streaming_response(
     user_id: i64,
     headers: HeaderMap,
     payload: &Value,
-    estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
+    num_input_tokens: i64,
+    estimated_output_tokens: i64,
+    price_per_million: i64,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -656,7 +669,7 @@ async fn handle_non_streaming_response(
         .send(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
+                model_name: model_name.clone(),
                 input_tokens,
                 output_tokens,
                 time: time.elapsed().as_secs_f64(),
@@ -670,37 +683,36 @@ async fn handle_non_streaming_response(
 
     // NOTE: We need to update the stack num tokens, because the inference response might have produced
     // less tokens than estimated what we initially estimated, from the middleware.
-    match selected_stack_small_id {
-        Some(stack_small_id) => {
-            if let Err(e) = update_state_manager(
-                &state.state_manager_sender,
-                stack_small_id,
-                estimated_total_tokens,
-                total_tokens,
-                &endpoint,
-            ) {
-                return Err(AtomaProxyError::InternalError {
-                    message: format!("Error updating state manager: {e:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                });
-            }
+    if let Some(stack_small_id) = selected_stack_small_id {
+        if let Err(e) = update_state_manager(
+            &state.state_manager_sender,
+            stack_small_id,
+            num_input_tokens + estimated_output_tokens,
+            total_tokens,
+            &endpoint,
+        ) {
+            return Err(AtomaProxyError::InternalError {
+                message: format!("Error updating state manager: {e:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            });
         }
-        None => {
-            if let Err(e) = update_state_manager_fiat(
-                &state.state_manager_sender,
-                user_id,
-                fiat_estimated_amount.unwrap_or(0),
-                total_tokens,
-                &endpoint,
-            ) {
-                return Err(AtomaProxyError::InternalError {
-                    message: format!("Error updating fiat state manager: {e:?}"),
-                    client_message: None,
-                    endpoint: endpoint.to_string(),
-                });
-            }
-        }
+    } else if let Err(e) = update_state_manager_fiat(
+        &state.state_manager_sender,
+        user_id,
+        num_input_tokens,
+        input_tokens,
+        estimated_output_tokens,
+        output_tokens,
+        price_per_million,
+        model_name,
+        &endpoint,
+    ) {
+        return Err(AtomaProxyError::InternalError {
+            message: format!("Error updating fiat state manager: {e:?}"),
+            client_message: None,
+            endpoint: endpoint.to_string(),
+        });
     }
 
     CHAT_COMPLETIONS_LATENCY_METRICS.record(
@@ -763,10 +775,9 @@ async fn handle_streaming_response(
     user_id: i64,
     mut headers: HeaderMap,
     payload: &Value,
-    num_input_tokens: Option<i64>,
-    estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
-    price_per_million: Option<i64>,
+    num_input_tokens: i64,
+    estimated_output_tokens: i64,
+    price_per_million: i64,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -817,9 +828,8 @@ async fn handle_streaming_response(
             stream,
             state_manager_sender,
             selected_stack_small_id,
-            num_input_tokens.unwrap_or(0),
-            estimated_total_tokens,
-            fiat_estimated_amount,
+            num_input_tokens,
+            estimated_output_tokens,
             price_per_million,
             start,
             user_id,
@@ -831,7 +841,10 @@ async fn handle_streaming_response(
                 event = streamer.next() => {
                     match event {
                         Some(Ok(maybe_chunk)) => {
-                            tracing::info!(target = "atoma-service-chat-completions", "Sending chunk to event sender");
+                            tracing::debug!(
+                                target = "atoma-service-chat-completions",
+                                "Sending chunk to event sender"
+                            );
                             if let Err(e) = event_sender.send(maybe_chunk) {
                                 tracing::error!(
                                     target = "atoma-service-chat-completions",
@@ -961,7 +974,6 @@ impl RequestModel for RequestModelChatCompletions {
     ) -> Result<ComputeUnitsEstimate> {
         // In order to account for the possibility of not taking into account possible additional special tokens,
         // which might not be considered by the tokenizer, we add a small overhead to the total number of tokens, per message.
-        const MESSAGE_OVERHEAD_TOKENS: u64 = 3;
         let Some(tokenizer) = tokenizer else {
             return Err(AtomaProxyError::InternalError {
                 client_message: Some("No available tokenizer found for current model, try again later or open a ticket".to_string()),
@@ -1027,8 +1039,8 @@ impl RequestModel for RequestModelChatCompletions {
         }
         // add the max completion tokens, to account for the response
         Ok(ComputeUnitsEstimate {
-            num_input_compute_units: total_num_tokens,
-            max_total_compute_units: total_num_tokens + self.max_completion_tokens,
+            num_input_tokens: total_num_tokens,
+            max_output_tokens: self.max_completion_tokens,
         })
     }
 }
@@ -2054,9 +2066,11 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(Some(&tokenizer));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().max_total_compute_units, 21); // 8 tokens + 3 overhead + 10 completion
+        let result = request
+            .get_compute_units_estimate(Some(&tokenizer))
+            .unwrap();
+        assert_eq!(result.num_input_tokens, 8 + MESSAGE_OVERHEAD_TOKENS);
+        assert_eq!(result.max_output_tokens, 10); // 10 completion
     }
 
     #[tokio::test]
@@ -2076,9 +2090,11 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(Some(&tokenizer));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().max_total_compute_units, 32); // (8+8) tokens + (3+3) overhead + 10 completion
+        let result = request
+            .get_compute_units_estimate(Some(&tokenizer))
+            .unwrap();
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 2);
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2102,9 +2118,11 @@ mod tests {
         };
 
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(Some(&tokenizer));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().max_total_compute_units, 32); // (8+8) tokens  (3 + 3) overhead + 10 completion
+        let result = request
+            .get_compute_units_estimate(Some(&tokenizer))
+            .unwrap();
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 2);
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2118,9 +2136,11 @@ mod tests {
             max_completion_tokens: 10,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(Some(&tokenizer));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().max_total_compute_units, 14); // 1 tokens (special token) + 3 overhead + 10 completion
+        let result = request
+            .get_compute_units_estimate(Some(&tokenizer))
+            .unwrap();
+        assert_eq!(result.num_input_tokens, 1 + MESSAGE_OVERHEAD_TOKENS); // 1 tokens (special token) + overhead tokens
+        assert_eq!(result.max_output_tokens, 10);
     }
 
     #[tokio::test]
@@ -2155,12 +2175,13 @@ mod tests {
             max_completion_tokens: 15,
         };
         let tokenizer = load_tokenizer().await;
-        let result = request.get_compute_units_estimate(Some(&tokenizer));
-        assert!(result.is_ok());
+        let result = request
+            .get_compute_units_estimate(Some(&tokenizer))
+            .unwrap();
         // System message: tokens + 15 completion
         // User message array: (2 text parts tokens) + (15 * 2 for text completion for parts)
-        let tokens = result.unwrap();
-        assert_eq!(tokens.max_total_compute_units, 48); // 3 * 8 + 3 * 3 overhead + 15
+        assert_eq!(result.num_input_tokens, (8 + MESSAGE_OVERHEAD_TOKENS) * 3);
+        assert_eq!(result.max_output_tokens, 15);
     }
 
     #[tokio::test]
@@ -2215,6 +2236,6 @@ mod tests {
         let result = request.get_compute_units_estimate(Some(&tokenizer));
         assert!(result.is_ok());
         let tokens = result.unwrap();
-        assert!(tokens.max_total_compute_units > 13); // Should be more than minimum (3 overhead + 10 completion)
+        assert_eq!(tokens.max_output_tokens, 10); // Should be more than minimum (3 overhead + 10 completion)
     }
 }

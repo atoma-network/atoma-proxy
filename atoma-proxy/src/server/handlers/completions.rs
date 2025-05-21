@@ -143,7 +143,8 @@ pub async fn completions_create(
                     update_state_manager(
                         &state.state_manager_sender,
                         stack_small_id,
-                        metadata.max_total_num_compute_units as i64,
+                        (metadata.num_input_tokens.unwrap_or_default() + metadata.max_output_tokens)
+                            as i64,
                         0,
                         &metadata.endpoint,
                     )?;
@@ -151,8 +152,12 @@ pub async fn completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.num_input_tokens.unwrap_or_default() as i64,
                         0,
+                        metadata.max_output_tokens as i64,
+                        0,
+                        metadata.price_per_million,
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -219,9 +224,8 @@ async fn handle_completions_request(
             metadata.user_id,
             headers,
             &payload,
-            metadata.num_input_tokens.map(|v| v as i64),
-            metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
+            metadata.num_input_tokens.unwrap_or_default() as i64,
+            metadata.max_output_tokens as i64,
             metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
@@ -235,8 +239,9 @@ async fn handle_completions_request(
             metadata.user_id,
             headers,
             &payload,
-            metadata.max_total_num_compute_units as i64,
-            metadata.fiat_estimated_amount,
+            metadata.num_input_tokens.unwrap_or_default() as i64,
+            metadata.max_output_tokens as i64,
+            metadata.price_per_million,
             metadata.selected_stack_small_id,
             metadata.endpoint.clone(),
             metadata.model_name.clone(),
@@ -393,7 +398,8 @@ pub async fn confidential_completions_create(
                     update_state_manager(
                         &state.state_manager_sender,
                         stack_small_id,
-                        metadata.max_total_num_compute_units as i64,
+                        (metadata.num_input_tokens.unwrap_or_default() + metadata.max_output_tokens)
+                            as i64,
                         0,
                         &metadata.endpoint,
                     )?;
@@ -401,8 +407,12 @@ pub async fn confidential_completions_create(
                     update_state_manager_fiat(
                         &state.state_manager_sender,
                         metadata.user_id,
-                        metadata.fiat_estimated_amount.unwrap_or_default(),
+                        metadata.num_input_tokens.unwrap_or_default() as i64,
                         0,
+                        metadata.max_output_tokens as i64,
+                        0,
+                        metadata.price_per_million,
+                        metadata.model_name,
                         &metadata.endpoint,
                     )?;
                 }
@@ -460,7 +470,8 @@ pub fn confidential_completions_create_stream(
 /// * `user_id` - The ID of the user making the request
 /// * `headers` - HTTP request headers to forward to the inference service
 /// * `payload` - The JSON payload containing the chat completion request
-/// * `estimated_total_tokens` - The estimated total number of tokens for the completion
+/// * `num_input_tokens` - The number of input tokens
+/// * `estimated_output_tokens` - The estimated total number of tokens for the completion
 /// * `fiat_estimated_amount` - The estimated amount in fiat currency for the completion
 /// * `selected_stack_small_id` - The ID of the stack small to update
 /// * `endpoint` - The endpoint to forward the request to
@@ -488,7 +499,7 @@ pub fn confidential_completions_create_stream(
         path = endpoint,
         completion_type = "non-streaming",
         stack_small_id,
-        estimated_total_tokens,
+        estimated_total_tokens = num_input_tokens + estimated_output_tokens,
         payload_hash
     )
 )]
@@ -499,8 +510,9 @@ async fn handle_non_streaming_response(
     user_id: i64,
     headers: HeaderMap,
     payload: &Value,
-    estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
+    num_input_tokens: i64,
+    estimated_output_tokens: i64,
+    price_per_million: i64,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -589,7 +601,7 @@ async fn handle_non_streaming_response(
         .send(
             AtomaAtomaStateManagerEvent::UpdateNodeThroughputPerformance {
                 timestamp: DateTime::<Utc>::from(std::time::SystemTime::now()),
-                model_name,
+                model_name: model_name.clone(),
                 input_tokens,
                 output_tokens,
                 time: time.elapsed().as_secs_f64(),
@@ -608,7 +620,7 @@ async fn handle_non_streaming_response(
             if let Err(e) = update_state_manager(
                 &state.state_manager_sender,
                 stack_small_id,
-                estimated_total_tokens,
+                num_input_tokens + estimated_output_tokens,
                 total_tokens,
                 &endpoint,
             ) {
@@ -623,8 +635,12 @@ async fn handle_non_streaming_response(
             if let Err(e) = update_state_manager_fiat(
                 &state.state_manager_sender,
                 user_id,
-                fiat_estimated_amount.unwrap_or(0),
+                num_input_tokens,
+                0,
+                estimated_output_tokens,
                 total_tokens,
+                price_per_million,
+                model_name,
                 &endpoint,
             ) {
                 return Err(AtomaProxyError::InternalError {
@@ -656,8 +672,7 @@ async fn handle_non_streaming_response(
 /// * `headers` - The headers of the request
 /// * `payload` - The payload of the request    
 /// * `num_input_tokens` - The number of input tokens
-/// * `estimated_total_tokens` - The estimated total tokens
-/// * `fiat_estimated_amount` - The fiat estimated amount
+/// * `estimated_output_tokens` - The estimated output tokens
 /// * `price_per_million` - The price per million
 /// * `selected_stack_small_id` - The selected stack small id
 /// * `endpoint` - The endpoint of the request
@@ -680,7 +695,7 @@ async fn handle_non_streaming_response(
         path = endpoint,
         completion_type = "streaming",
         stack_small_id,
-        estimated_total_tokens,
+        estimated_total_tokens = num_input_tokens + estimated_output_tokens,
         payload_hash
     )
 )]
@@ -691,10 +706,9 @@ async fn handle_streaming_response(
     user_id: i64,
     mut headers: HeaderMap,
     payload: &Value,
-    num_input_tokens: Option<i64>,
-    estimated_total_tokens: i64,
-    fiat_estimated_amount: Option<i64>,
-    price_per_million: Option<i64>,
+    num_input_tokens: i64,
+    estimated_output_tokens: i64,
+    price_per_million: i64,
     selected_stack_small_id: Option<i64>,
     endpoint: String,
     model_name: String,
@@ -745,9 +759,8 @@ async fn handle_streaming_response(
             stream,
             state_manager_sender,
             selected_stack_small_id,
-            num_input_tokens.unwrap_or(0),
-            estimated_total_tokens,
-            fiat_estimated_amount,
+            num_input_tokens,
+            estimated_output_tokens,
             price_per_million,
             start,
             user_id,
@@ -917,8 +930,8 @@ impl RequestModel for RequestModelCompletions {
                         }
                     })?;
                 Ok(ComputeUnitsEstimate {
-                    num_input_compute_units,
-                    max_total_compute_units: self.max_tokens,
+                    num_input_tokens: num_input_compute_units,
+                    max_output_tokens: self.max_tokens,
                 })
             }
             CompletionsPrompt::List(prompts) => {
@@ -931,23 +944,23 @@ impl RequestModel for RequestModelCompletions {
                     .map(|prompt| count_text_tokens(prompt, tokenizer).unwrap_or(0))
                     .sum();
                 Ok(ComputeUnitsEstimate {
-                    num_input_compute_units,
-                    max_total_compute_units: self.max_tokens,
+                    num_input_tokens: num_input_compute_units,
+                    max_output_tokens: self.max_tokens,
                 })
             }
             CompletionsPrompt::Tokens(tokens) => {
                 let num_input_compute_units = tokens.len() as u64;
                 Ok(ComputeUnitsEstimate {
-                    num_input_compute_units,
-                    max_total_compute_units: self.max_tokens,
+                    num_input_tokens: num_input_compute_units,
+                    max_output_tokens: self.max_tokens,
                 })
             }
             CompletionsPrompt::TokenArrays(token_arrays) => {
                 let num_input_compute_units =
                     token_arrays.iter().map(|tokens| tokens.len() as u64).sum();
                 Ok(ComputeUnitsEstimate {
-                    num_input_compute_units,
-                    max_total_compute_units: self.max_tokens,
+                    num_input_tokens: num_input_compute_units,
+                    max_output_tokens: self.max_tokens,
                 })
             }
         }

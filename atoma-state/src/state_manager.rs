@@ -4420,13 +4420,23 @@ impl AtomaState {
     /// This function will return an error if:
     ///
     /// - The database query fails to execute.
-    #[instrument(level = "trace", skip(self),fields(%user_id, %amount))]
-    pub async fn lock_user_fiat_balance(&self, user_id: i64, amount: i64) -> Result<bool> {
+    #[instrument(level = "trace", skip(self))]
+    pub async fn lock_user_fiat_balance(
+        &self,
+        user_id: i64,
+        input_amount: i64,
+        output_amount: i64,
+    ) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE fiat_balance SET overcharged_unsettled_amount = overcharged_unsettled_amount + $2 WHERE user_id = $1 AND usd_balance >= already_debited_amount + overcharged_unsettled_amount + $1",
+            "UPDATE fiat_balances 
+             SET overcharged_unsettled_input_amount = overcharged_unsettled_input_amount + $2,
+                 overcharged_unsettled_completions_amount = overcharged_unsettled_completions_amount + $3
+             WHERE user_id = $1 AND 
+                   usd_balance >= already_debited_completions_amount + already_debited_input_amount + overcharged_unsettled_completions_amount + overcharged_unsettled_input_amount + $2 + $3",
         )
         .bind(user_id)
-        .bind(amount)
+        .bind(input_amount)
+        .bind(output_amount)
         .execute(&self.db)
         .await?;
 
@@ -4452,28 +4462,31 @@ impl AtomaState {
     ///
     /// This function will return an error if:
     /// - The database query fails to execute.
-    #[instrument(
-        level = "trace",
-        skip_all,
-        fields(%user_id, %estimated_amount, %amount)
-    )]
+    #[instrument(level = "trace", skip(self))]
     pub async fn update_real_amount_fiat_balance(
         &self,
         user_id: i64,
-        estimated_amount: i64,
-        amount: i64,
+        estimated_input_amount: i64,
+        input_amount: i64,
+        estimated_output_amount: i64,
+        output_amount: i64,
     ) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE fiat_balance 
-                SET already_debited_amount = already_debited_amount + $3,
-                    overcharged_unsettled_amount = overcharged_unsettled_amount - $2,
-                    num_requests = num_requests + $4
+            "UPDATE fiat_balances 
+                SET 
+                    overcharged_unsettled_input_amount = overcharged_unsettled_input_amount - $2,
+                    already_debited_input_amount = already_debited_input_amount + $3,
+                    overcharged_unsettled_completions_amount = overcharged_unsettled_completions_amount - $4,
+                    already_debited_completions_amount = already_debited_completions_amount + $5,
+                    num_requests = num_requests + $6
                 WHERE user_id = $1",
         )
         .bind(user_id)
-        .bind(estimated_amount)
-        .bind(amount)
-        .bind(i64::from(amount > 0)) // If total amount is greater than 0 then the request was successful
+        .bind(estimated_input_amount)
+        .bind(input_amount)
+        .bind(estimated_output_amount)
+        .bind(output_amount)
+        .bind(i64::from(output_amount > 0)) // If total amount is greater than 0 then the request was successful
         .execute(&self.db)
         .await?;
 
@@ -4481,6 +4494,58 @@ impl AtomaState {
             return Err(AtomaStateManagerError::InsufficientBalance);
         }
 
+        Ok(())
+    }
+
+    /// Updates the usage per model for a user.
+    ///
+    /// This method updates the `usage_per_model` table for the specified user and model.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `model_name` - The name of the model.
+    /// * `total_tokens` - The total tokens used by the user for the model.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn update_usage(state_manager: &AtomaStateManager, user_id: i64, model_name: String, total_tokens: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.update_usage_per_model(user_id, model_name, total_tokens).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn update_usage_per_model(
+        &self,
+        user_id: i64,
+        model_name: String,
+        input_tokens: i64,
+        output_tokens: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO usage_per_model (user_id, model, total_input_tokens, total_output_tokens)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id, model) DO UPDATE SET
+                    total_input_tokens = usage_per_model.total_input_tokens + EXCLUDED.total_input_tokens,
+                    total_output_tokens = usage_per_model.total_output_tokens + EXCLUDED.total_output_tokens",
+        )
+        .bind(user_id)
+        .bind(model_name)
+        .bind(input_tokens)
+        .bind(output_tokens)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 }

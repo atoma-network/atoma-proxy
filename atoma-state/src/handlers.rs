@@ -8,7 +8,7 @@ use atoma_sui::events::{
 };
 use atoma_utils::compression::decompress_bytes;
 use chrono::{DateTime, Utc};
-use remote_attestation::DeviceEvidence;
+use remote_attestation_verification::CombinedEvidence;
 use tokio::sync::oneshot;
 use tracing::{error, info, instrument, trace};
 
@@ -1431,12 +1431,13 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::LockUserFiatBalance {
             user_id,
-            amount,
+            input_amount,
+            output_amount,
             result_sender,
         } => {
             let result = state_manager
                 .state
-                .lock_user_fiat_balance(user_id, amount)
+                .lock_user_fiat_balance(user_id, input_amount, output_amount)
                 .await;
             result_sender
                 .send(result)
@@ -1444,13 +1445,28 @@ pub async fn handle_state_manager_event(
         }
         AtomaAtomaStateManagerEvent::UpdateStackNumTokensFiat {
             user_id,
-            estimated_amount,
-            amount,
+            model_name,
+            estimated_input_amount,
+            input_amount,
+            estimated_output_amount,
+            output_amount,
         } => {
             state_manager
                 .state
-                .update_real_amount_fiat_balance(user_id, estimated_amount, amount)
+                .update_real_amount_fiat_balance(
+                    user_id,
+                    estimated_input_amount,
+                    input_amount,
+                    estimated_output_amount,
+                    output_amount,
+                )
                 .await?;
+            if output_amount > 0 {
+                state_manager
+                    .state
+                    .update_usage_per_model(user_id, model_name, input_amount, output_amount)
+                    .await?;
+            }
         }
     }
     Ok(())
@@ -1558,16 +1574,69 @@ pub async fn handle_node_key_rotation_event(
         device_type,
         evidence_bytes,
     } = event;
+
     let original_evidence_bytes = decompress_bytes(&evidence_bytes)?;
-    let evidence_data = serde_json::from_slice::<Vec<DeviceEvidence>>(&original_evidence_bytes)?;
-    let is_valid = remote_attestation_verification::attest_nvidia_evidence_list(
-        state_manager,
-        &evidence_data,
-        &new_public_key,
-        device_type,
-    )
-    .await
-    .is_ok();
+    let evidence_data = serde_json::from_slice::<Vec<CombinedEvidence>>(&original_evidence_bytes)?;
+
+    let (gpu_evidence_data, nvswitch_evidence_data): (Vec<_>, Vec<_>) = evidence_data
+        .into_iter()
+        .partition(|evidence| matches!(evidence, CombinedEvidence::Device(_)));
+
+    let gpu_evidence_data = gpu_evidence_data
+        .into_iter()
+        .filter_map(|e| {
+            if let CombinedEvidence::Device(evidence) = e {
+                Some(evidence)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let nvswitch_evidence_data = nvswitch_evidence_data
+        .into_iter()
+        .filter_map(|e| {
+            if let CombinedEvidence::NvSwitch(evidence) = e {
+                Some(evidence)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Check if ppcie mode is enabled for current attestation
+    let is_ppcie_mode = gpu_evidence_data.len() == 8 && nvswitch_evidence_data.len() == 4;
+
+    let is_valid = if is_ppcie_mode {
+        remote_attestation_verification::attest_nvidia_gpu_evidence_list(
+            state_manager,
+            &gpu_evidence_data,
+            &new_public_key,
+            device_type,
+        )
+        .await?;
+        remote_attestation_verification::attest_nvidia_nvswitch_evidence_list(
+            state_manager,
+            &nvswitch_evidence_data,
+            &new_public_key,
+            device_type,
+        )
+        .await?;
+        remote_attestation_verification::verify_topology(
+            &gpu_evidence_data,
+            &nvswitch_evidence_data,
+        )?;
+        true
+    } else {
+        remote_attestation_verification::attest_nvidia_gpu_evidence_list(
+            state_manager,
+            &gpu_evidence_data,
+            &new_public_key,
+            device_type,
+        )
+        .await
+        .is_ok()
+    };
     state_manager
         .state
         .update_node_public_key(
@@ -1734,20 +1803,61 @@ pub(crate) async fn handle_node_small_id_ownership_verification_event(
 pub mod remote_attestation_verification {
     use crate::{errors::AtomaStateRemoteAttestationError, AtomaStateManager};
 
-    use remote_attestation::{attest_remote, AttestError, DeviceEvidence};
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use remote_attestation_verifier::{
+        remote_gpu_attestation::AttestRemoteOptions, verify_gpu_attestation,
+        verify_nvswitch_attestation, AttestError, DeviceEvidence, NvSwitchEvidence,
+    };
+    use serde::{Deserialize, Serialize};
     use tracing::instrument;
 
     type Result<T> = std::result::Result<T, AtomaStateRemoteAttestationError>;
 
+    /// Combined evidence from a device and an NVSwitch
+    ///
+    /// This enum represents the evidence from a device and an NVSwitch, which is used to verify the integrity and authenticity of the GPU hardware and its execution environment.
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(tag = "evidence_type")]
+    pub enum CombinedEvidence {
+        /// Evidence from a device
+        #[serde(rename = "device")]
+        Device(DeviceEvidence),
+
+        /// Evidence from an NVSwitch
+        #[serde(rename = "nvswitch")]
+        NvSwitch(NvSwitchEvidence),
+    }
+
+    /// Attests the NVIDIA GPU evidence list
+    ///
+    /// This function attests the NVIDIA GPU evidence list by verifying the evidence data and the topology.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+    /// * `evidence_data` - A reference to the GPU evidence data
+    /// * `new_public_key` - The new public key
+    /// * `device_type` - The device type
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Ok(()) if the attestation is successful, or an error if the operation failed
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The GPU evidence data cannot be decoded
+    /// * The topology check fails
     #[instrument(
         level = "info",
         skip_all,
         fields(
             device_type = device_type,
             new_public_key = hex::encode(new_public_key),
-        )
+        ),
+        err
     )]
-    pub async fn attest_nvidia_evidence_list(
+    pub async fn attest_nvidia_gpu_evidence_list(
         state_manager: &AtomaStateManager,
         evidence_data: &[DeviceEvidence],
         new_public_key: &[u8],
@@ -1775,10 +1885,10 @@ pub mod remote_attestation_verification {
             device_type = device_type,
             "Attesting NVIDIA evidence list, with should_be_nonce: {should_be_nonce_hex}"
         );
-        let result = match attest_remote(
+        let result = match verify_gpu_attestation(
             evidence_data,
             &should_be_nonce_hex,
-            attest_remote::AttestRemoteOptions::default(),
+            AttestRemoteOptions::default(),
         )
         .await
         {
@@ -1814,5 +1924,203 @@ pub mod remote_attestation_verification {
                 AttestError::RemoteAttestationFailed,
             ))
         }
+    }
+
+    /// Attests the NVIDIA NVSwitch evidence list
+    ///
+    /// This function attests the NVIDIA NVSwitch evidence list by verifying the evidence data and the topology.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_manager` - A reference to the `AtomaStateManager` that provides access to the state database
+    /// * `nvswitch_evidence_data` - A reference to the NVSwitch evidence data
+    /// * `new_public_key` - The new public key
+    /// * `device_type` - The device type
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Ok(()) if the attestation is successful, or an error if the operation failed
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The NVSwitch evidence data cannot be decoded
+    /// * The topology check fails
+    #[instrument(
+        level = "info", 
+        skip_all,
+        fields(
+            device_type = device_type,
+            new_public_key = hex::encode(new_public_key),
+        ),
+        err,
+    )]
+    pub async fn attest_nvidia_nvswitch_evidence_list(
+        state_manager: &AtomaStateManager,
+        nvswitch_evidence_data: &[NvSwitchEvidence],
+        new_public_key: &[u8],
+        device_type: u16,
+    ) -> Result<()> {
+        let contract_nonce = state_manager
+            .state
+            .get_contract_key_rotation_nonce()
+            .await
+            .map_err(|_| AtomaStateRemoteAttestationError::FailedToRetrieveContractNonce)?;
+        let should_be_nonce = blake3::hash(
+            &[
+                &contract_nonce.to_le_bytes()[..],
+                new_public_key,
+                &device_type.to_le_bytes()[..],
+            ]
+            .concat(),
+        );
+        let should_be_nonce_hex = hex::encode(should_be_nonce.as_bytes());
+        let (result, _) = verify_nvswitch_attestation(
+            nvswitch_evidence_data,
+            &should_be_nonce_hex,
+            AttestRemoteOptions::default(),
+        ).await.map_err(|e| {
+            tracing::error!(
+                target = "atoma-state-handlers",
+                event = "attest-nvidia-evidence-list",
+                "NVSwitch attestation verification failed for device type: {device_type} and public key: {}, with error: {e}",
+                hex::encode(new_public_key),
+            );
+            AtomaStateRemoteAttestationError::FailedToAttestRemote(
+                AttestError::RemoteAttestationFailed,
+            )
+        })?;
+        if result {
+            tracing::info!(
+                target = "atoma-state-handlers",
+                event = "attest-nvidia-evidence-list",
+                "Attestation successful for device type: {device_type} and public key: {}",
+                hex::encode(new_public_key),
+            );
+            Ok(())
+        } else {
+            tracing::error!(
+                target = "atoma-state-handlers",
+                event = "attest-nvidia-evidence-list",
+                "Attestation failed for device type: {device_type} and public key: {}",
+                hex::encode(new_public_key),
+            );
+            Err(AtomaStateRemoteAttestationError::FailedToAttestRemote(
+                AttestError::RemoteAttestationFailed,
+            ))
+        }
+    }
+
+    /// Verifies the topology of the GPU and NVSwitch evidence data
+    ///
+    /// This function verifies the topology of the GPU and NVSwitch evidence data by decoding the evidence data and checking the topology.
+    ///
+    /// # Arguments
+    ///
+    /// * `gpu_evidence_data` - A reference to the GPU evidence data
+    /// * `nvswitch_evidence_data` - A reference to the NVSwitch evidence data
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Ok(()) if the topology is valid, or an error if the operation failed
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The GPU evidence data cannot be decoded
+    /// * The NVSwitch evidence data cannot be decoded
+    /// * The topology check fails
+    #[instrument(level = "info", skip_all, fields(topology_check = "true",), err)]
+    pub fn verify_topology(
+        gpu_evidence_data: &[DeviceEvidence],
+        nvswitch_evidence_data: &[NvSwitchEvidence],
+    ) -> Result<()> {
+        let gpu_evidence_data_refs = decode_evidence(
+            &gpu_evidence_data
+                .iter()
+                .map(|e| &e.evidence)
+                .collect::<Vec<_>>(),
+            "GPU",
+        )?;
+        let nvswitch_evidence_data_refs = decode_evidence(
+            &nvswitch_evidence_data
+                .iter()
+                .map(|e| &e.evidence)
+                .collect::<Vec<_>>(),
+            "NVSwitch",
+        )?;
+        let unique_switch_pdis_set = topology::topology::gpu_topology_check(
+            &gpu_evidence_data_refs
+                .iter()
+                .map(Vec::as_slice)
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| {
+            tracing::error!(
+                target = "atoma-state-handlers",
+                event = "verify-topology",
+                "Failed to check GPU topology: {e}",
+            );
+            AtomaStateRemoteAttestationError::TopologyCheckFailed {
+                check_type: "GPU topology check".to_string(),
+                error: Box::new(e),
+            }
+        })?;
+        topology::topology::switch_topology_check(
+            &nvswitch_evidence_data_refs
+                .iter()
+                .map(Vec::as_slice)
+                .collect::<Vec<_>>(),
+            gpu_evidence_data.len(),
+            unique_switch_pdis_set,
+        )
+        .map_err(|e| {
+            tracing::error!(
+                target = "atoma-state-handlers",
+                event = "verify-topology",
+                "Failed to check NVSwitch topology: {e}",
+            );
+            AtomaStateRemoteAttestationError::TopologyCheckFailed {
+                check_type: "NVSwitch topology check".to_string(),
+                error: Box::new(e),
+            }
+        })?;
+
+        tracing::info!(
+            target = "atoma-state-handlers",
+            event = "verify-topology",
+            "Topology verification completed successfully",
+        );
+        Ok(())
+    }
+
+    /// Decodes the evidence data from base64 to a vector of bytes
+    ///
+    /// This function decodes the evidence data from base64 to a vector of bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `evidence_list` - A reference to the evidence data
+    /// * `evidence_type` - The type of evidence
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Vec<Vec<u8>>>` - Ok(()) if the evidence data is decoded successfully, or an error if the operation failed
+    fn decode_evidence<T: AsRef<str>>(
+        evidence_list: &[T],
+        evidence_type: &str,
+    ) -> Result<Vec<Vec<u8>>> {
+        evidence_list
+            .iter()
+            .map(|evidence| {
+                STANDARD.decode(evidence.as_ref()).map_err(|e| {
+                    tracing::error!("Failed to decode {} evidence data: {}", evidence_type, e);
+                    AtomaStateRemoteAttestationError::FailedToDecode {
+                        evidence_type: evidence_type.to_string(),
+                        error: Box::new(e),
+                    }
+                })
+            })
+            .collect()
     }
 }
