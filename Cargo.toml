@@ -74,5 +74,6 @@ url                         = "2.5.4"
 utoipa                      = "5.3.1"
 utoipa-swagger-ui           = "9.0.1"
 uuid                        = "1.15.1"
+validator                   = { version = "0.20.0", features = [ "derive" ] }
 x25519-dalek                = "2.0.1"
 zeroize                     = "1.8.1"
