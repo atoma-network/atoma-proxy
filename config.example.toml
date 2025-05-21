@@ -25,6 +25,7 @@ models = [
 top_k = 10 # Number of top performing nodes to return in rankings
 
 [atoma_service]
+environment = "development" # or "production" based on your deployment used in sentry
 heartbeat_url = "my-heartbeat-url" # Heartbeat URL for the service
 hf_token = "<API_KEY>" # Hugging Face API token (required for gated/private models)
 modalities = [
@@ -41,9 +42,8 @@ models = [
 open_router_models_file = "/app/open_router.json" # Path to the Open Router JSON file for model configuration
 password = "password" # Authentication password for the service API
 revisions = [ "main", "main" ] # Model revision/version tags (must match models array length)
+sentry_dsn = "sentry_dsn" # Sentry DSN for error reporting
 service_bind_address = "0.0.0.0:8080" # HTTP service binding address and port (must match docker-compose.yml)
-environment           = "development"  # or "production" based on your deployment used in sentry
-sentry_dsn            = "sentry_dsn"   # Sentry DSN for error reporting
 
 [atoma_proxy_service]
 grafana_api_token     = ""             # Grafana API token (read-only permissions required)
