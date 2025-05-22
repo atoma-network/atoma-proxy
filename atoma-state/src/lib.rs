@@ -4,6 +4,7 @@
 #![allow(clippy::doc_markdown)]
 
 pub mod config;
+pub mod config_error;
 pub mod errors;
 pub mod handlers;
 pub mod metrics;

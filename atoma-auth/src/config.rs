@@ -1,23 +1,48 @@
-use config::Config;
+use config::{Config, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use thiserror::Error;
+use validator::Validate;
 
-/// Configuration for Postgres database connection.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Error, Debug)]
+pub enum AuthConfigError {
+    #[error("Invalid auth configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Missing required field: {0}")]
+    MissingField(String),
+
+    #[error("Configuration file error: {0}")]
+    FileError(#[from] config::ConfigError),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Validate)]
 pub struct AtomaAuthConfig {
-    /// The secret key for JWT authentication.
-    pub secret_key: String,
-    /// The access token lifetime in minutes.
+    /// Access token validity duration in minutes
+    #[validate(range(min = 1, message = "access token lifetime must be at least 1 minute"))]
     pub access_token_lifetime: usize,
-    /// The refresh token lifetime in days.
-    pub refresh_token_lifetime: usize,
-    /// Google client id.
+
+    /// Google OAuth client ID (required only when google-oauth feature is enabled)
+    #[validate(length(
+        min = 1,
+        message = "google client ID cannot be empty when google-oauth is enabled"
+    ))]
     #[cfg(feature = "google-oauth")]
     pub google_client_id: String,
+
+    /// Refresh token validity duration in days
+    #[validate(range(min = 1, message = "refresh token lifetime must be at least 1 day"))]
+    pub refresh_token_lifetime: usize,
+
+    /// JWT signing key for token generation
+    #[validate(length(min = 1, message = "secret key cannot be empty"))]
+    pub secret_key: String,
 }
 
 impl AtomaAuthConfig {
-    /// Constructor
     #[must_use]
     pub const fn new(
         secret_key: String,
@@ -26,54 +51,46 @@ impl AtomaAuthConfig {
         #[cfg(feature = "google-oauth")] google_client_id: String,
     ) -> Self {
         Self {
-            secret_key,
             access_token_lifetime,
-            refresh_token_lifetime,
             #[cfg(feature = "google-oauth")]
             google_client_id,
+            refresh_token_lifetime,
+            secret_key,
         }
     }
 
-    /// Creates a new `AtomaAuthConfig` instance from a configuration file.
+    /// Validates the auth configuration
     ///
-    /// # Arguments
+    /// # Errors
     ///
-    /// * `config_file_path` - A path-like object representing the location of the configuration file.
+    /// Returns `AuthConfigError::ValidationError` if any validation rules fail
+    pub fn validate(&self) -> Result<(), AuthConfigError> {
+        Validate::validate(self).map_err(|e| AuthConfigError::ValidationError(e.to_string()))
+    }
+
+    /// Loads configuration from a file path
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Returns a new `AtomaAuthConfig` instance populated with values from the configuration file.
+    /// Returns `AuthConfigError` if the configuration file cannot be read or parsed
     ///
     /// # Panics
     ///
-    /// This method will panic if:
-    /// - The configuration file cannot be read or parsed.
-    /// - The "atoma-auth" section is missing from the configuration file.
-    /// - The required fields are missing or have invalid types in the configuration file.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use std::path::Path;
-    /// use atoma_node::atoma_state::AtomaAuthConfig;
-    ///
-    /// let config = AtomaAuthConfig::from_file_path("path/to/config.toml");
-    /// ```
-    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Self {
+    /// Panics if the path cannot be converted to a string
+    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Result<Self, AuthConfigError> {
         let builder = Config::builder()
-            .add_source(config::File::with_name(
-                config_file_path.as_ref().to_str().unwrap(),
-            ))
+            .add_source(File::with_name(config_file_path.as_ref().to_str().unwrap()))
             .add_source(
                 config::Environment::with_prefix("ATOMA_AUTH")
                     .keep_prefix(true)
                     .separator("__"),
             );
-        let config = builder
-            .build()
-            .expect("Failed to generate atoma state configuration file");
-        config
-            .get::<Self>("atoma_auth")
-            .expect("Failed to generate configuration instance")
+        let config = builder.build()?;
+        let config = config.get::<Self>("atoma_auth")?;
+
+        // Validate the configuration
+        config.validate()?;
+
+        Ok(config)
     }
 }
