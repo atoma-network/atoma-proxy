@@ -66,6 +66,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: create
   /v1/completions#stream:
     post:
       tags:
@@ -97,6 +98,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: stream
   /v1/confidential/completions:
     post:
       tags:
@@ -153,6 +155,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialCompletions
+      x-speakeasy-name-override: create
   /v1/confidential/completions#stream:
     post:
       tags:
@@ -184,6 +188,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialCompletions
+      x-speakeasy-name-override: stream
   /v1/chat/completions:
     post:
       tags:
@@ -228,6 +234,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: create
   /v1/chat/completions#stream:
     post:
       tags:
@@ -260,6 +267,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: stream
   /v1/confidential/chat/completions:
     post:
       tags:
@@ -316,6 +324,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialChat
+      x-speakeasy-name-override: create
   /v1/confidential/chat/completions#stream:
     post:
       tags:
@@ -347,6 +357,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialChat
+      x-speakeasy-name-override: stream
   /v1/confidential/embeddings:
     post:
       tags:
@@ -386,6 +398,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialEmbeddings
+      x-speakeasy-name-override: create
   /v1/confidential/images/generations:
     post:
       tags:
@@ -418,6 +432,8 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-group: confidentialImages
+      x-speakeasy-name-override: generate
   /v1/embeddings:
     post:
       tags:
@@ -456,6 +472,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: create
   /health:
     get:
       tags:
@@ -471,6 +488,7 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
         "500":
           description: Service is unhealthy
+      x-speakeasy-name-override: check
   /v1/images/generations:
     post:
       tags:
@@ -506,6 +524,7 @@ paths:
           description: Internal server error
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: generate
   /v1/models:
     get:
       tags:
@@ -527,6 +546,7 @@ paths:
           description: Failed to retrieve list of available models
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: list
   /v1/open_router/models:
     get:
       tags:
@@ -545,6 +565,7 @@ paths:
               schema: {}
         "500":
           description: Failed to retrieve list of available models
+      x-speakeasy-name-override: getAll
   /v1/nodes:
     post:
       tags:
@@ -585,6 +606,7 @@ paths:
                 $ref: "#/components/schemas/NodesCreateResponse"
         "500":
           description: Failed to register node public address
+      x-speakeasy-name-override: create
   /v1/nodes/lock:
     post:
       tags:
@@ -625,6 +647,7 @@ paths:
           description: No node found for model with confidential compute enabled for requested model
       security:
         - bearerAuth: []
+      x-speakeasy-name-override: createLock
 components:
   schemas:
     ChatCompletionChoice:
