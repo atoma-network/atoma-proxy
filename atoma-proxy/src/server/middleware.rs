@@ -50,7 +50,7 @@ const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 
 /// Maximum size of the body in bytes.
 /// This is to prevent DoS attacks by limiting the size of the request body.
-const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
+const MAX_BODY_SIZE: usize = 1024 * 1024 * 1024; // 1GB
 
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
