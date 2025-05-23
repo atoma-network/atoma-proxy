@@ -30,6 +30,9 @@ const NODE_SMALL_ID_LABEL: &str = "node_small_id";
 /// Default top k best available nodes
 pub(crate) const DEFAULT_TOP_K_BEST_AVAILABLE_NODES: usize = 10;
 
+/// Environment variable to disable metrics collection
+const DISABLE_METRICS_ENV: &str = "DISABLE_METRICS";
+
 type Result<T> = std::result::Result<T, MetricsServiceError>;
 
 /// HTTP client for the node metrics queries
@@ -88,9 +91,26 @@ pub async fn trigger_new_metrics_collection_task(
     request_best_available_models_receiver: FlumeReceiver<(String, oneshot::Sender<Vec<i64>>)>,
     mut shutdown_signal: watch::Receiver<bool>,
 ) -> Result<()> {
+    // Check if metrics collection is disabled
+    if std::env::var(DISABLE_METRICS_ENV).unwrap_or_default() == "true" {
+        tracing::info!(
+            target = "atoma-state-manager",
+            event = "metrics_collection_disabled",
+            "Metrics collection disabled via environment variable"
+        );
+        loop {
+            if shutdown_signal.changed().await.is_err() || *shutdown_signal.borrow() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        return Ok(());
+    }
+
     let best_available_nodes = Arc::new(RwLock::new(HashMap::with_capacity(
         metrics_collection_config.models.len(),
     )));
+
     loop {
         tokio::select! {
             () = tokio::time::sleep(DURATION_UNTIL_NEXT_TOP_K_BEST_AVAILABLE_NODES_SELECTION) => {
@@ -1047,9 +1067,9 @@ impl NodeMetricsCollector {
         format!(
             r#"topk({top_k},
                 -1 * (
-                    (embeddings_queue_duration{{model="{model}"}} + 
-                    embeddings_inference_duration{{model="{model}"}}) * 
-                    (1 + (embeddings_batch_tokens{{model="{model}"}} / 
+                    (embeddings_queue_duration{{model="{model}"}} +
+                    embeddings_inference_duration{{model="{model}"}}) *
+                    (1 + (embeddings_batch_tokens{{model="{model}"}} /
                           max(embeddings_batch_size{{model="{model}"}}, 1) / 1000000))
                 )
             )"#,
