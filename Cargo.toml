@@ -59,7 +59,7 @@ sui-sdk                     = { git = "https://github.com/mystenlabs/sui", packa
 sui-sdk-types               = "0.0.2"
 thiserror                   = "2.0.12"
 tokenizers                  = "0.21.0"
-tokio                       = "1.45.0"
+tokio                       = "1.45.1"
 toml                        = "0.8.19"
 tonic                       = "0.12"
 topology                    = { git = "https://github.com/atoma-network/nvrust", branch = "main" }
