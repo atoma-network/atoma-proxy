@@ -296,6 +296,14 @@ and remove the specific postgres volumes:
 docker system prune -af --volumes
 ```
 
+#### Local Debugging
+
+You may not want to enable metrics collection when debugging locally given that you may want to debug the `proxy` as a standalone instance. To do this you can pass in the env variable `DISABLE_METRICS` as `true` to disable metrics collection. E.g.
+
+```
+DISABLE_METRICS=true cargo run -- --config-path=./config.toml
+```
+
 #### Troubleshooting
 
 1. Check if services are running:
