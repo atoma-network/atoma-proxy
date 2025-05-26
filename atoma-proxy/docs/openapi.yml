@@ -1,33 +1,33 @@
 openapi: 3.1.0
 info:
   title: atoma-proxy
-  description: ""
+  description: ''
   license:
     name: Apache-2.0
     identifier: Apache-2.0
   version: 0.1.0
 servers:
-  - url: https://api.atoma.network
-    x-speakeasy-retries:
-      strategy: backoff
-      backoff:
-        initialInterval: 500
-        maxInterval: 60000
-        maxElapsedTime: 3600000
-        randomizationFactor: 0.5
-        multiplier: 1.5
-      statusCodes:
-        - 408
-        - 429
-        - 500
-        - 502
-        - 503
-        - 504
+- url: https://api.atoma.network
+  x-speakeasy-retries:
+    strategy: backoff
+    backoff:
+      initialInterval: 500
+      maxInterval: 60000
+      maxElapsedTime: 3600000
+      exponent: 1.5
+    statusCodes:
+    - 408
+    - 429
+    - 500
+    - 502
+    - 503
+    - 504
+    retryConnectionErrors: true
 paths:
   /v1/completions:
     post:
       tags:
-        - Completions
+      - Completions
       summary: Create completions
       description: |-
         This function processes completion requests by using the chat completions endpoint.
@@ -49,60 +49,64 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CompletionsRequest"
+              $ref: '#/components/schemas/CompletionsRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Chat completions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CompletionsResponse"
-        "400":
+                $ref: '#/components/schemas/CompletionsResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /v1/completions#stream:
     post:
       tags:
-        - Completions
+      - Completions
       operationId: completions_create_stream
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCompletionsStreamRequest"
+              $ref: '#/components/schemas/CreateCompletionsStreamRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Completions
           content:
             text/event-stream:
               schema:
                 type: object
                 required:
-                  - data
+                - data
                 properties:
                   data:
-                    $ref: "#/components/schemas/CompletionsStreamResponse"
-        "400":
+                    type: object
+                    required:
+                    - choices
+                    properties:
+                      choices:
+                        $ref: '#/components/schemas/CompletionsStreamResponse'
+              x-speakeasy-sse-sentinel: '[DONE]'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: stream
+      - bearerAuth: []
   /v1/confidential/completions:
     post:
       tags:
-        - Confidential Completions
+      - Confidential Completions
       summary: Create confidential completions
       description: |-
         This handler processes completions requests in a confidential manner, providing additional
@@ -138,62 +142,64 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Confidential chat completions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConfidentialComputeResponse"
-        "400":
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialCompletions
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /v1/confidential/completions#stream:
     post:
       tags:
-        - Confidential Completions
+      - Confidential Completions
       operationId: confidential_completions_create_stream
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Chat completions
           content:
             text/event-stream:
               schema:
                 type: object
                 required:
-                  - data
+                - data
                 properties:
                   data:
-                    $ref: "#/components/schemas/ConfidentialComputeStreamResponse"
-        "400":
+                    type: object
+                    required:
+                    - choices
+                    properties:
+                      choices:
+                        $ref: '#/components/schemas/ConfidentialComputeStreamResponse'
+              x-speakeasy-sse-sentinel: '[DONE]'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialCompletions
-      x-speakeasy-name-override: stream
+      - bearerAuth: []
   /v1/chat/completions:
     post:
       tags:
-        - Chat
+      - Chat
       summary: Create chat completions
       description: |-
         This function processes chat completion requests by determining whether to use streaming
@@ -217,61 +223,64 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateChatCompletionRequest"
+              $ref: '#/components/schemas/CreateChatCompletionRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Chat completions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChatCompletionResponse"
-        "400":
+                $ref: '#/components/schemas/ChatCompletionResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /v1/chat/completions#stream:
     post:
       tags:
-        - Chat
+      - Chat
       operationId: chat_completions_create_stream
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateChatCompletionStreamRequest"
+              $ref: '#/components/schemas/CreateChatCompletionStreamRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Chat completions
           content:
             text/event-stream:
               schema:
                 type: object
                 required:
-                  - data
+                - data
                 properties:
                   data:
-                    $ref: "#/components/schemas/ChatCompletionChunk"
-              x-speakeasy-sse-sentinel: "[DONE]"
-        "400":
+                    type: object
+                    required:
+                    - choices
+                    properties:
+                      choices:
+                        $ref: '#/components/schemas/ChatCompletionStreamResponse'
+              x-speakeasy-sse-sentinel: '[DONE]'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: stream
+      - bearerAuth: []
   /v1/confidential/chat/completions:
     post:
       tags:
-        - Confidential Chat
+      - Confidential Chat
       summary: Create confidential chat completions
       description: |-
         This handler processes chat completion requests in a confidential manner, providing additional
@@ -307,62 +316,64 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Confidential chat completions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConfidentialComputeResponse"
-        "400":
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialChat
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /v1/confidential/chat/completions#stream:
     post:
       tags:
-        - Confidential Chat
+      - Confidential Chat
       operationId: confidential_chat_completions_create_stream
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Chat completions
           content:
             text/event-stream:
               schema:
                 type: object
                 required:
-                  - data
+                - data
                 properties:
                   data:
-                    $ref: "#/components/schemas/ConfidentialComputeStreamResponse"
-        "400":
+                    type: object
+                    required:
+                    - choices
+                    properties:
+                      choices:
+                        $ref: '#/components/schemas/ConfidentialComputeStreamResponse'
+              x-speakeasy-sse-sentinel: '[DONE]'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialChat
-      x-speakeasy-name-override: stream
+      - bearerAuth: []
   /v1/confidential/embeddings:
     post:
       tags:
-        - Confidential Embeddings
+      - Confidential Embeddings
       summary: Create confidential embeddings
       description: |-
         This endpoint follows the OpenAI API format for generating vector embeddings from input text,
@@ -381,29 +392,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Confidential embeddings generated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConfidentialComputeResponse"
-        "400":
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialEmbeddings
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /v1/confidential/images/generations:
     post:
       tags:
-        - Confidential Images
+      - Confidential Images
       summary: Create confidential image
       description: |-
         This handler processes image generation requests in a confidential manner, providing additional
@@ -415,29 +424,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfidentialComputeRequest"
+              $ref: '#/components/schemas/ConfidentialComputeRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Image generations
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConfidentialComputeResponse"
-        "400":
+                $ref: '#/components/schemas/ConfidentialComputeResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-group: confidentialImages
-      x-speakeasy-name-override: generate
+      - bearerAuth: []
   /v1/embeddings:
     post:
       tags:
-        - Embeddings
+      - Embeddings
       summary: Create embeddings
       description: |-
         This endpoint follows the OpenAI API format for generating vector embeddings from input text.
@@ -455,44 +462,42 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateEmbeddingRequest"
+              $ref: '#/components/schemas/CreateEmbeddingRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Embeddings generated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreateEmbeddingResponse"
-        "400":
+                $ref: '#/components/schemas/CreateEmbeddingResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: create
+      - bearerAuth: []
   /health:
     get:
       tags:
-        - Health
+      - Health
       summary: Health
       operationId: health
       responses:
-        "200":
+        '200':
           description: Service is healthy
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
-        "500":
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
           description: Service is unhealthy
-      x-speakeasy-name-override: check
   /v1/images/generations:
     post:
       tags:
-        - Images
+      - Images
       summary: Create image
       description: |-
         This endpoint processes requests to generate images using AI models by forwarding them
@@ -507,28 +512,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateImageRequest"
+              $ref: '#/components/schemas/CreateImageRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Image generations
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreateImageResponse"
-        "400":
+                $ref: '#/components/schemas/CreateImageResponse'
+        '400':
           description: Bad request
-        "401":
+        '401':
           description: Unauthorized
-        "500":
+        '500':
           description: Internal server error
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: generate
+      - bearerAuth: []
   /v1/models:
     get:
       tags:
-        - Models
+      - Models
       summary: List models
       description: |-
         This endpoint mimics the OpenAI models endpoint format, returning a list of
@@ -536,21 +540,20 @@ paths:
         OpenAI-compatible fields to ensure compatibility with existing OpenAI client libraries.
       operationId: models_list
       responses:
-        "200":
+        '200':
           description: List of available models
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ModelList"
-        "500":
+                $ref: '#/components/schemas/ModelList'
+        '500':
           description: Failed to retrieve list of available models
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: list
+      - bearerAuth: []
   /v1/open_router/models:
     get:
       tags:
-        - Models
+      - Models
       summary: OpenRouter models listing endpoint
       description: |-
         This endpoint returns a list of available models from the OpenRouter
@@ -558,18 +561,17 @@ paths:
         information about the models, including their IDs and other metadata.
       operationId: open_router_models_list
       responses:
-        "200":
+        '200':
           description: List of available models
           content:
             application/json:
               schema: {}
-        "500":
+        '500':
           description: Failed to retrieve list of available models
-      x-speakeasy-name-override: getAll
   /v1/nodes:
     post:
       tags:
-        - Nodes
+      - Nodes
       summary: Create node
       description: |-
         This endpoint allows nodes to register or update their public address in the system.
@@ -595,22 +597,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NodesCreateRequest"
+              $ref: '#/components/schemas/NodesCreateRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Node public address registered successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NodesCreateResponse"
-        "500":
+                $ref: '#/components/schemas/NodesCreateResponse'
+        '500':
           description: Failed to register node public address
-      x-speakeasy-name-override: create
   /v1/nodes/lock:
     post:
       tags:
-        - Nodes
+      - Nodes
       summary: Create a node lock for confidential compute
       description: |-
         This endpoint attempts to find a suitable node and retrieve its public key for encryption
@@ -632,22 +633,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NodesCreateLockRequest"
+              $ref: '#/components/schemas/NodesCreateLockRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Node DH public key requested successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NodesCreateLockResponse"
-        "500":
+                $ref: '#/components/schemas/NodesCreateLockResponse'
+        '500':
           description: Failed to request node DH public key
-        "503":
+        '503':
           description: No node found for model with confidential compute enabled for requested model
       security:
-        - bearerAuth: []
-      x-speakeasy-name-override: createLock
+      - bearerAuth: []
 components:
   schemas:
     ChatCompletionChoice:
@@ -658,13 +658,13 @@ components:
         This is used to represent the chat completion choice in the chat completion request.
         It can be either a chat completion message or a chat completion chunk.
       required:
-        - index
-        - message
+      - index
+      - message
       properties:
         finish_reason:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The reason the chat completion was finished.
           example: stop
         index:
@@ -674,11 +674,11 @@ components:
           example: 0
         logprobs:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/ChatCompletionLogProbs"
-              description: Log probability information for the choice, if applicable.
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionLogProbs'
+            description: Log probability information for the choice, if applicable.
         message:
-          $ref: "#/components/schemas/ChatCompletionMessage"
+          $ref: '#/components/schemas/ChatCompletionMessage'
           description: The chat completion message.
     ChatCompletionChunk:
       type: object
@@ -688,16 +688,16 @@ components:
         This is used to represent the chat completion chunk in the chat completion request.
         It can be either a chat completion chunk or a chat completion chunk choice.
       required:
-        - id
-        - object
-        - created
-        - model
-        - choices
+      - id
+      - object
+      - created
+      - model
+      - choices
       properties:
         choices:
           type: array
           items:
-            $ref: "#/components/schemas/ChatCompletionChunkChoice"
+            $ref: '#/components/schemas/ChatCompletionChunkChoice'
           description: A list of chat completion chunk choices.
           example: '[{"index": 0, "delta": {"role": "assistant", "content": "Hello! How can you help me today?"}, "logprobs": null, "finish_reason": null, "stop_reason": null}]'
         created:
@@ -719,9 +719,9 @@ components:
           example: chat.completion.chunk
         usage:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/CompletionUsage"
-              description: Usage statistics for the completion request.
+          - type: 'null'
+          - $ref: '#/components/schemas/CompletionUsage'
+            description: Usage statistics for the completion request.
     ChatCompletionChunkChoice:
       type: object
       description: |-
@@ -729,16 +729,16 @@ components:
 
         This is used to represent the chat completion chunk choice in the chat completion request.
       required:
-        - index
-        - delta
+      - index
+      - delta
       properties:
         delta:
-          $ref: "#/components/schemas/ChatCompletionChunkDelta"
+          $ref: '#/components/schemas/ChatCompletionChunkDelta'
           description: The chat completion delta message for streaming.
         finish_reason:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The reason the chat completion was finished, if applicable.
           example: stop
         index:
@@ -748,14 +748,14 @@ components:
           example: 0
         logprobs:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/ChatCompletionLogProbs"
-              description: Log probability information for the choice, if applicable.
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionLogProbs'
+            description: Log probability information for the choice, if applicable.
         stop_reason:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/StopReason"
-              description: The reason the chat completion was stopped, if applicable.
+          - type: 'null'
+          - $ref: '#/components/schemas/StopReason'
+            description: The reason the chat completion was stopped, if applicable.
     ChatCompletionChunkDelta:
       type: object
       description: |-
@@ -766,27 +766,27 @@ components:
       properties:
         content:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The content of the message, if present in this chunk.
           example: Hello
         reasoning_content:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The reasoning content, if present in this chunk.
         role:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The role of the message author, if present in this chunk.
           example: assistant
         tool_calls:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
-            $ref: "#/components/schemas/ChatCompletionChunkDeltaToolCall"
+            $ref: '#/components/schemas/ChatCompletionChunkDeltaToolCall'
           description: The tool calls information, if present in this chunk.
     ChatCompletionChunkDeltaToolCall:
       type: object
@@ -796,15 +796,15 @@ components:
         This is used to represent the chat completion chunk delta tool call in the chat completion request.
         It can be either a chat completion chunk delta tool call or a chat completion chunk delta tool call function.
       required:
-        - id
-        - type
-        - index
+      - id
+      - type
+      - index
       properties:
         function:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/ChatCompletionChunkDeltaToolCallFunction"
-              description: The function of the tool call.
+          - type: 'null'
+          - $ref: '#/components/schemas/ChatCompletionChunkDeltaToolCallFunction'
+            description: The function of the tool call.
         id:
           type: string
           description: The ID of the tool call.
@@ -825,13 +825,13 @@ components:
       properties:
         arguments:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The arguments of the tool call function.
         name:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The name of the tool call function.
     ChatCompletionLogProb:
       type: object
@@ -841,13 +841,13 @@ components:
         This is used to represent the chat completion log prob in the chat completion request.
         It can be either a chat completion log prob or a chat completion log prob choice.
       required:
-        - logprob
-        - token
+      - logprob
+      - token
       properties:
         bytes:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
             type: integer
             format: int32
@@ -873,10 +873,10 @@ components:
       properties:
         content:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
-            $ref: "#/components/schemas/ChatCompletionLogProbsContent"
+            $ref: '#/components/schemas/ChatCompletionLogProbsContent'
           description: The log probs of the chat completion.
     ChatCompletionLogProbsContent:
       type: object
@@ -886,105 +886,105 @@ components:
         This is used to represent the chat completion log probs content in the chat completion request.
         It can be either a chat completion log probs content or a chat completion log probs content choice.
       required:
-        - top_logprobs
+      - top_logprobs
       properties:
         top_logprobs:
           type: array
           items:
-            $ref: "#/components/schemas/ChatCompletionLogProb"
+            $ref: '#/components/schemas/ChatCompletionLogProb'
     ChatCompletionMessage:
       oneOf:
-        - type: object
-          title: System
-          description: The role of the messages author, in this case system.
-          required:
-            - role
-          properties:
-            content:
-              oneOf:
-                - type: "null"
-                - $ref: "#/components/schemas/MessageContent"
-                  description: The contents of the message.
-            name:
-              type:
-                - string
-                - "null"
-              description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
-              example: AI expert
-            role:
-              type: string
-              enum:
-                - system
-        - type: object
-          title: User
-          description: The role of the messages author, in this case user.
-          required:
-            - role
-          properties:
-            content:
-              oneOf:
-                - type: "null"
-                - $ref: "#/components/schemas/MessageContent"
-                  description: The contents of the message.
-            name:
-              type:
-                - string
-                - "null"
-              description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
-              example: John Doe
-            role:
-              type: string
-              enum:
-                - user
-        - type: object
-          title: Assistant
-          description: The role of the messages author, in this case assistant.
-          required:
-            - role
-          properties:
-            content:
-              oneOf:
-                - type: "null"
-                - $ref: "#/components/schemas/MessageContent"
-                  description: The contents of the message.
-            name:
-              type:
-                - string
-                - "null"
-              description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
-              example: AI
-            refusal:
-              type:
-                - string
-                - "null"
-              description: The refusal message by the assistant.
-            role:
-              type: string
-              enum:
-                - assistant
-            tool_calls:
-              type: array
-              items:
-                $ref: "#/components/schemas/ToolCall"
-              description: The tool calls generated by the model, such as function calls.
-        - type: object
-          title: Tool
-          description: The role of the messages author, in this case tool.
-          required:
-            - role
-          properties:
-            content:
-              oneOf:
-                - type: "null"
-                - $ref: "#/components/schemas/MessageContent"
-                  description: The contents of the message.
-            role:
-              type: string
-              enum:
-                - tool
-            tool_call_id:
-              type: string
-              description: Tool call that this message is responding to.
+      - type: object
+        title: System
+        description: The role of the messages author, in this case system.
+        required:
+        - role
+        properties:
+          content:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/MessageContent'
+              description: The contents of the message.
+          name:
+            type:
+            - string
+            - 'null'
+            description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+            example: AI expert
+          role:
+            type: string
+            enum:
+            - system
+      - type: object
+        title: User
+        description: The role of the messages author, in this case user.
+        required:
+        - role
+        properties:
+          content:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/MessageContent'
+              description: The contents of the message.
+          name:
+            type:
+            - string
+            - 'null'
+            description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+            example: John Doe
+          role:
+            type: string
+            enum:
+            - user
+      - type: object
+        title: Assistant
+        description: The role of the messages author, in this case assistant.
+        required:
+        - role
+        properties:
+          content:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/MessageContent'
+              description: The contents of the message.
+          name:
+            type:
+            - string
+            - 'null'
+            description: An optional name for the participant. Provides the model information to differentiate between participants of the same role.
+            example: AI
+          refusal:
+            type:
+            - string
+            - 'null'
+            description: The refusal message by the assistant.
+          role:
+            type: string
+            enum:
+            - assistant
+          tool_calls:
+            type: array
+            items:
+              $ref: '#/components/schemas/ToolCall'
+            description: The tool calls generated by the model, such as function calls.
+      - type: object
+        title: Tool
+        description: The role of the messages author, in this case tool.
+        required:
+        - role
+        properties:
+          content:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/MessageContent'
+              description: The contents of the message.
+          role:
+            type: string
+            enum:
+            - tool
+          tool_call_id:
+            type: string
+            description: Tool call that this message is responding to.
       description: |-
         A message that is part of a conversation which is based on the role
         of the author of the message.
@@ -998,7 +998,7 @@ components:
 
         This is used to represent the named function in the chat completion request.
       required:
-        - name
+      - name
       properties:
         name:
           type: string
@@ -1010,11 +1010,11 @@ components:
 
         This is used to represent the named tool choice in the chat completion request.
       required:
-        - type
-        - function
+      - type
+      - function
       properties:
         function:
-          $ref: "#/components/schemas/ChatCompletionNamedFunction"
+          $ref: '#/components/schemas/ChatCompletionNamedFunction'
           description: The function of the tool choice.
         type:
           type: string
@@ -1027,13 +1027,13 @@ components:
         This is used to represent the chat completion request in the chat completion request.
         It can be either a chat completion or a chat completion stream.
       required:
-        - model
-        - messages
+      - model
+      - messages
       properties:
         frequency_penalty:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on their
@@ -1043,25 +1043,25 @@ components:
           description: Controls how the model responds to function calls
         functions:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items: {}
           description: A list of functions the model may generate JSON inputs for
           example:
-            - name: get_current_weather
-              description: Get the current weather in a location
-              parameters:
-                type: object
-                properties:
-                  location:
-                    type: string
-                    description: The location to get the weather for
-                required:
-                  - location
+          - name: get_current_weather
+            description: Get the current weather in a location
+            parameters:
+              type: object
+              properties:
+                location:
+                  type: string
+                  description: The location to get the weather for
+              required:
+              - location
         logit_bias:
           type:
-            - object
-            - "null"
+          - object
+          - 'null'
           description: |-
             Modify the likelihood of specified tokens appearing in the completion.
 
@@ -1078,19 +1078,19 @@ components:
             format: int32
             minimum: 0
           example:
-            "1234567890": 0.5
-            "1234567891": -0.5
+            '1234567890': 0.5
+            '1234567891': -0.5
         max_completion_tokens:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
           example: 4096
         max_tokens:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
           deprecated: true
@@ -1098,36 +1098,36 @@ components:
         messages:
           type: array
           items:
-            $ref: "#/components/schemas/ChatCompletionMessage"
+            $ref: '#/components/schemas/ChatCompletionMessage'
           description: A list of messages comprising the conversation so far
           example:
-            - role: system
-              content: You are a helpful AI assistant
-            - role: user
-              content: Hello!
-            - role: assistant
-              content: I'm here to help you with any questions you have. How can I assist you today?
+          - role: system
+            content: You are a helpful AI assistant
+          - role: user
+            content: Hello!
+          - role: assistant
+            content: I'm here to help you with any questions you have. How can I assist you today?
         model:
           type: string
           description: ID of the model to use
           example: meta-llama/Llama-3.3-70B-Instruct
         n:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: How many chat completion choices to generate for each input message
           example: 1
         parallel_tool_calls:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Whether to enable parallel tool calls.
           example: true
         presence_penalty:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on
@@ -1135,20 +1135,20 @@ components:
           example: 0.0
         response_format:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/ResponseFormat"
-              description: The format to return the response in
+          - type: 'null'
+          - $ref: '#/components/schemas/ResponseFormat'
+            description: The format to return the response in
         seed:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int64
           description: If specified, our system will make a best effort to sample deterministically
           example: 123
         service_tier:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: |-
             Specifies the latency tier to use for processing the request. This parameter is relevant for customers subscribed to the scale tier service:
 
@@ -1159,60 +1159,60 @@ components:
           example: auto
         stop:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
             type: string
           description: Up to 4 sequences where the API will stop generating further tokens
           example: json(["stop", "halt"])
-          default: "[]"
+          default: '[]'
         stream:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Whether to stream back partial progress
           example: false
         stream_options:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/StreamOptions"
-              description: "Options for streaming response. Only set this when you set stream: true."
+          - type: 'null'
+          - $ref: '#/components/schemas/StreamOptions'
+            description: 'Options for streaming response. Only set this when you set stream: true.'
         temperature:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: What sampling temperature to use, between 0 and 2
           example: 0.7
         tool_choice:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/ToolChoice"
-              description: Controls which (if any) tool the model should use
+          - type: 'null'
+          - $ref: '#/components/schemas/ToolChoice'
+            description: Controls which (if any) tool the model should use
         tools:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
-            $ref: "#/components/schemas/ChatCompletionToolsParam"
+            $ref: '#/components/schemas/ChatCompletionToolsParam'
           description: A list of tools the model may call
           example:
-            - type: function
-              function:
-                name: get_current_weather
-                description: Get the current weather in a location
-                parameters:
-                  type: object
-                  properties:
-                    location:
-                      type: string
-                      description: The location to get the weather for
-                  required:
-                    - location
+          - type: function
+            function:
+              name: get_current_weather
+              description: Get the current weather in a location
+              parameters:
+                type: object
+                properties:
+                  location:
+                    type: string
+                    description: The location to get the weather for
+                required:
+                - location
         top_logprobs:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: |-
             An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
@@ -1220,15 +1220,15 @@ components:
           example: 1
         top_p:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: An alternative to sampling with temperature
           example: 1.0
         user:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: A unique identifier representing your end-user
           example: user-1234
     ChatCompletionResponse:
@@ -1239,16 +1239,16 @@ components:
         This is used to represent the chat completion response in the chat completion request.
         It can be either a chat completion or a chat completion stream.
       required:
-        - id
-        - created
-        - model
-        - choices
-        - object
+      - id
+      - created
+      - model
+      - choices
+      - object
       properties:
         choices:
           type: array
           items:
-            $ref: "#/components/schemas/ChatCompletionChoice"
+            $ref: '#/components/schemas/ChatCompletionChoice'
           description: A list of chat completion choices.
           example: '[{"index": 0, "message": {"role": "assistant", "content": "Hello! How can you help me today?"}, "finish_reason": null, "stop_reason": null}]'
         created:
@@ -1270,21 +1270,21 @@ components:
           example: chat.completion
         service_tier:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The service tier of the chat completion.
           example: auto
         system_fingerprint:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The system fingerprint for the completion, if applicable.
           example: fp_44709d6fcb
         usage:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/CompletionUsage"
-              description: Usage statistics for the completion request.
+          - type: 'null'
+          - $ref: '#/components/schemas/CompletionUsage'
+            description: Usage statistics for the completion request.
     ChatCompletionStreamResponse:
       type: object
       description: |-
@@ -1293,47 +1293,47 @@ components:
         This is used to represent the chat completion stream response in the chat completion request.
         It can be either a chat completion chunk or a chat completion stream.
       required:
-        - data
+      - data
       properties:
         data:
-          $ref: "#/components/schemas/ChatCompletionChunk"
+          $ref: '#/components/schemas/ChatCompletionChunk'
           description: The stream of chat completion chunks.
     ChatCompletionToolFunctionParam:
       type: object
       description: A function that can be used in a chat completion.
       required:
-        - name
+      - name
       properties:
         description:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The description of the function.
         name:
           type: string
           description: The name of the function.
         parameters:
           type:
-            - object
-            - "null"
+          - object
+          - 'null'
           description: The parameters of the function.
           additionalProperties: {}
           propertyNames:
             type: string
         strict:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Whether to strictly validate the parameters of the function.
     ChatCompletionToolsParam:
       type: object
       description: A tool that can be used in a chat completion.
       required:
-        - type
-        - function
+      - type
+      - function
       properties:
         function:
-          $ref: "#/components/schemas/ChatCompletionToolFunctionParam"
+          $ref: '#/components/schemas/ChatCompletionToolFunctionParam'
           description: The function that the tool will call.
         type:
           type: string
@@ -1342,9 +1342,9 @@ components:
       type: object
       description: A completion choice response
       required:
-        - text
-        - index
-        - finish_reason
+      - text
+      - index
+      - finish_reason
       properties:
         finish_reason:
           type: string
@@ -1357,9 +1357,9 @@ components:
           example: 0
         logprobs:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/LogProbs"
-              description: The log probabilities of the chosen tokens
+          - type: 'null'
+          - $ref: '#/components/schemas/LogProbs'
+            description: The log probabilities of the chosen tokens
         text:
           type: string
           description: The generated text
@@ -1368,10 +1368,10 @@ components:
       type: object
       description: The details of the completion tokens
       required:
-        - accepted_prediction_tokens
-        - audio_tokens
-        - reasoning_tokens
-        - rejected_prediction_tokens
+      - accepted_prediction_tokens
+      - audio_tokens
+      - reasoning_tokens
+      - rejected_prediction_tokens
       properties:
         accepted_prediction_tokens:
           type: integer
@@ -1405,9 +1405,9 @@ components:
         This is used to represent the completion usage in the chat completion request.
         It can be either a completion usage or a completion chunk usage.
       required:
-        - prompt_tokens
-        - completion_tokens
-        - total_tokens
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
       properties:
         completion_tokens:
           type: integer
@@ -1421,9 +1421,9 @@ components:
           example: 9
         prompt_tokens_details:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/PromptTokensDetails"
-              description: Details about the prompt tokens.
+          - type: 'null'
+          - $ref: '#/components/schemas/PromptTokensDetails'
+            description: Details about the prompt tokens.
         total_tokens:
           type: integer
           format: int32
@@ -1431,49 +1431,49 @@ components:
           example: 21
     CompletionsPrompt:
       oneOf:
-        - type: string
-          description: A single string prompt
-        - type: array
-          items:
-            type: string
-          description: An array of strings prompts
-        - type: array
+      - type: string
+        description: A single string prompt
+      - type: array
+        items:
+          type: string
+        description: An array of strings prompts
+      - type: array
+        items:
+          type: integer
+          format: int32
+          minimum: 0
+        description: An array of tokens
+      - type: array
+        items:
+          type: array
           items:
             type: integer
             format: int32
             minimum: 0
-          description: An array of tokens
-        - type: array
-          items:
-            type: array
-            items:
-              type: integer
-              format: int32
-              minimum: 0
-          description: An array of token arrays
+        description: An array of token arrays
     CompletionsRequest:
       type: object
       required:
-        - model
-        - prompt
+      - model
+      - prompt
       properties:
         best_of:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           default: 1
           example: 1
         echo:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           default: false
           example: false
         frequency_penalty:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on their
@@ -1481,8 +1481,8 @@ components:
           example: 0.0
         logit_bias:
           type:
-            - object
-            - "null"
+          - object
+          - 'null'
           description: |-
             Modify the likelihood of specified tokens appearing in the completion.
 
@@ -1497,19 +1497,19 @@ components:
           propertyNames:
             type: string
           example:
-            "1234567890": 0.5
-            "1234567891": -0.5
+            '1234567890': 0.5
+            '1234567891': -0.5
         logprobs:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
           example: 1
         max_tokens:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
           default: 16
@@ -1520,97 +1520,97 @@ components:
           example: meta-llama/Llama-3.3-70B-Instruct
         n:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: How many chat completion choices to generate for each input message
           example: 1
         presence_penalty:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on
             whether they appear in the text so far
           example: 0.0
         prompt:
-          $ref: "#/components/schemas/CompletionsPrompt"
+          $ref: '#/components/schemas/CompletionsPrompt'
           description: The prompt to generate completions for
         seed:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int64
           description: If specified, our system will make a best effort to sample deterministically
           example: 123
         stop:
           type:
-            - array
-            - "null"
+          - array
+          - 'null'
           items:
             type: string
           description: Up to 4 sequences where the API will stop generating further tokens
           example: json(["stop", "halt"])
-          default: "[]"
+          default: '[]'
         stream:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Whether to stream back partial progress
           example: false
         stream_options:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/StreamOptions"
-              description: "Options for streaming response. Only set this when you set stream: true."
+          - type: 'null'
+          - $ref: '#/components/schemas/StreamOptions'
+            description: 'Options for streaming response. Only set this when you set stream: true.'
         suffix:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The suffix that comes after a completion of inserted text.
           example: json("\n")
         temperature:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: What sampling temperature to use, between 0 and 2
           example: 0.7
         top_p:
           type:
-            - number
-            - "null"
+          - number
+          - 'null'
           format: float
           description: An alternative to sampling with temperature
           example: 1.0
         user:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: A unique identifier representing your end-user
           example: user-1234
     CompletionsResponse:
       type: object
       required:
-        - choices
-        - usage
-        - created
-        - id
-        - model
-        - object
-        - system_fingerprint
+      - choices
+      - usage
+      - created
+      - id
+      - model
+      - object
+      - system_fingerprint
       properties:
         choices:
           type: array
           items:
-            $ref: "#/components/schemas/CompletionChoice"
+            $ref: '#/components/schemas/CompletionChoice'
           description: Array of completion choices response
           example:
-            - text: This is a test
-              index: 0
-              logprobs: null
-              finish_reason: stop
+          - text: This is a test
+            index: 0
+            logprobs: null
+            finish_reason: stop
         created:
           type: integer
           format: int64
@@ -1633,28 +1633,28 @@ components:
           description: The system fingerprint
           example: system-fingerprint
         usage:
-          $ref: "#/components/schemas/Usage"
+          $ref: '#/components/schemas/Usage'
           description: The usage information for the request
     CompletionsStreamResponse:
       type: object
       required:
-        - choices
-        - created
-        - id
-        - model
-        - object
-        - system_fingerprint
+      - choices
+      - created
+      - id
+      - model
+      - object
+      - system_fingerprint
       properties:
         choices:
           type: array
           items:
-            $ref: "#/components/schemas/CompletionChoice"
+            $ref: '#/components/schemas/CompletionChoice'
           description: Array of completion choices response
           example:
-            - text: This is a test
-              index: 0
-              logprobs: null
-              finish_reason: stop
+          - text: This is a test
+            index: 0
+            logprobs: null
+            finish_reason: stop
         created:
           type: integer
           format: int64
@@ -1680,14 +1680,14 @@ components:
       type: object
       description: A request for confidential computation that includes encrypted data and associated cryptographic parameters
       required:
-        - ciphertext
-        - stack_small_id
-        - nonce
-        - salt
-        - client_dh_public_key
-        - node_dh_public_key
-        - plaintext_body_hash
-        - model_name
+      - ciphertext
+      - stack_small_id
+      - nonce
+      - salt
+      - client_dh_public_key
+      - node_dh_public_key
+      - plaintext_body_hash
+      - model_name
       properties:
         ciphertext:
           type: string
@@ -1706,8 +1706,8 @@ components:
           description: Cryptographic nonce used for encryption (base64 encoded)
         num_compute_units:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int64
           description: |-
             Number of compute units to be used for the request, for image generations,
@@ -1726,15 +1726,15 @@ components:
           minimum: 0
         stream:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Indicates whether this is a streaming request
     ConfidentialComputeResponse:
       type: object
       description: Represents a response from a confidential compute request
       required:
-        - ciphertext
-        - nonce
+      - ciphertext
+      - nonce
       properties:
         ciphertext:
           type: string
@@ -1744,39 +1744,39 @@ components:
           description: Nonce used for encryption (base64 encoded)
         response_hash:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: Hash of the response body (base64 encoded)
         signature:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: Signature of the response body (base64 encoded)
         usage:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/Usage"
-              description: Usage statistics for the request
+          - type: 'null'
+          - $ref: '#/components/schemas/Usage'
+            description: Usage statistics for the request
     ConfidentialComputeStreamResponse:
       type: object
       description: Represents a response from a confidential compute request
       required:
-        - data
+      - data
       properties:
         data:
-          $ref: "#/components/schemas/ConfidentialComputeResponse"
+          $ref: '#/components/schemas/ConfidentialComputeResponse'
           description: The stream of chat completion chunks.
     CreateChatCompletionRequest:
       allOf:
-        - $ref: "#/components/schemas/ChatCompletionRequest"
-        - type: object
-          properties:
-            stream:
-              type:
-                - boolean
-                - "null"
-              description: Whether to stream back partial progress. Must be false for this request type.
-              default: false
+      - $ref: '#/components/schemas/ChatCompletionRequest'
+      - type: object
+        properties:
+          stream:
+            type:
+            - boolean
+            - 'null'
+            description: Whether to stream back partial progress. Must be false for this request type.
+            default: false
       description: |-
         Represents the create chat completion request.
 
@@ -1784,50 +1784,50 @@ components:
         It can be either a chat completion or a chat completion stream.
     CreateChatCompletionStreamRequest:
       allOf:
-        - $ref: "#/components/schemas/ChatCompletionRequest"
-        - type: object
-          required:
-            - stream
-          properties:
-            stream:
-              type: boolean
-              description: Whether to stream back partial progress. Must be true for this request type.
-              default: true
+      - $ref: '#/components/schemas/ChatCompletionRequest'
+      - type: object
+        required:
+        - stream
+        properties:
+          stream:
+            type: boolean
+            description: Whether to stream back partial progress. Must be true for this request type.
+            default: true
     CreateCompletionsStreamRequest:
       allOf:
-        - $ref: "#/components/schemas/CompletionsRequest"
-        - type: object
-          required:
-            - stream
-          properties:
-            stream:
-              type: boolean
-              description: Whether to stream back partial progress. Must be true for this request type.
-              default: true
+      - $ref: '#/components/schemas/CompletionsRequest'
+      - type: object
+        required:
+        - stream
+        properties:
+          stream:
+            type: boolean
+            description: Whether to stream back partial progress. Must be true for this request type.
+            default: true
     CreateEmbeddingRequest:
       type: object
       description: Request object for creating embeddings
       required:
-        - model
-        - input
+      - model
+      - input
       properties:
         dimensions:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: The number of dimensions the resulting output embeddings should have.
           minimum: 0
         encoding_format:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: |-
             The format to return the embeddings in. Can be "float" or "base64".
             Defaults to "float"
           example: float
         input:
-          $ref: "#/components/schemas/EmbeddingInput"
+          $ref: '#/components/schemas/EmbeddingInput'
           description: |-
             Input text to get embeddings for. Can be a string or array of strings.
             Each input must not exceed the max input tokens for the model
@@ -1837,23 +1837,23 @@ components:
           example: intfloat/multilingual-e5-large-instruct
         user:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
           example: user-1234
     CreateEmbeddingResponse:
       type: object
       description: Response object from creating embeddings
       required:
-        - object
-        - model
-        - data
-        - usage
+      - object
+      - model
+      - data
+      - usage
       properties:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/EmbeddingObject"
+            $ref: '#/components/schemas/EmbeddingObject'
           description: List of embedding objects
         model:
           type: string
@@ -1864,14 +1864,14 @@ components:
           description: The object type, which is always "list"
           example: list
         usage:
-          $ref: "#/components/schemas/EmbeddingUsage"
+          $ref: '#/components/schemas/EmbeddingUsage'
           description: Usage statistics for the request
     CreateImageRequest:
       type: object
       description: Request body for image generation
       required:
-        - prompt
-        - model
+      - prompt
+      - model
       properties:
         model:
           type: string
@@ -1879,8 +1879,8 @@ components:
           example: black-forest-labs/FLUX.1-schnell
         n:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int32
           description: The number of images to generate. Defaults to 1.
           example: 1
@@ -1891,42 +1891,42 @@ components:
           example: A cute baby sea otter floating on its back
         quality:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: |-
             The quality of the image that will be generated.
             `hd` creates images with finer details and greater consistency across the image.
           example: hd
         response_format:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The format in which the generated images are returned.
           example: url
         size:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The size of the generated images.
           example: 1024x1024
         style:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The style of the generated images.
           example: vivid
         user:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
           example: user-1234
     CreateImageResponse:
       type: object
       description: Response format for image generation
       required:
-        - created
-        - data
+      - created
+      - data
       properties:
         created:
           type: integer
@@ -1935,22 +1935,22 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/ImageData"
+            $ref: '#/components/schemas/ImageData'
     EmbeddingInput:
       oneOf:
-        - type: string
-          example: The quick brown fox jumped over the lazy dog
-        - type: array
-          items:
-            type: string
-          example: '["The quick brown fox", "jumped over the lazy dog"]'
+      - type: string
+        example: The quick brown fox jumped over the lazy dog
+      - type: array
+        items:
+          type: string
+        example: '["The quick brown fox", "jumped over the lazy dog"]'
     EmbeddingObject:
       type: object
       description: Individual embedding object in the response
       required:
-        - object
-        - embedding
-        - index
+      - object
+      - embedding
+      - index
       properties:
         embedding:
           type: array
@@ -1958,7 +1958,7 @@ components:
             type: number
             format: float
           description: The embedding vector
-          example: "[0.0023064255, -0.009327292]"
+          example: '[0.0023064255, -0.009327292]'
         index:
           type: integer
           description: Index of the embedding in the list of embeddings
@@ -1972,8 +1972,8 @@ components:
       type: object
       description: Usage information for the embeddings request
       required:
-        - prompt_tokens
-        - total_tokens
+      - prompt_tokens
+      - total_tokens
       properties:
         prompt_tokens:
           type: integer
@@ -1990,7 +1990,7 @@ components:
     HealthResponse:
       type: object
       required:
-        - message
+      - message
       properties:
         message:
           type: string
@@ -1999,12 +1999,12 @@ components:
       type: object
       description: Individual image data in the response
       required:
-        - url
+      - url
       properties:
         revised_prompt:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           example: A stunning image of a baby sea otter floating on its back in crystal clear blue water, with gentle ripples surrounding it. The otter's fur appears soft and well-detailed, and its expression is peaceful and content.
         url:
           type: string
@@ -2017,12 +2017,12 @@ components:
         This is used to represent the format to return the response in in the chat completion request.
         It can be either text, json_object, or json_schema.
       required:
-        - name
+      - name
       properties:
         description:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: The description of the response format.
         name:
           type: string
@@ -2031,16 +2031,16 @@ components:
           description: The JSON schema of the response format.
         strict:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: Whether to strictly validate the JSON schema.
     LogProbs:
       type: object
       required:
-        - tokens
-        - token_logprobs
-        - top_logprobs
-        - text_offset
+      - tokens
+      - token_logprobs
+      - top_logprobs
+      - text_offset
       properties:
         text_offset:
           type: array
@@ -2050,8 +2050,8 @@ components:
             minimum: 0
           description: The text offset of the tokens
           example:
-            - 0
-            - 10
+          - 0
+          - 10
         token_logprobs:
           type: array
           items:
@@ -2059,16 +2059,16 @@ components:
             format: float
           description: The log probabilities of the tokens
           example:
-            - 0.5
-            - -0.5
+          - 0.5
+          - -0.5
         tokens:
           type: array
           items:
             type: string
           description: The tokens
           example:
-            - "Hello "
-            - world
+          - 'Hello '
+          - world
         top_logprobs:
           type: array
           items:
@@ -2080,18 +2080,18 @@ components:
               type: string
           description: The top log probabilities
           example:
-            - "Hello ": -0.2
-              world: -0.8
+          - 'Hello ': -0.2
+            world: -0.8
     MessageContent:
       oneOf:
-        - type: string
-          description: The text contents of the message.
-        - type: array
-          items:
-            $ref: "#/components/schemas/MessageContentPart"
-          description: |-
-            An array of content parts with a defined type, each can be of type text or image_url when passing in images.
-            You can pass multiple images by adding multiple image_url content parts. Image input is only supported when using the gpt-4o model.
+      - type: string
+        description: The text contents of the message.
+      - type: array
+        items:
+          $ref: '#/components/schemas/MessageContentPart'
+        description: |-
+          An array of content parts with a defined type, each can be of type text or image_url when passing in images.
+          You can pass multiple images by adding multiple image_url content parts. Image input is only supported when using the gpt-4o model.
       description: |-
         Represents the content of a message.
 
@@ -2099,28 +2099,28 @@ components:
         It can be either a text or an array of content parts.
     MessageContentPart:
       oneOf:
-        - type: object
-          required:
-            - type
-            - text
-          properties:
-            text:
-              type: string
-              description: The text content.
-            type:
-              type: string
-              description: The type of the content part.
-        - type: object
-          required:
-            - type
-            - image_url
-          properties:
-            image_url:
-              $ref: "#/components/schemas/MessageContentPartImageUrl"
-              description: The image URL.
-            type:
-              type: string
-              description: The type of the content part.
+      - type: object
+        required:
+        - type
+        - text
+        properties:
+          text:
+            type: string
+            description: The text content.
+          type:
+            type: string
+            description: The type of the content part.
+      - type: object
+        required:
+        - type
+        - image_url
+        properties:
+          image_url:
+            $ref: '#/components/schemas/MessageContentPartImageUrl'
+            description: The image URL.
+          type:
+            type: string
+            description: The type of the content part.
       description: |-
         Represents a part of a message content.
 
@@ -2134,12 +2134,12 @@ components:
         This is used to represent the image URL of a message content part in the chat completion request.
         It can be either a URL or a base64 encoded image data.
       required:
-        - url
+      - url
       properties:
         detail:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: Specifies the detail level of the image.
         url:
           type: string
@@ -2148,10 +2148,10 @@ components:
       type: object
       description: Individual model object in the response
       required:
-        - id
-        - object
-        - created
-        - owned_by
+      - id
+      - object
+      - created
+      - owned_by
       properties:
         created:
           type: integer
@@ -2170,13 +2170,13 @@ components:
       type: object
       description: Response object for the models listing endpoint
       required:
-        - object
-        - data
+      - object
+      - data
       properties:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/Model"
+            $ref: '#/components/schemas/Model'
           description: List of model objects
         object:
           type: string
@@ -2188,9 +2188,9 @@ components:
 
         This struct represents the payload for the node public address registration request.
       required:
-        - node_small_id
-        - public_address
-        - country
+      - node_small_id
+      - public_address
+      - country
       properties:
         country:
           type: string
@@ -2207,12 +2207,12 @@ components:
       type: object
       description: Request body for creating a node lock
       required:
-        - model
+      - model
       properties:
         max_num_tokens:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int64
           description: |-
             The number of tokens to be processed for confidential compute
@@ -2223,8 +2223,8 @@ components:
           description: The model to lock a node for
         timeout:
           type:
-            - integer
-            - "null"
+          - integer
+          - 'null'
           format: int64
           description: An optional timeout period for the locked compute units, in seconds
           minimum: 0
@@ -2236,9 +2236,9 @@ components:
         the request and send it back to the proxy. The proxy will then route this
         request to the selected node.
       required:
-        - public_key
-        - node_small_id
-        - stack_small_id
+      - public_key
+      - node_small_id
+      - stack_small_id
       properties:
         node_small_id:
           type: integer
@@ -2250,8 +2250,8 @@ components:
           description: The public key for the selected node, base64 encoded
         stack_entry_digest:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: Transaction digest for the transaction that acquires the stack entry, if any
         stack_small_id:
           type: integer
@@ -2262,11 +2262,11 @@ components:
       type: object
       description: Represents the payload for the node public address registration request.
       required:
-        - data
-        - signature
+      - data
+      - signature
       properties:
         data:
-          $ref: "#/components/schemas/NodePublicAddressAssignment"
+          $ref: '#/components/schemas/NodePublicAddressAssignment'
           description: The data required to register a node's public address
         signature:
           type: string
@@ -2274,7 +2274,7 @@ components:
     NodesCreateResponse:
       type: object
       required:
-        - message
+      - message
       properties:
         message:
           type: string
@@ -2282,8 +2282,8 @@ components:
     PromptTokensDetails:
       type: object
       required:
-        - audio_tokens
-        - cached_tokens
+      - audio_tokens
+      - cached_tokens
       properties:
         audio_tokens:
           type: integer
@@ -2305,49 +2305,49 @@ components:
         This is used to represent the format to return the response in in the chat completion request.
         It can be either text, json_object, or json_schema.
       required:
-        - type
+      - type
       properties:
         json_schema:
           oneOf:
-            - type: "null"
-            - $ref: "#/components/schemas/JsonSchemaResponseFormat"
-              description: The JSON schema of the response format.
+          - type: 'null'
+          - $ref: '#/components/schemas/JsonSchemaResponseFormat'
+            description: The JSON schema of the response format.
         type:
-          $ref: "#/components/schemas/ResponseFormatType"
+          $ref: '#/components/schemas/ResponseFormatType'
           description: The type of the response format.
     ResponseFormatType:
       type: string
       description: The format to return the response in.
       enum:
-        - text
-        - json_object
-        - json_schema
+      - text
+      - json_object
+      - json_schema
     Role:
       type: string
       title: Role
       description: The role of the message author
       enum:
-        - system
-        - assistant
-        - user
-        - tool
+      - system
+      - assistant
+      - user
+      - tool
       example: system
     StopReason:
       oneOf:
-        - type: object
-          required:
-            - Int
-          properties:
-            Int:
-              type: integer
-              format: int32
-              minimum: 0
-        - type: object
-          required:
-            - String
-          properties:
-            String:
-              type: string
+      - type: object
+        required:
+        - Int
+        properties:
+          Int:
+            type: integer
+            format: int32
+            minimum: 0
+      - type: object
+        required:
+        - String
+        properties:
+          String:
+            type: string
       description: |-
         Represents the stop reason.
 
@@ -2359,8 +2359,8 @@ components:
       properties:
         include_usage:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: |-
             If set, an additional chunk will be streamed before the data: [DONE] message.
             The usage field on this chunk shows the token usage statistics for the entire request, and the choices field
@@ -2373,11 +2373,11 @@ components:
         This is used to represent the tool that the model called in the chat completion request.
         It can be either a function or a tool.
       required:
-        - type
-        - function
+      - type
+      - function
       properties:
         function:
-          $ref: "#/components/schemas/ToolFunction"
+          $ref: '#/components/schemas/ToolFunction'
           description: The function that the model called.
         type:
           type: string
@@ -2390,12 +2390,12 @@ components:
         This is used to represent the tool call that the model made in the chat completion request.
         It can be either a function or a tool.
       required:
-        - id
-        - type
-        - function
+      - id
+      - type
+      - function
       properties:
         function:
-          $ref: "#/components/schemas/ToolCallFunction"
+          $ref: '#/components/schemas/ToolCallFunction'
           description: The function that the model called.
         id:
           type: string
@@ -2411,8 +2411,8 @@ components:
         This is used to represent the function that the model called in the chat completion request.
         It can be either a function or a tool call.
       required:
-        - name
-        - arguments
+      - name
+      - arguments
       properties:
         arguments:
           type: string
@@ -2425,8 +2425,8 @@ components:
           description: The name of the function to call.
     ToolChoice:
       oneOf:
-        - $ref: "#/components/schemas/ToolChoiceLiteral"
-        - $ref: "#/components/schemas/ChatCompletionNamedToolChoiceParam"
+      - $ref: '#/components/schemas/ToolChoiceLiteral'
+      - $ref: '#/components/schemas/ChatCompletionNamedToolChoiceParam'
       description: |-
         A tool choice that can be used in a chat completion.
 
@@ -2440,8 +2440,8 @@ components:
         This is used to represent the literal tool choice in the chat completion request.
         It can be either none or auto.
       enum:
-        - none
-        - auto
+      - none
+      - auto
     ToolFunction:
       type: object
       description: |-
@@ -2450,12 +2450,12 @@ components:
         This is used to represent the function that the model called in the chat completion request.
         It can be either a function or a tool.
       required:
-        - name
+      - name
       properties:
         description:
           type:
-            - string
-            - "null"
+          - string
+          - 'null'
           description: Description of the function to call.
         name:
           type: string
@@ -2464,19 +2464,19 @@ components:
           description: The arguments to call the function with, as generated by the model in JSON format.
         strict:
           type:
-            - boolean
-            - "null"
+          - boolean
+          - 'null'
           description: |-
             Whether to enable strict schema adherence when generating the function call. If set to true, the
             model will follow the exact schema defined in the parameters field. Only a subset of JSON Schema is supported when strict is true
     Usage:
       type: object
       required:
-        - prompt_tokens
-        - completion_tokens
-        - total_tokens
-        - completion_tokens_details
-        - prompt_tokens_details
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
+      - completion_tokens_details
+      - prompt_tokens_details
       properties:
         completion_tokens:
           type: integer
@@ -2485,7 +2485,7 @@ components:
           example: 10
           minimum: 0
         completion_tokens_details:
-          $ref: "#/components/schemas/CompletionTokensDetails"
+          $ref: '#/components/schemas/CompletionTokensDetails'
           description: The details of the completion tokens
         prompt_tokens:
           type: integer
@@ -2494,7 +2494,7 @@ components:
           example: 10
           minimum: 0
         prompt_tokens_details:
-          $ref: "#/components/schemas/PromptTokensDetails"
+          $ref: '#/components/schemas/PromptTokensDetails'
           description: The details of the prompt tokens
         total_tokens:
           type: integer
@@ -2507,52 +2507,52 @@ components:
       type: http
       scheme: bearer
 tags:
-  - name: Completions
-    description: OpenAI's API completions v1 endpoint
-  - name: Confidential Completions
-    description: Atoma's API confidential completions v1 endpoint
-  - name: Chat
-    description: OpenAI's API chat completions v1 endpoint
-  - name: Confidential Chat
-    description: Atoma's API confidential chat completions v1 endpoint
-  - name: Confidential Embeddings
-    description: Atoma's API confidential embeddings v1 endpoint
-  - name: Confidential Images
-    description: Atoma's API confidential images v1 endpoint
-  - name: Embeddings
-    description: OpenAI's API embeddings v1 endpoint
-  - name: Health
-    description: Health check
-  - name: Images
-    description: OpenAI's API images v1 endpoint
-  - name: Models
-    description: OpenAI's API models v1 endpoint
-  - name: Nodes
-    description: Nodes Management
-  - name: Node Public Key Selection
-    description: Node public key selection
+- name: Completions
+  description: OpenAI's API completions v1 endpoint
+- name: Confidential Completions
+  description: Atoma's API confidential completions v1 endpoint
+- name: Chat
+  description: OpenAI's API chat completions v1 endpoint
+- name: Confidential Chat
+  description: Atoma's API confidential chat completions v1 endpoint
+- name: Confidential Embeddings
+  description: Atoma's API confidential embeddings v1 endpoint
+- name: Confidential Images
+  description: Atoma's API confidential images v1 endpoint
+- name: Embeddings
+  description: OpenAI's API embeddings v1 endpoint
+- name: Health
+  description: Health check
+- name: Images
+  description: OpenAI's API images v1 endpoint
+- name: Models
+  description: OpenAI's API models v1 endpoint
+- name: Nodes
+  description: Nodes Management
+- name: Node Public Key Selection
+  description: Node public key selection
 x-speakeasy-name-override:
-  - operationId: completions_create
-    methodNameOverride: create
-  - operationId: completions_create_stream
-    methodNameOverride: create_stream
-  - operationId: confidential_completions_create
-    methodNameOverride: create
-  - operationId: confidential_completions_create_stream
-    methodNameOverride: create_stream
-  - operationId: chat_completions_create
-    methodNameOverride: create
-  - operationId: chat_completions_create_stream
-    methodNameOverride: create_stream
-  - operationId: confidential_chat_completions_create
-    methodNameOverride: create
-  - operationId: confidential_chat_completions_create_stream
-    methodNameOverride: create_stream
-  - operationId: embeddings_create
-    methodNameOverride: create
-  - operationId: confidential_embeddings_create
-    methodNameOverride: create
-  - operationId: image_generations_create
-    methodNameOverride: generate
-  - operationId: confidential_image_generations_create
-    methodNameOverride: generate
+- operationId: completions_create
+  methodNameOverride: create
+- operationId: completions_create_stream
+  methodNameOverride: create_stream
+- operationId: confidential_completions_create
+  methodNameOverride: create
+- operationId: confidential_completions_create_stream
+  methodNameOverride: create_stream
+- operationId: chat_completions_create
+  methodNameOverride: create
+- operationId: chat_completions_create_stream
+  methodNameOverride: create_stream
+- operationId: confidential_chat_completions_create
+  methodNameOverride: create
+- operationId: confidential_chat_completions_create_stream
+  methodNameOverride: create_stream
+- operationId: embeddings_create
+  methodNameOverride: create
+- operationId: confidential_embeddings_create
+  methodNameOverride: create
+- operationId: image_generations_create
+  methodNameOverride: generate
+- operationId: confidential_image_generations_create
+  methodNameOverride: generate

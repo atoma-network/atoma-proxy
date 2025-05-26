@@ -76,6 +76,7 @@ pub fn openapi_routes() -> Router {
         fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
             // Create new Extensions if none exist
             let extensions = openapi.extensions.get_or_insert_with(Default::default);
+            let servers = openapi.servers.get_or_insert_with(Default::default);
 
             // Add the x-speakeasy-name-override
             extensions.insert(
@@ -131,6 +132,26 @@ pub fn openapi_routes() -> Router {
                     }
                 ]),
             );
+
+            for server in servers.iter_mut() {
+                server
+                    .extensions
+                    .get_or_insert_with(Default::default)
+                    .insert(
+                        "x-speakeasy-retries".to_string(),
+                        json!({
+                            "strategy": "backoff",
+                            "backoff": {
+                                "initialInterval": 500,
+                                "maxInterval": 60000,
+                                "maxElapsedTime": 3_600_000,
+                                "exponent": 1.5
+                            },
+                            "statusCodes": [408, 429, 500, 502, 503, 504],
+                            "retryConnectionErrors": true
+                        }),
+                    );
+            }
         }
     }
 
@@ -163,63 +184,102 @@ pub fn openapi_routes() -> Router {
 
         // Add x-speakeasy-sse-sentinel to the completions and chat completions stream endpoints
         if let serde_yaml::Value::Mapping(ref mut paths) = spec_value["paths"] {
-            if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
-                serde_yaml::Value::String("/v1/chat/completions#stream".to_string()),
-            ) {
-                if let Some(serde_yaml::Value::Mapping(ref mut post)) =
-                    endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
-                {
-                    if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
-                        post.get_mut(serde_yaml::Value::String("responses".to_string()))
-                    {
-                        if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
-                            responses.get_mut(serde_yaml::Value::String("200".to_string()))
-                        {
-                            if let Some(serde_yaml::Value::Mapping(ref mut content)) = ok_response
-                                .get_mut(serde_yaml::Value::String("content".to_string()))
+            for (path, endpoint) in paths.iter_mut() {
+                if let serde_yaml::Value::String(path_str) = path {
+                    if path_str.ends_with("#stream") {
+                        if let serde_yaml::Value::Mapping(ref mut endpoint) = endpoint {
+                            if let Some(serde_yaml::Value::Mapping(ref mut post)) =
+                                endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
                             {
-                                if let Some(serde_yaml::Value::Mapping(ref mut event_stream)) =
-                                    content.get_mut(serde_yaml::Value::String(
-                                        "text/event-stream".to_string(),
-                                    ))
+                                if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
+                                    post.get_mut(serde_yaml::Value::String("responses".to_string()))
                                 {
-                                    event_stream.insert(
-                                        serde_yaml::Value::String(
-                                            "x-speakeasy-sse-sentinel".to_string(),
-                                        ),
-                                        serde_yaml::Value::String("[DONE]".to_string()),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if let Some(serde_yaml::Value::Mapping(ref mut endpoint)) = paths.get_mut(
-                serde_yaml::Value::String("/v1/completions#stream".to_string()),
-            ) {
-                if let Some(serde_yaml::Value::Mapping(ref mut post)) =
-                    endpoint.get_mut(serde_yaml::Value::String("post".to_string()))
-                {
-                    if let Some(serde_yaml::Value::Mapping(ref mut responses)) =
-                        post.get_mut(serde_yaml::Value::String("responses".to_string()))
-                    {
-                        if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
-                            responses.get_mut(serde_yaml::Value::String("200".to_string()))
-                        {
-                            if let Some(serde_yaml::Value::Mapping(ref mut content)) = ok_response
-                                .get_mut(serde_yaml::Value::String("content".to_string()))
-                            {
-                                if let Some(serde_yaml::Value::Mapping(ref mut event_stream)) =
-                                    content.get_mut(serde_yaml::Value::String(
-                                        "text/event-stream".to_string(),
-                                    ))
-                                {
-                                    event_stream.insert(
-                                        serde_yaml::Value::String(
-                                            "x-speakeasy-sse-sentinel".to_string(),
-                                        ),
-                                        serde_yaml::Value::String("[DONE]".to_string()),
-                                    );
+                                    if let Some(serde_yaml::Value::Mapping(ref mut ok_response)) =
+                                        responses
+                                            .get_mut(serde_yaml::Value::String("200".to_string()))
+                                    {
+                                        if let Some(serde_yaml::Value::Mapping(ref mut content)) =
+                                            ok_response.get_mut(serde_yaml::Value::String(
+                                                "content".to_string(),
+                                            ))
+                                        {
+                                            if let Some(serde_yaml::Value::Mapping(
+                                                ref mut event_stream,
+                                            )) = content.get_mut(serde_yaml::Value::String(
+                                                "text/event-stream".to_string(),
+                                            )) {
+                                                let mut new_schema = serde_yaml::Mapping::new();
+                                                new_schema.insert(
+                                                    serde_yaml::Value::String("type".to_string()),
+                                                    serde_yaml::Value::String("object".to_string()),
+                                                );
+                                                new_schema.insert(
+                                                    serde_yaml::Value::String(
+                                                        "required".to_string(),
+                                                    ),
+                                                    serde_yaml::Value::Sequence(vec![
+                                                        serde_yaml::Value::String(
+                                                            "data".to_string(),
+                                                        ),
+                                                    ]),
+                                                );
+                                                let mut properties = serde_yaml::Mapping::new();
+                                                let mut data_schema = serde_yaml::Mapping::new();
+                                                data_schema.insert(
+                                                    serde_yaml::Value::String("type".to_string()),
+                                                    serde_yaml::Value::String("object".to_string()),
+                                                );
+                                                data_schema.insert(
+                                                    serde_yaml::Value::String(
+                                                        "required".to_string(),
+                                                    ),
+                                                    serde_yaml::Value::Sequence(vec![
+                                                        serde_yaml::Value::String(
+                                                            "choices".to_string(),
+                                                        ),
+                                                    ]),
+                                                );
+                                                let mut data_properties =
+                                                    serde_yaml::Mapping::new();
+                                                if let Some(schema) = event_stream.get(
+                                                    serde_yaml::Value::String("schema".to_string()),
+                                                ) {
+                                                    data_properties.insert(
+                                                        serde_yaml::Value::String(
+                                                            "choices".to_string(),
+                                                        ),
+                                                        schema.clone(),
+                                                    );
+                                                }
+                                                data_schema.insert(
+                                                    serde_yaml::Value::String(
+                                                        "properties".to_string(),
+                                                    ),
+                                                    serde_yaml::Value::Mapping(data_properties),
+                                                );
+                                                properties.insert(
+                                                    serde_yaml::Value::String("data".to_string()),
+                                                    serde_yaml::Value::Mapping(data_schema),
+                                                );
+                                                new_schema.insert(
+                                                    serde_yaml::Value::String(
+                                                        "properties".to_string(),
+                                                    ),
+                                                    serde_yaml::Value::Mapping(properties),
+                                                );
+                                                event_stream.insert(
+                                                    serde_yaml::Value::String("schema".to_string()),
+                                                    serde_yaml::Value::Mapping(new_schema),
+                                                );
+                                                event_stream.insert(
+                                                    serde_yaml::Value::String(
+                                                        "x-speakeasy-sse-sentinel".to_string(),
+                                                    ),
+                                                    serde_yaml::Value::String("[DONE]".to_string()),
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
