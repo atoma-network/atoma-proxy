@@ -14,11 +14,15 @@ use atoma_p2p::AtomaP2pEvent;
 use atoma_sui::events::AtomaEvent;
 use chrono::{DateTime, Timelike, Utc};
 use flume::{Receiver as FlumeReceiver, Sender as FlumeSender};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use sqlx::{FromRow, Row};
 use tokio::sync::oneshot;
 use tokio::sync::watch::Receiver;
 use tracing::instrument;
+
+/// The maximum number of connections to the Postgres database.
+const MAX_NUMBER_POOL_CONNECTIONS: u32 = 256;
 
 pub type Result<T> = std::result::Result<T, AtomaStateManagerError>;
 
@@ -93,7 +97,10 @@ impl AtomaStateManager {
         p2p_event_receiver: FlumeReceiver<AtomaP2pData>,
         sui_address: String,
     ) -> Result<Self> {
-        let db = PgPool::connect(database_url).await?;
+        let db = PgPoolOptions::new()
+            .max_connections(MAX_NUMBER_POOL_CONNECTIONS)
+            .connect(database_url)
+            .await?;
         // run migrations
         sqlx::migrate!("./src/migrations").run(&db).await?;
         Ok(Self {
@@ -4073,18 +4080,13 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip(self))]
     pub async fn new_stats_stack(&self, stack: Stack, timestamp: DateTime<Utc>) -> Result<()> {
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
             "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
                  ON CONFLICT (timestamp)
                  DO UPDATE SET
                     num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",
         )
-        .bind(timestamp)
+        .bind(Utc::now())
         .bind(stack.num_compute_units)
         .execute(&self.db)
         .await?;
