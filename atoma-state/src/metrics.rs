@@ -318,11 +318,11 @@ pub struct NodeMetricsCollector {
     #[allow(dead_code)]
     registry: Registry,
 
+    /// Average waiting queue duration for chat completions
+    avg_waiting_queue_duration: GaugeVec,
+
     /// GPU KV cache usage percentage for chat completions
     chat_completions_gpu_kv_cache_usage: GaugeVec,
-
-    /// CPU KV cache usage percentage for chat completions
-    chat_completions_cpu_kv_cache_usage: GaugeVec,
 
     /// Time to first token for chat completions
     chat_completions_ttft: GaugeVec,
@@ -369,8 +369,8 @@ impl NodeMetricsCollector {
         let registry = Registry::new();
 
         let (
+            avg_waiting_queue_duration,
             chat_completions_gpu_kv_cache_usage,
-            chat_completions_cpu_kv_cache_usage,
             chat_completions_ttft,
             chat_completions_tpot,
             chat_completions_num_running_requests,
@@ -388,8 +388,8 @@ impl NodeMetricsCollector {
 
         Ok(Self {
             registry,
+            avg_waiting_queue_duration,
             chat_completions_gpu_kv_cache_usage,
-            chat_completions_cpu_kv_cache_usage,
             chat_completions_ttft,
             chat_completions_tpot,
             chat_completions_num_running_requests,
@@ -691,9 +691,9 @@ impl NodeMetricsCollector {
         self.chat_completions_gpu_kv_cache_usage
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.gpu_kv_cache_usage_perc);
-        self.chat_completions_cpu_kv_cache_usage
+        self.avg_waiting_queue_duration
             .with_label_values(&[model, node_small_id.to_string().as_str()])
-            .set(chat_completions.cpu_kv_cache_usage_perc);
+            .set(chat_completions.avg_request_queue_latency.unwrap_or(0.0));
         self.chat_completions_ttft
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.time_to_first_token);
@@ -828,13 +828,15 @@ impl NodeMetricsCollector {
         let gpu_kv_cache_usage =
             GaugeVec::new(gpu_kv_cache_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
                 .expect("Failed to create gauge");
-        let cpu_kv_cache_usage_opts = Opts::new(
-            "chat_cpu_kv_cache_usage_perc",
-            "CPU KV cache usage percentage for chat completions",
+        let avg_waiting_queue_duration_opts = Opts::new(
+            "avg_waiting_queue_duration",
+            "Average waiting queue duration for chat completions",
         );
-        let cpu_kv_cache_usage =
-            GaugeVec::new(cpu_kv_cache_usage_opts, &[MODEL_LABEL, NODE_SMALL_ID_LABEL])
-                .expect("Failed to create gauge");
+        let avg_waiting_queue_duration = GaugeVec::new(
+            avg_waiting_queue_duration_opts,
+            &[MODEL_LABEL, NODE_SMALL_ID_LABEL],
+        )
+        .expect("Failed to create gauge");
         let ttft_opts = Opts::new(
             "chat_time_to_first_token",
             "Time to first token for chat completions",
@@ -867,7 +869,7 @@ impl NodeMetricsCollector {
         .expect("Failed to create gauge");
 
         registry.register(Box::new(gpu_kv_cache_usage.clone()))?;
-        registry.register(Box::new(cpu_kv_cache_usage.clone()))?;
+        registry.register(Box::new(avg_waiting_queue_duration.clone()))?;
         registry.register(Box::new(ttft.clone()))?;
         registry.register(Box::new(tpot.clone()))?;
         registry.register(Box::new(num_running_requests.clone()))?;
@@ -875,7 +877,7 @@ impl NodeMetricsCollector {
 
         Ok((
             gpu_kv_cache_usage,
-            cpu_kv_cache_usage,
+            avg_waiting_queue_duration,
             ttft,
             tpot,
             num_running_requests,
@@ -1082,7 +1084,7 @@ impl NodeMetricsCollector {
     /// Resets all the metrics in the Prometheus registry.
     pub fn reset_metrics(&self) {
         self.chat_completions_gpu_kv_cache_usage.reset();
-        self.chat_completions_cpu_kv_cache_usage.reset();
+        self.avg_waiting_queue_duration.reset();
         self.chat_completions_ttft.reset();
         self.chat_completions_tpot.reset();
         self.chat_completions_num_running_requests.reset();
@@ -1104,8 +1106,8 @@ impl NodeMetricsCollector {
 
     #[cfg(test)]
     #[must_use]
-    pub const fn get_chat_completions_cpu_kv_cache_usage(&self) -> &GaugeVec {
-        &self.chat_completions_cpu_kv_cache_usage
+    pub const fn get_avg_waiting_queue_duration(&self) -> &GaugeVec {
+        &self.avg_waiting_queue_duration
     }
 
     #[cfg(test)]

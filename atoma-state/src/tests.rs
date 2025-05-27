@@ -1242,8 +1242,8 @@ fn test_store_chat_completions_metrics() {
 
     // Create test data
     let chat_completions = ChatCompletionsMetrics {
+        avg_request_queue_latency: Some(45.2),
         gpu_kv_cache_usage_perc: 75.5,
-        cpu_kv_cache_usage_perc: 45.2,
         time_to_first_token: 0.15,
         time_per_output_token: 0.05,
         num_running_requests: 3,
@@ -1267,7 +1267,7 @@ fn test_store_chat_completions_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels)
             .get(),
         45.2_f64
@@ -1310,8 +1310,8 @@ fn test_store_chat_completions_metrics_multiple_models() {
 
     // Test data for first model
     let chat_completions_1 = ChatCompletionsMetrics {
+        avg_request_queue_latency: Some(45.2),
         gpu_kv_cache_usage_perc: 75.5,
-        cpu_kv_cache_usage_perc: 45.2,
         time_to_first_token: 0.15,
         time_per_output_token: 0.05,
         num_running_requests: 3,
@@ -1322,8 +1322,8 @@ fn test_store_chat_completions_metrics_multiple_models() {
 
     // Test data for second model
     let chat_completions_2 = ChatCompletionsMetrics {
+        avg_request_queue_latency: Some(30.0),
         gpu_kv_cache_usage_perc: 60.0,
-        cpu_kv_cache_usage_perc: 30.0,
         time_to_first_token: 0.1,
         time_per_output_token: 0.03,
         num_running_requests: 1,
@@ -1347,7 +1347,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels_1)
             .get(),
         45.2_f64
@@ -1392,7 +1392,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels_2)
             .get(),
         30.0_f64
@@ -1827,8 +1827,8 @@ fn test_reset_metrics() {
 
     // Store some test metrics
     let chat_completions = ChatCompletionsMetrics {
+        avg_request_queue_latency: Some(0.0),
         gpu_kv_cache_usage_perc: 75.5,
-        cpu_kv_cache_usage_perc: 45.2,
         time_to_first_token: 0.15,
         time_per_output_token: 0.05,
         num_running_requests: 3,
@@ -1911,7 +1911,7 @@ fn test_reset_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&chat_labels)
             .get(),
         0.0
@@ -2009,8 +2009,8 @@ fn test_store_metrics() {
     model_metrics.insert(
         "gpt-4".to_string(),
         ModelMetrics::ChatCompletions(ChatCompletionsMetrics {
+            avg_request_queue_latency: Some(0.0),
             gpu_kv_cache_usage_perc: 75.5,
-            cpu_kv_cache_usage_perc: 45.2,
             time_to_first_token: 0.15,
             time_per_output_token: 0.05,
             num_running_requests: 3,
@@ -2061,10 +2061,10 @@ fn test_store_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&chat_labels)
             .get(),
-        45.2
+        0.0
     );
     assert_eq!(
         collector
