@@ -1322,7 +1322,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
 
     // Test data for second model
     let chat_completions_2 = ChatCompletionsMetrics {
-        avg_request_queue_latency: Some(0.0),
+        avg_request_queue_latency: Some(45.2),
         gpu_kv_cache_usage_perc: 60.0,
         time_to_first_token: 0.1,
         time_per_output_token: 0.03,

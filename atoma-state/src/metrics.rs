@@ -691,6 +691,9 @@ impl NodeMetricsCollector {
         self.chat_completions_gpu_kv_cache_usage
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.gpu_kv_cache_usage_perc);
+        self.avg_waiting_queue_duration
+            .with_label_values(&[model, node_small_id.to_string().as_str()])
+            .set(chat_completions.avg_request_queue_latency.unwrap_or(0.0));
         self.chat_completions_ttft
             .with_label_values(&[model, node_small_id.to_string().as_str()])
             .set(chat_completions.time_to_first_token);
