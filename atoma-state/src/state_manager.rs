@@ -4073,18 +4073,13 @@ impl AtomaState {
     /// ```
     #[instrument(level = "trace", skip(self))]
     pub async fn new_stats_stack(&self, stack: Stack, timestamp: DateTime<Utc>) -> Result<()> {
-        let timestamp = timestamp
-            .with_second(0)
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_nanosecond(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
             "INSERT into stats_stacks (timestamp,num_compute_units) VALUES ($1,$2)
                  ON CONFLICT (timestamp)
                  DO UPDATE SET
                     num_compute_units = stats_stacks.num_compute_units + EXCLUDED.num_compute_units",
         )
-        .bind(timestamp)
+        .bind(Utc::now())
         .bind(stack.num_compute_units)
         .execute(&self.db)
         .await?;
