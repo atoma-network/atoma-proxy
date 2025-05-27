@@ -34,6 +34,7 @@ use openai_api::{
 };
 use openai_api::{CreateChatCompletionRequest, CreateChatCompletionStreamRequest};
 use opentelemetry::KeyValue;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -77,6 +78,12 @@ pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 
 /// The messages field in the request payload.
 const MESSAGES: &str = "messages";
+
+/// The model key
+const MODEL_KEY: &str = "model";
+
+/// The user id key
+const USER_ID_KEY: &str = "user_id";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -177,15 +184,15 @@ pub async fn chat_completions_create(
             Err(e) => {
                 if !e.status_code().is_client_error() {
                     TOTAL_FAILED_CHAT_REQUESTS
-                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
                     TOTAL_FAILED_REQUESTS
-                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
                     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
                 }
-                if e.error_code() == "429" {
+                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
                     TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
                 }
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
                     update_state_manager(

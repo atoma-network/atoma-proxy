@@ -9,6 +9,7 @@ use axum::{
     Extension, Json,
 };
 use opentelemetry::KeyValue;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -51,6 +52,12 @@ pub const EMBEDDINGS_PATH: &str = "/v1/embeddings";
 
 /// The input field in the request payload.
 const INPUT: &str = "input";
+
+/// The model key
+const MODEL_KEY: &str = "model";
+
+/// The user id key
+const USER_ID_KEY: &str = "user_id";
 
 // A model representing an embeddings request payload.
 ///
@@ -227,14 +234,14 @@ pub async fn embeddings_create(
                 let model_label: String = metadata.model_name.clone();
                 if !e.status_code().is_client_error() {
                     TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS
-                        .add(1, &[KeyValue::new("model", model_label.clone())]);
-                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, model_label.clone())]);
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model_label)]);
                     UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
                 }
-                if e.error_code() == "429" {
+                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
                     TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
                 }
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {

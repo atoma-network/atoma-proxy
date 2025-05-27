@@ -23,6 +23,7 @@ use openai_api_completions::{
     Usage,
 };
 use opentelemetry::KeyValue;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -56,6 +57,12 @@ pub const CONFIDENTIAL_COMPLETIONS_PATH: &str = "/v1/confidential/completions";
 
 /// The key for the prompt in the request.
 const PROMPT: &str = "prompt";
+
+/// The model key
+const MODEL_KEY: &str = "model";
+
+/// The user id key
+const USER_ID_KEY: &str = "user_id";
 
 /// The OpenAPI schema for the completions endpoint.
 #[derive(OpenApi)]
@@ -389,16 +396,16 @@ pub async fn confidential_completions_create(
                 let model_label: String = metadata.model_name.clone();
                 if !e.status_code().is_client_error() {
                     TOTAL_FAILED_CHAT_REQUESTS
-                        .add(1, &[KeyValue::new("model", model_label.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, model_label.clone())]);
                     // Record the failed request in the total failed requests metric
-                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model_label)]);
                     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
                 }
 
-                if e.error_code() == "429" {
+                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
                     TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
                 }
 
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
