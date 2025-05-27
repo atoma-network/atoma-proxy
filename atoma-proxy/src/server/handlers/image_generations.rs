@@ -20,7 +20,7 @@ use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtensio
 use super::metrics::{
     IMAGE_GENERATION_TOTAL_TOKENS_PER_USER, IMAGE_GEN_LATENCY_METRICS, IMAGE_GEN_NUM_REQUESTS,
     SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
-    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS,
+    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
     UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER,
 };
 use super::request_model::ComputeUnitsEstimate;
@@ -218,11 +218,17 @@ pub async fn image_generations_create(
             Err(e) => {
                 // Record the failed request in the image generations num requests metric
                 let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
-                    .add(1, &[KeyValue::new("model", model_label.clone())]);
-
-                // Record the failed request in the total failed requests metric
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                if !e.status_code().is_client_error() {
+                    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
+                        .add(1, &[KeyValue::new("model", model_label.clone())]);
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                    UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
+                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                }
+                if e.error_code() == "429" {
+                    TOTAL_TOO_MANY_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                }
 
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
@@ -334,13 +340,17 @@ pub async fn confidential_image_generations_create(
             }
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
-                    .add(1, &[KeyValue::new("model", model_label.clone())]);
-
-                // Record the failed request in the total failed requests metric
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-                UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                if !e.status_code().is_client_error() {
+                    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
+                        .add(1, &[KeyValue::new("model", model_label.clone())]);
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                    UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
+                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                }
+                if e.error_code() == "429" {
+                    TOTAL_TOO_MANY_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                }
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
                         update_state_manager(

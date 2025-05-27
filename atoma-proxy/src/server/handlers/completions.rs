@@ -35,7 +35,7 @@ use super::metrics::{
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
     INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_COMPLETED_REQUESTS,
-    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -387,12 +387,19 @@ pub async fn confidential_completions_create(
             }
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_CHAT_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
+                if !e.status_code().is_client_error() {
+                    TOTAL_FAILED_CHAT_REQUESTS
+                        .add(1, &[KeyValue::new("model", model_label.clone())]);
+                    // Record the failed request in the total failed requests metric
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                    UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                }
 
-                // Record the failed request in the total failed requests metric
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                if e.error_code() == "429" {
+                    TOTAL_TOO_MANY_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                }
 
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
                     update_state_manager(
@@ -670,7 +677,7 @@ async fn handle_non_streaming_response(
 /// * `node_address` - The address of the node
 /// * `user_id` - The user id
 /// * `headers` - The headers of the request
-/// * `payload` - The payload of the request    
+/// * `payload` - The payload of the request
 /// * `num_input_tokens` - The number of input tokens
 /// * `estimated_output_tokens` - The estimated output tokens
 /// * `price_per_million` - The price per million
@@ -687,7 +694,7 @@ async fn handle_non_streaming_response(
 /// * `serde_json::Error` - If the request fails
 /// * `flume::Error` - If the request fails
 /// * `tokio::Error` - If the request fails
-///  
+///
 #[instrument(
     level = "info",
     skip_all,

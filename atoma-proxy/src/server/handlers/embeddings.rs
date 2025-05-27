@@ -29,7 +29,7 @@ use super::{
     metrics::{
         EMBEDDING_TOTAL_TOKENS_PER_USER, SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
         TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
-        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
+        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
         UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
     },
     request_model::{ComputeUnitsEstimate, RequestModel},
@@ -225,10 +225,17 @@ pub async fn embeddings_create(
             }
             Err(e) => {
                 let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
-                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-                UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                if !e.status_code().is_client_error() {
+                    TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS
+                        .add(1, &[KeyValue::new("model", model_label.clone())]);
+                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
+                    UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                }
+                if e.error_code() == "429" {
+                    TOTAL_TOO_MANY_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                }
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
                         update_state_manager(

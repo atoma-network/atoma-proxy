@@ -47,7 +47,7 @@ use super::metrics::{
     CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
     INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_COMPLETED_REQUESTS,
-    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS,
+    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -175,12 +175,18 @@ pub async fn chat_completions_create(
                 Ok(response)
             }
             Err(e) => {
-                TOTAL_FAILED_CHAT_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
-                TOTAL_FAILED_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
-                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                if !e.status_code().is_client_error() {
+                    TOTAL_FAILED_CHAT_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                    TOTAL_FAILED_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                    UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                        .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                }
+                if e.error_code() == "429" {
+                    TOTAL_TOO_MANY_REQUESTS
+                        .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
+                }
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
                     update_state_manager(
                         &state.state_manager_sender,
