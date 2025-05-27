@@ -1267,7 +1267,7 @@ fn test_store_chat_completions_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels)
             .get(),
         45.2_f64
@@ -1347,7 +1347,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels_1)
             .get(),
         45.2_f64
@@ -1392,7 +1392,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&labels_2)
             .get(),
         30.0_f64
@@ -1911,7 +1911,7 @@ fn test_reset_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&chat_labels)
             .get(),
         0.0
@@ -2061,10 +2061,10 @@ fn test_store_metrics() {
     );
     assert_eq!(
         collector
-            .get_chat_completions_cpu_kv_cache_usage()
+            .get_avg_waiting_queue_duration()
             .with_label_values(&chat_labels)
             .get(),
-        45.2
+        0.0
     );
     assert_eq!(
         collector

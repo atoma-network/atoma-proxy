@@ -24,7 +24,7 @@ remote-attestation-verifier = { workspace = true }
 reqwest                     = { workspace = true }
 serde                       = { workspace = true, features = [ "derive" ] }
 serde_json                  = { workspace = true }
-sqlx                        = { workspace = true, features = [ "chrono", "runtime-tokio-native-tls", "sqlite" ] }
+sqlx                        = { workspace = true, features = [ "chrono", "postgres", "runtime-tokio-native-tls" ] }
 thiserror                   = { workspace = true }
 tokio                       = { workspace = true, features = [ "full" ] }
 topology                    = { workspace = true }
