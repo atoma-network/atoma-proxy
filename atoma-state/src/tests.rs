@@ -1242,7 +1242,7 @@ fn test_store_chat_completions_metrics() {
 
     // Create test data
     let chat_completions = ChatCompletionsMetrics {
-        avg_request_queue_latency: Some(0.0),
+        avg_request_queue_latency: Some(45.2),
         gpu_kv_cache_usage_perc: 75.5,
         time_to_first_token: 0.15,
         time_per_output_token: 0.05,
@@ -1310,7 +1310,7 @@ fn test_store_chat_completions_metrics_multiple_models() {
 
     // Test data for first model
     let chat_completions_1 = ChatCompletionsMetrics {
-        avg_request_queue_latency: Some(0.0),
+        avg_request_queue_latency: Some(45.2),
         gpu_kv_cache_usage_perc: 75.5,
         time_to_first_token: 0.15,
         time_per_output_token: 0.05,
