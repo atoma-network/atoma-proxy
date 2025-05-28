@@ -229,25 +229,24 @@ pub async fn image_generations_create(
                 let model: String = metadata.model_name.clone();
                 match e.status_code() {
                     StatusCode::TOO_MANY_REQUESTS => {
-                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::BAD_REQUEST => {
-                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::LOCKED => {
-                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::TOO_EARLY => {
-                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::UNAUTHORIZED => {
-                        TOTAL_UNAUTHORIZED_REQUESTS
-                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_UNAUTHORIZED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     _ => {
                         TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
                             .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
-                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
 
                         UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
                             .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
@@ -366,25 +365,24 @@ pub async fn confidential_image_generations_create(
                 let model: String = metadata.model_name.clone();
                 match e.status_code() {
                     StatusCode::TOO_MANY_REQUESTS => {
-                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::BAD_REQUEST => {
-                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::LOCKED => {
-                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::TOO_EARLY => {
-                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::UNAUTHORIZED => {
-                        TOTAL_UNAUTHORIZED_REQUESTS
-                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_UNAUTHORIZED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     _ => {
                         TOTAL_FAILED_CONFIDENTIAL_IMAGE_GENERATION_REQUESTS
                             .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
-                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
 
                         UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
                             .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
