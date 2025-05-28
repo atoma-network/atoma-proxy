@@ -4543,7 +4543,7 @@ impl AtomaState {
         sqlx::query(
             "INSERT INTO usage_per_day (user_id, model, input_amount, input_tokens, output_amount, output_tokens)
                 VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (user_id, model, timestamp) DO UPDATE SET
+                ON CONFLICT (user_id, model, date) DO UPDATE SET
                     input_amount = usage_per_day.input_amount + EXCLUDED.input_amount,
                     input_tokens = usage_per_day.input_tokens + EXCLUDED.input_tokens,
                     output_amount = usage_per_day.output_amount + EXCLUDED.output_amount,
