@@ -407,26 +407,24 @@ pub async fn confidential_embeddings_create(
                 let model = metadata.model_name.clone();
                 match e.status_code() {
                     StatusCode::TOO_MANY_REQUESTS => {
-                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::BAD_REQUEST => {
-                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::LOCKED => {
-                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::TOO_EARLY => {
-                        TOTAL_TOO_EARLY_REQUESTS
-                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     StatusCode::UNAUTHORIZED => {
-                        TOTAL_UNAUTHORIZED_REQUESTS
-                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_UNAUTHORIZED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
                     }
                     _ => {
                         TOTAL_FAILED_CONFIDENTIAL_EMBEDDING_REQUESTS
-                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
-                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
 
                         UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
                             .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
