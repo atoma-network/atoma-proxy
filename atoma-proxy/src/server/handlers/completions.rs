@@ -32,11 +32,14 @@ use utoipa::OpenApi;
 
 use super::metrics::{
     CHAT_COMPLETIONS_COMPLETIONS_TOKENS, CHAT_COMPLETIONS_COMPLETIONS_TOKENS_PER_USER,
-    CHAT_COMPLETIONS_INPUT_TOKENS, CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER,
-    CHAT_COMPLETIONS_LATENCY_METRICS, CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
+    CHAT_COMPLETIONS_CONFIDENTIAL_NUM_REQUESTS, CHAT_COMPLETIONS_INPUT_TOKENS,
+    CHAT_COMPLETIONS_INPUT_TOKENS_PER_USER, CHAT_COMPLETIONS_LATENCY_METRICS,
+    CHAT_COMPLETIONS_NUM_REQUESTS, CHAT_COMPLETIONS_TOTAL_TOKENS,
     CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER, CHAT_COMPLETION_REQUESTS_PER_USER,
-    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_COMPLETED_REQUESTS,
-    TOTAL_FAILED_CHAT_REQUESTS, TOTAL_FAILED_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
+    INTENTIONALLY_CANCELLED_CHAT_COMPLETION_STREAMING_REQUESTS, TOTAL_BAD_REQUESTS,
+    TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CHAT_CONFIDENTIAL_REQUESTS, TOTAL_FAILED_CHAT_REQUESTS,
+    TOTAL_FAILED_REQUESTS, TOTAL_LOCKED_REQUESTS, TOTAL_TOO_EARLY_REQUESTS,
+    TOTAL_TOO_MANY_REQUESTS, TOTAL_UNAUTHORIZED_REQUESTS,
     UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER,
 };
 use super::request_model::{ComputeUnitsEstimate, RequestModel};
@@ -140,12 +143,35 @@ pub async fn completions_create(
                 Ok(response)
             }
             Err(e) => {
-                TOTAL_FAILED_CHAT_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
-                TOTAL_FAILED_REQUESTS
-                    .add(1, &[KeyValue::new("model", metadata.model_name.clone())]);
-                UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                let model = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_CHAT_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+
+                        UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
+                }
+
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
                     update_state_manager(
                         &state.state_manager_sender,
@@ -388,26 +414,40 @@ pub async fn confidential_completions_create(
             Ok(response) => {
                 if !is_streaming {
                     // The streaming metric is recorded in the streamer (final chunk)
-                    TOTAL_COMPLETED_REQUESTS.add(1, &[KeyValue::new("model", metadata.model_name)]);
+                    CHAT_COMPLETIONS_CONFIDENTIAL_NUM_REQUESTS
+                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name)]);
                 }
                 Ok(response)
             }
             Err(e) => {
-                let model_label: String = metadata.model_name.clone();
-                if !e.status_code().is_client_error() {
-                    TOTAL_FAILED_CHAT_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, model_label.clone())]);
-                    // Record the failed request in the total failed requests metric
-                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model_label)]);
-                    UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
-                }
+                let model = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_CHAT_CONFIDENTIAL_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.to_owned())]);
 
-                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
-                    TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
+                        UNSUCCESSFUL_CHAT_COMPLETION_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
                 }
-
                 if let Some(stack_small_id) = metadata.selected_stack_small_id {
                     update_state_manager(
                         &state.state_manager_sender,

@@ -20,8 +20,10 @@ use crate::server::{http_server::ProxyState, middleware::RequestMetadataExtensio
 
 use super::metrics::{
     IMAGE_GENERATION_TOTAL_TOKENS_PER_USER, IMAGE_GEN_LATENCY_METRICS, IMAGE_GEN_NUM_REQUESTS,
-    SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
-    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_REQUESTS, TOTAL_TOO_MANY_REQUESTS,
+    SUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER, TOTAL_BAD_REQUESTS, TOTAL_COMPLETED_REQUESTS,
+    TOTAL_FAILED_CONFIDENTIAL_IMAGE_GENERATION_REQUESTS, TOTAL_FAILED_IMAGE_GENERATION_REQUESTS,
+    TOTAL_FAILED_REQUESTS, TOTAL_LOCKED_REQUESTS, TOTAL_TOO_EARLY_REQUESTS,
+    TOTAL_TOO_MANY_REQUESTS, TOTAL_UNAUTHORIZED_REQUESTS,
     UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER,
 };
 use super::request_model::ComputeUnitsEstimate;
@@ -224,17 +226,32 @@ pub async fn image_generations_create(
             }
             Err(e) => {
                 // Record the failed request in the image generations num requests metric
-                let model_label: String = metadata.model_name.clone();
-                if !e.status_code().is_client_error() {
-                    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, model_label.clone())]);
-                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model_label)]);
-                    UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
-                }
-                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
-                    TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
+                let model: String = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+
+                        UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
                 }
 
                 match metadata.selected_stack_small_id {
@@ -346,17 +363,32 @@ pub async fn confidential_image_generations_create(
                 Ok(response.into_response())
             }
             Err(e) => {
-                let model_label: String = metadata.model_name.clone();
-                if !e.status_code().is_client_error() {
-                    TOTAL_FAILED_IMAGE_GENERATION_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, model_label.clone())]);
-                    TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model_label)]);
-                    UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
-                        .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
-                }
-                if e.status_code() == StatusCode::TOO_MANY_REQUESTS {
-                    TOTAL_TOO_MANY_REQUESTS
-                        .add(1, &[KeyValue::new(MODEL_KEY, metadata.model_name.clone())]);
+                let model: String = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_CONFIDENTIAL_IMAGE_GENERATION_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+
+                        UNSUCCESSFUL_IMAGE_GENERATION_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
                 }
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
