@@ -4540,15 +4540,9 @@ impl AtomaState {
         output_amount: i64,
         output_tokens: i64,
     ) -> Result<()> {
-        let timestamp = Utc::now()
-            .with_nanosecond(0)
-            .and_then(|t| t.with_second(0))
-            .and_then(|t| t.with_minute(0))
-            .and_then(|t| t.with_hour(0))
-            .ok_or(AtomaStateManagerError::InvalidTimestamp)?;
         sqlx::query(
-            "INSERT INTO usage_per_day (user_id, timestamp, model, input_amount, input_tokens, output_amount, output_tokens)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "INSERT INTO usage_per_day (user_id, model, input_amount, input_tokens, output_amount, output_tokens)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (user_id, model, timestamp) DO UPDATE SET
                     input_amount = usage_per_day.input_amount + EXCLUDED.input_amount,
                     input_tokens = usage_per_day.input_tokens + EXCLUDED.input_tokens,
@@ -4556,7 +4550,6 @@ impl AtomaState {
                     output_tokens = usage_per_day.output_tokens + EXCLUDED.output_tokens",
         )
         .bind(user_id)
-        .bind(timestamp)
         .bind(model)
         .bind(input_amount)
         .bind(input_tokens)
