@@ -186,8 +186,10 @@ pub fn update_state_manager_fiat(
             user_id,
             estimated_input_amount,
             input_amount,
+            input_tokens,
             estimated_output_amount,
             output_amount,
+            output_tokens,
             model_name,
         })
         .map_err(|e| AtomaProxyError::InternalError {

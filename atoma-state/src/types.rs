@@ -918,9 +918,13 @@ pub enum AtomaAtomaStateManagerEvent {
         estimated_input_amount: i64,
         /// The actual input amount
         input_amount: i64,
+        /// Number of input tokens,
+        input_tokens: i64,
         /// The original estimated output amount
         estimated_output_amount: i64,
         /// The actual output amount
         output_amount: i64,
+        /// Number of output tokens
+        output_tokens: i64,
     },
 }
