@@ -14,7 +14,6 @@ use tracing::{error, info, instrument, trace};
 
 use crate::{
     state_manager::Result,
-    timestamp_to_datetime_or_now,
     types::{AtomaAtomaStateManagerEvent, Stack, StackSettlementTicket},
     AtomaStateManager, AtomaStateManagerError,
 };
@@ -101,13 +100,8 @@ pub async fn handle_atoma_event(
         AtomaEvent::NodeUnsubscribedFromTaskEvent(event) => {
             handle_node_task_unsubscription_event(state_manager, event).await
         }
-        AtomaEvent::StackCreatedEvent((event, timestamp)) => {
-            handle_create_stack_stats(
-                state_manager,
-                event,
-                timestamp_to_datetime_or_now(timestamp),
-            )
-            .await?;
+        AtomaEvent::StackCreatedEvent(event) => {
+            handle_create_stack_stats(state_manager, event).await?;
             Ok(())
         }
         AtomaEvent::StackCreateAndUpdateEvent(event) => {
@@ -115,13 +109,8 @@ pub async fn handle_atoma_event(
             info!("Stack creates and update event: {:?}", event);
             Ok(())
         }
-        AtomaEvent::StackTrySettleEvent((event, timestamp)) => {
-            handle_stack_try_settle_event(
-                state_manager,
-                event,
-                timestamp_to_datetime_or_now(timestamp),
-            )
-            .await
+        AtomaEvent::StackTrySettleEvent(event) => {
+            handle_stack_try_settle_event(state_manager, event).await
         }
         AtomaEvent::ClaimedStackEvent(event) => {
             handle_claimed_stack_event(state_manager, event).await
@@ -613,12 +602,11 @@ pub async fn handle_stack_created_event(
 pub async fn handle_create_stack_stats(
     state_manager: &AtomaStateManager,
     event: StackCreatedEvent,
-    timestamp: DateTime<Utc>,
 ) -> Result<()> {
     let stack = event.into();
     state_manager
         .state
-        .new_stats_stack(stack, timestamp)
+        .new_stats_stack(stack, Utc::now())
         .await?;
     Ok(())
 }
@@ -652,7 +640,6 @@ pub async fn handle_create_stack_stats(
 pub async fn handle_stack_try_settle_event(
     state_manager: &AtomaStateManager,
     event: StackTrySettleEvent,
-    timestamp: DateTime<Utc>,
 ) -> Result<()> {
     trace!(
         target = "atoma-state-handlers",
@@ -662,7 +649,7 @@ pub async fn handle_stack_try_settle_event(
     let stack_settlement_ticket = StackSettlementTicket::try_from(event)?;
     state_manager
         .state
-        .insert_new_stack_settlement_ticket(stack_settlement_ticket, timestamp)
+        .insert_new_stack_settlement_ticket(stack_settlement_ticket, Utc::now())
         .await?;
     Ok(())
 }
@@ -1448,8 +1435,10 @@ pub async fn handle_state_manager_event(
             model_name,
             estimated_input_amount,
             input_amount,
+            input_tokens,
             estimated_output_amount,
             output_amount,
+            output_tokens,
         } => {
             state_manager
                 .state
@@ -1462,6 +1451,17 @@ pub async fn handle_state_manager_event(
                 )
                 .await?;
             if output_amount > 0 {
+                state_manager
+                    .state
+                    .update_per_day_table(
+                        user_id,
+                        model_name.clone(),
+                        input_amount,
+                        input_tokens,
+                        output_amount,
+                        output_tokens,
+                    )
+                    .await?;
                 state_manager
                     .state
                     .update_usage_per_model(user_id, model_name, input_amount, output_amount)

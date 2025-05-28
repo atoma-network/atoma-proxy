@@ -50,7 +50,7 @@ const DEFAULT_IMAGE_RESOLUTION: u64 = 1024 * 1024;
 
 /// Maximum size of the body in bytes.
 /// This is to prevent DoS attacks by limiting the size of the request body.
-const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB
+const MAX_BODY_SIZE: usize = 1024 * 1024 * 1024; // 1GB
 
 /// Metadata extension for tracking request-specific information about the selected inference node.
 ///
@@ -607,6 +607,10 @@ pub async fn confidential_compute_middleware(
         req_parts
             .headers
             .insert(constants::SIGNATURE, signature_header);
+        req_parts.headers.insert(
+            constants::USER_ID,
+            HeaderValue::from_str(&user_id.to_string()).unwrap(),
+        );
         let request_metadata = req_parts
             .extensions
             .get::<RequestMetadataExtension>()
@@ -2514,6 +2518,10 @@ pub mod utils {
         req_parts
             .headers
             .insert(CONTENT_LENGTH, content_length_header);
+        req_parts.headers.insert(
+            constants::USER_ID,
+            HeaderValue::from_str(&user_id.to_string()).unwrap(),
+        );
         let request_model = body_json
             .get(MODEL)
             .and_then(|m| m.as_str())
