@@ -881,7 +881,7 @@ impl Auth {
                         != Self::get_sui_address_from_signature(&signature, transaction_digest)?
                             .to_string()
                     {
-                        return Err(AuthError::PaymentNotForThisUser);
+                        return Err(Box::new(AuthError::PaymentNotForThisUser));
                     }
                 }
                 #[cfg(not(feature = "google-oauth"))]
