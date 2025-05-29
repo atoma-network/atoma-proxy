@@ -101,64 +101,8 @@ grafana:
 loki:
   enabled: true
   deploymentMode: SingleBinary
-
-  # Single binary configuration - this should be at root level, not under structuredConfig
-  singleBinary:
-    replicas: 1
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClass: local-path
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 200m
-        memory: 512Mi
-    extraVolumes:
-      - name: loki-config
-        emptyDir: {}
-    extraVolumeMounts:
-      - name: loki-config
-        mountPath: /var/loki
-
-  # Gateway configuration
-  gateway:
-    enabled: true
-    replicas: 1
-
-  # Disable other components for single binary mode
-  write:
-    replicas: 0
-  read:
-    replicas: 0
-  backend:
-    replicas: 0
-
-  # Disable caching for development
-  memcached:
-    enabled: false
-  memcachedExporter:
-    enabled: false
-  chunksCache:
-    enabled: false
-  resultsCache:
-    enabled: false
-
-  # Disable monitoring for development
-  monitoring:
-    serviceMonitor:
-      enabled: false
-    selfMonitoring:
-      enabled: false
-      grafanaAgent:
-        installOperator: false
-
-  # Loki configuration
   auth_enabled: false
 
-  # Storage configuration
   storage:
     type: filesystem
     bucketNames:
@@ -166,59 +110,19 @@ loki:
       ruler: ruler
       admin: admin
 
-  # Common configuration
-  commonConfig:
-    path_prefix: /var/loki
-    replication_factor: 1
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: local-path
 
-  # Structured configuration for Loki itself
-  structuredConfig:
-    auth_enabled: false
-
-    server:
-      http_listen_port: 3100
-      grpc_listen_port: 9095
-
-    common:
-      path_prefix: /var/loki
-      storage:
-        filesystem:
-          chunks_directory: /var/loki/chunks
-          rules_directory: /var/loki/rules
-      replication_factor: 1
-      ring:
-        kvstore:
-          store: inmemory
-
-    schema_config:
-      configs:
-        - from: "2020-10-24"
-          store: boltdb-shipper
-          object_store: filesystem
-          schema: v11
-          index:
-            prefix: index_
-            period: 24h
-
-    storage_config:
-      boltdb_shipper:
-        active_index_directory: /var/loki/index
-        cache_location: /var/loki/cache
-        shared_store: filesystem
-      filesystem:
-        directory: /var/loki/chunks
-
-    limits_config:
-      enforce_metric_name: false
-      reject_old_samples: true
-      reject_old_samples_max_age: 168h
-      volume_enabled: true
-      retention_period: 96h
-
-    compactor:
-      retention_enabled: true
-      retention_delete_delay: 2h
-      retention_delete_worker_count: 150
+  write:
+    replicas: 0
+  read:
+    replicas: 0
+  backend:
+    replicas: 0
 
 tempo:
   enabled: true
