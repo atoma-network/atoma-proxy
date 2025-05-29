@@ -98,17 +98,38 @@ grafana:
     annotations:
       metallb.universe.tf/address-pool: grafana-pool
 
-loki:
+loki: # Fixed typo: was "oki"
   enabled: true
   deploymentMode: SingleBinary
   auth_enabled: false
 
-  storage:
-    type: filesystem
-    bucketNames:
-      chunks: chunks
-      ruler: ruler
-      admin: admin
+  # Remove the storage.bucketNames section entirely
+  # Use raw config instead
+  config: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      path_prefix: /var/loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /var/loki/index
+        shared_store: filesystem
+      filesystem:
+        directory: /var/loki/chunks
 
   singleBinary:
     replicas: 1
