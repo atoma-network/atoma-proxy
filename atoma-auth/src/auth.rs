@@ -118,7 +118,7 @@ pub enum AuthError {
     TimestampConversionError,
 }
 
-type Result<T> = std::result::Result<T, AuthError>;
+type Result<T> = std::result::Result<T, Box<AuthError>>;
 /// The Auth struct
 #[derive(Clone)]
 pub struct Auth {
@@ -233,7 +233,7 @@ impl Auth {
 
         let claims = token_data.claims;
         if claims.refresh_token_hash.is_none() != is_refresh {
-            return Err(AuthError::NotRefreshToken);
+            return Err(Box::new(AuthError::NotRefreshToken));
         }
         Ok(claims)
     }
@@ -283,7 +283,7 @@ impl Auth {
             .check_refresh_token_validity(claims.user_id, &refresh_token_hash)
             .await?
         {
-            return Err(AuthError::InvalidRefreshToken);
+            return Err(Box::new(AuthError::InvalidRefreshToken));
         }
         let expiration = Utc::now() + Duration::days(self.access_token_lifetime as i64);
 
@@ -527,7 +527,7 @@ impl Auth {
             )
             .await?
         {
-            return Err(AuthError::RevokedToken);
+            return Err(Box::new(AuthError::RevokedToken));
         }
         Ok(claims)
     }
@@ -571,21 +571,24 @@ impl Auth {
     ///
     /// Map a base64 string to a bit array by taking each char's index and convert it to binary form with one bit per u8
     /// element in the output. Returns SignatureError if one of the characters is not in the base64 charset.
+    #[allow(clippy::cast_possible_truncation)]
     fn base64_to_bitarray(input: &str) -> Result<Vec<u8>> {
-        use itertools::Itertools;
         const BASE64_URL_CHARSET: &str =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
         input
             .chars()
-            .map(|c| {
+            .flat_map(|c| {
                 BASE64_URL_CHARSET
                     .find(c)
-                    .map(|index| u8::try_from(index).map_err(AuthError::IntConversionError))
-                    .unwrap()
-                    .map(|index| (0..6).rev().map(move |i| index >> i & 1))
+                    .ok_or_else(|| {
+                        Box::new(AuthError::FailedToParseSignature(format!(
+                            "Invalid character: {c}"
+                        )))
+                    })
+                    .map(|index| (0..6).rev().map(move |i| Ok((index >> i & 1) as u8)))
+                    .into_iter()
             })
-            .flatten_ok()
+            .flatten()
             .collect()
     }
 
@@ -701,9 +704,9 @@ impl Auth {
             }
             UserSignature::Simple(simple_signature) => (simple_signature, None),
             _ => {
-                return Err(AuthError::FailedToParseSignature(
+                return Err(Box::new(AuthError::FailedToParseSignature(
                     "Unsupported signature".to_string(),
-                ))
+                )))
             }
         };
         match signature {
@@ -845,14 +848,14 @@ impl Auth {
                 if tag.address.to_hex() == self.sui.read().await.usdc_package_id.to_hex() {
                     if balance_change.amount < 0 {
                         if sender.is_some() {
-                            return Err(AuthError::MultipleSenders);
+                            return Err(Box::new(AuthError::MultipleSenders));
                         }
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
                             sender = Some(*owner);
                         }
                     } else {
                         if receiver.is_some() {
-                            return Err(AuthError::MultipleReceivers);
+                            return Err(Box::new(AuthError::MultipleReceivers));
                         }
                         money_in = Some(balance_change.amount);
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
@@ -863,7 +866,7 @@ impl Auth {
             }
         }
         if sender.is_none() || receiver.is_none() {
-            return Err(AuthError::SenderOrReceiverNotFound);
+            return Err(Box::new(AuthError::SenderOrReceiverNotFound));
         }
         let sender = sender.unwrap();
         let receiver = receiver.unwrap();
@@ -878,12 +881,12 @@ impl Auth {
                         != Self::get_sui_address_from_signature(&signature, transaction_digest)?
                             .to_string()
                     {
-                        return Err(AuthError::PaymentNotForThisUser);
+                        return Err(Box::new(AuthError::PaymentNotForThisUser));
                     }
                 }
                 #[cfg(not(feature = "google-oauth"))]
                 Some(_) => {
-                    return Err(AuthError::ZkLoginNotEnabled);
+                    return Err(Box::new(AuthError::ZkLoginNotEnabled));
                 }
                 None => {
                     let (result_sender, result_receiver) = oneshot::channel();
@@ -896,7 +899,7 @@ impl Auth {
                     let is_their_wallet = result_receiver.await??;
 
                     if !is_their_wallet {
-                        return Err(AuthError::PaymentNotForThisUser);
+                        return Err(Box::new(AuthError::PaymentNotForThisUser));
                     }
                 }
             }
@@ -936,6 +939,73 @@ impl Auth {
             })?;
         let sui_address = result_receiver.await;
         Ok(sui_address??)
+    }
+}
+
+impl From<anyhow::Error> for Box<AuthError> {
+    fn from(err: anyhow::Error) -> Self {
+        Self::new(AuthError::AnyhowError(err))
+    }
+}
+
+impl From<jsonwebtoken::errors::Error> for Box<AuthError> {
+    fn from(err: jsonwebtoken::errors::Error) -> Self {
+        Self::new(AuthError::JsonWebTokenError(err))
+    }
+}
+
+impl From<flume::SendError<AtomaAtomaStateManagerEvent>> for Box<AuthError> {
+    fn from(err: flume::SendError<AtomaAtomaStateManagerEvent>) -> Self {
+        Self::new(AuthError::FlumeError(err))
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for Box<AuthError> {
+    fn from(err: tokio::sync::oneshot::error::RecvError) -> Self {
+        Self::new(AuthError::OneShotReceiveError(err))
+    }
+}
+
+impl From<AtomaStateManagerError> for Box<AuthError> {
+    fn from(err: AtomaStateManagerError) -> Self {
+        Self::new(AuthError::AtomaStateManagerError(err))
+    }
+}
+
+impl From<reqwest::Error> for Box<AuthError> {
+    fn from(err: reqwest::Error) -> Self {
+        Self::new(AuthError::ReqwestError(err))
+    }
+}
+
+impl From<bcs::Error> for Box<AuthError> {
+    fn from(err: bcs::Error) -> Self {
+        Self::new(AuthError::BcsError(err))
+    }
+}
+
+impl From<FastCryptoError> for Box<AuthError> {
+    fn from(err: FastCryptoError) -> Self {
+        Self::new(AuthError::FastCryptoError(err))
+    }
+}
+
+impl From<std::num::TryFromIntError> for Box<AuthError> {
+    fn from(err: std::num::TryFromIntError) -> Self {
+        Self::new(AuthError::IntConversionError(err))
+    }
+}
+
+#[cfg(feature = "google-oauth")]
+impl From<crate::google::GoogleError> for Box<AuthError> {
+    fn from(err: crate::google::GoogleError) -> Self {
+        Self::new(AuthError::GoogleError(err))
+    }
+}
+
+impl From<SuiError> for Box<AuthError> {
+    fn from(err: SuiError) -> Self {
+        Self::new(AuthError::SuiError(err))
     }
 }
 

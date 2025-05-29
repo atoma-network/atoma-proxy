@@ -1435,8 +1435,10 @@ pub async fn handle_state_manager_event(
             model_name,
             estimated_input_amount,
             input_amount,
+            input_tokens,
             estimated_output_amount,
             output_amount,
+            output_tokens,
         } => {
             state_manager
                 .state
@@ -1449,6 +1451,17 @@ pub async fn handle_state_manager_event(
                 )
                 .await?;
             if output_amount > 0 {
+                state_manager
+                    .state
+                    .update_per_day_table(
+                        user_id,
+                        model_name.clone(),
+                        input_amount,
+                        input_tokens,
+                        output_amount,
+                        output_tokens,
+                    )
+                    .await?;
                 state_manager
                     .state
                     .update_usage_per_model(user_id, model_name, input_amount, output_amount)
