@@ -104,6 +104,14 @@ loki:
   commonConfig:
     path_prefix: /loki
     replication_factor: 1
+  # This is required by the helper template
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
+  # This is the actual storage configuration
   storage_config:
     filesystem:
       chunks_directory: /loki/chunks
