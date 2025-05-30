@@ -793,9 +793,8 @@ async fn handle_streaming_response(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| AtomaProxyError::InternalError {
+        .map_err(|e| AtomaProxyError::TooManyRequests {
             message: format!("Error sending request to inference service: {e:?}"),
-            client_message: Some("Failed to connect to the node.".to_string()),
             endpoint: endpoint.to_string(),
         })?;
 
