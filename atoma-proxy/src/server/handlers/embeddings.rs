@@ -9,6 +9,7 @@ use axum::{
     Extension, Json,
 };
 use opentelemetry::KeyValue;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::chrono::{DateTime, Utc};
@@ -28,8 +29,10 @@ use super::{
     handle_status_code_error,
     metrics::{
         EMBEDDING_TOTAL_TOKENS_PER_USER, SUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
-        TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_COMPLETED_REQUESTS,
-        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS,
+        TEXT_EMBEDDINGS_LATENCY_METRICS, TEXT_EMBEDDINGS_NUM_REQUESTS, TOTAL_BAD_REQUESTS,
+        TOTAL_COMPLETED_REQUESTS, TOTAL_FAILED_CONFIDENTIAL_EMBEDDING_REQUESTS,
+        TOTAL_FAILED_REQUESTS, TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS, TOTAL_LOCKED_REQUESTS,
+        TOTAL_TOO_EARLY_REQUESTS, TOTAL_TOO_MANY_REQUESTS, TOTAL_UNAUTHORIZED_REQUESTS,
         UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER,
     },
     request_model::{ComputeUnitsEstimate, RequestModel},
@@ -51,6 +54,12 @@ pub const EMBEDDINGS_PATH: &str = "/v1/embeddings";
 
 /// The input field in the request payload.
 const INPUT: &str = "input";
+
+/// The model key
+const MODEL_KEY: &str = "model";
+
+/// The user id key
+const USER_ID_KEY: &str = "user_id";
 
 // A model representing an embeddings request payload.
 ///
@@ -224,11 +233,32 @@ pub async fn embeddings_create(
                 Ok(Json(response).into_response())
             }
             Err(e) => {
-                let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
-                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-                UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                let model = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+
+                        UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
+                }
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {
                         update_state_manager(
@@ -374,11 +404,32 @@ pub async fn confidential_embeddings_create(
                 Ok(Json(response).into_response())
             }
             Err(e) => {
-                let model_label: String = metadata.model_name.clone();
-                TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
-                TOTAL_FAILED_TEXT_EMBEDDING_REQUESTS.add(1, &[KeyValue::new("model", model_label)]);
-                UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
-                    .add(1, &[KeyValue::new("user_id", metadata.user_id)]);
+                let model = metadata.model_name.clone();
+                match e.status_code() {
+                    StatusCode::TOO_MANY_REQUESTS => {
+                        TOTAL_TOO_MANY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::BAD_REQUEST => {
+                        TOTAL_BAD_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::LOCKED => {
+                        TOTAL_LOCKED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::TOO_EARLY => {
+                        TOTAL_TOO_EARLY_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    StatusCode::UNAUTHORIZED => {
+                        TOTAL_UNAUTHORIZED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+                    }
+                    _ => {
+                        TOTAL_FAILED_CONFIDENTIAL_EMBEDDING_REQUESTS
+                            .add(1, &[KeyValue::new(MODEL_KEY, model.clone())]);
+                        TOTAL_FAILED_REQUESTS.add(1, &[KeyValue::new(MODEL_KEY, model)]);
+
+                        UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER
+                            .add(1, &[KeyValue::new(USER_ID_KEY, metadata.user_id)]);
+                    }
+                }
 
                 match metadata.selected_stack_small_id {
                     Some(stack_small_id) => {

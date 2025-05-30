@@ -316,6 +316,112 @@ pub static TOTAL_FAILED_CHAT_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(||
         .build()
 });
 
+/// Counter metric that tracks the total number of too many requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_too_many_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_TOO_MANY_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_too_many_requests")
+        .with_description("Total number of too many requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of bad requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_bad_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_BAD_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_bad_requests")
+        .with_description("Total number of bad requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of locked requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_locked_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_LOCKED_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_locked_requests")
+        .with_description("Total number of locked requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of too early requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_too_early_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_TOO_EARLY_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_too_early_requests")
+        .with_description("Total number of too early requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of unauthorized requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_unauthorized_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_UNAUTHORIZED_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_unauthorized_requests")
+        .with_description("Total number of unauthorized requests")
+        .with_unit("requests")
+        .build()
+});
+
+/// Counter metric that tracks the total number of confidential chat requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_confidential_chat_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static CHAT_COMPLETIONS_CONFIDENTIAL_NUM_REQUESTS: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_total_confidential_chat_requests")
+            .with_description("Total number of confidential chat requests")
+            .with_unit("requests")
+            .build()
+    });
+
+/// Counter metric that tracks the total number of failed confidential chat requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_failed_confidential_chat_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_FAILED_CHAT_CONFIDENTIAL_REQUESTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    GLOBAL_METER
+        .u64_counter("atoma_total_failed_confidential_chat_requests")
+        .with_description("Total number of failed confidential chat requests")
+        .with_unit("requests")
+        .build()
+});
+
 /// Counter metric that tracks the total number of failed image generation requests.
 ///
 /// # Metric Details
@@ -330,6 +436,22 @@ pub static TOTAL_FAILED_IMAGE_GENERATION_REQUESTS: LazyLock<Counter<u64>> = Lazy
         .with_unit("requests")
         .build()
 });
+
+/// Counter metric that tracks the total number of failed confidential image generation requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_failed_confidential_image_generation_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_FAILED_CONFIDENTIAL_IMAGE_GENERATION_REQUESTS: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_total_failed_confidential_image_generation_requests")
+            .with_description("Total number of failed confidential image generation requests")
+            .with_unit("requests")
+            .build()
+    });
 
 /// Counter metric that tracks the total number of failed text embedding requests.
 ///
@@ -482,6 +604,22 @@ pub static UNSUCCESSFUL_TEXT_EMBEDDING_REQUESTS_PER_USER: LazyLock<Counter<u64>>
         GLOBAL_METER
             .u64_counter("atoma_unsuccessful_text_embedding_requests_per_user")
             .with_description("Total number of unsuccessful text embedding requests per user")
+            .with_unit("requests")
+            .build()
+    });
+
+/// Counter metric that tracks the total number of failed text embedding confidential requests.
+///
+/// # Metric Details
+/// - Name: `atoma_total_failed_text_embedding_confidential_requests`
+/// - Type: Counter
+/// - Labels: `model`
+/// - Unit: requests (count)
+pub static TOTAL_FAILED_CONFIDENTIAL_EMBEDDING_REQUESTS: LazyLock<Counter<u64>> =
+    LazyLock::new(|| {
+        GLOBAL_METER
+            .u64_counter("atoma_total_failed_text_embedding_confidential_requests")
+            .with_description("Total number of failed text embedding confidential requests")
             .with_unit("requests")
             .build()
     });
