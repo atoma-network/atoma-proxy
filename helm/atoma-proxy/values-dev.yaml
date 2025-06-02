@@ -99,7 +99,7 @@ grafana:
       metallb.universe.tf/address-pool: grafana-pool
 
 loki: # Fixed typo: was "oki"
-  enabled: true
+  enabled: false
   deploymentMode: SingleBinary
   auth_enabled: false
 
