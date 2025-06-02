@@ -787,7 +787,7 @@ dependencies = [
  "tokio",
  "tonic 0.12.3",
  "tower 0.5.2",
- "tower-http 0.6.4",
+ "tower-http 0.6.5",
  "tracing",
  "tracing-appender",
  "tracing-loki",
@@ -820,7 +820,7 @@ dependencies = [
  "sui-sdk",
  "thiserror 2.0.12",
  "tokio",
- "tower-http 0.6.4",
+ "tower-http 0.6.5",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -6893,7 +6893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -9970,9 +9970,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdb0c213ca27a9f57ab69ddb290fd80d970922355b83ae380b395d3986b8a2e"
+checksum = "5cc2d9e086a412a451384326f521c8123a99a466b329941a9403696bff9b0da2"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",

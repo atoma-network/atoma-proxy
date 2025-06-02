@@ -64,7 +64,7 @@ toml                        = "0.8.19"
 tonic                       = "0.12"
 topology                    = { git = "https://github.com/atoma-network/nvrust", branch = "main" }
 tower                       = "0.5.1"
-tower-http                  = "0.6.4"
+tower-http                  = "0.6.5"
 tracing                     = "0.1.40"
 tracing-appender            = "0.2.3"
 tracing-loki                = "0.2.6"
