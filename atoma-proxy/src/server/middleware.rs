@@ -899,6 +899,7 @@ pub mod auth {
     use atoma_auth::Sui;
     use atoma_state::types::CheapestNode;
     use atoma_state::types::Stack;
+    use atoma_state::AtomaStateManagerError;
     use atoma_state::{timestamp_to_datetime_or_now, types::AtomaAtomaStateManagerEvent};
     use axum::http::HeaderMap;
     use flume::Sender;
@@ -1092,6 +1093,97 @@ pub mod auth {
         }
     }
 
+    /// Sends an event to the Atoma state manager.
+    ///
+    /// This function is used to send events to the state manager for processing.
+    /// It handles the sending of events and returns a `Result` indicating success or failure.
+    ///
+    /// # Arguments
+    /// * `state_manager_sender` - The sender channel for the Atoma state manager events.
+    /// * `event` - The event to be sent to the state manager.
+    /// * `event_name` - A static string representing the name of the event, used for logging.
+    /// * `endpoint` - The endpoint from which the event is being sent, used for error reporting.
+    ///
+    /// # Returns
+    /// * `Result<()>` - Returns `Ok(())` if the event was sent successfully, or an `AtomaProxyError` if there was an error.
+    ///
+    /// # Errors
+    /// Returns `AtomaProxyError::InternalError` if the event could not be sent, with a message detailing the error.
+    #[instrument(level = "trace", skip_all)]
+    pub fn send_event(
+        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+        event: AtomaAtomaStateManagerEvent,
+        event_name: &'static str,
+        endpoint: &str,
+    ) -> Result<()> {
+        state_manager_sender
+            .send(event)
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send {event_name} event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })
+    }
+
+    /// Sends an event to the Atoma state manager and waits for a response.
+    ///
+    /// This function is used to send events that require a response from the state manager.
+    /// It creates a oneshot channel to receive the response and handles any errors that may occur during sending or receiving.
+    ///
+    /// # Arguments
+    /// * `state_manager_sender` - The sender channel for the Atoma state manager events.
+    /// * `event_creator` - A closure that creates the event to be sent, taking a oneshot sender for the response.
+    /// * `event_name` - A static string representing the name of the event, used for logging.
+    /// * `endpoint` - The endpoint from which the event is being sent, used for error reporting.
+    ///
+    /// # Returns
+    /// * `Result<T>` - Returns `Ok(T)` if the event was sent and a response was received successfully, or an `AtomaProxyError` if there was an error.
+    ///
+    /// # Errors
+    /// Returns `AtomaProxyError::InternalError` if:
+    /// * The event could not be sent to the state manager.
+    /// * The response could not be received from the oneshot channel.
+    /// * The response contained an error.
+    #[instrument(level = "trace", skip_all)]
+    pub async fn send_event_with_response<T>(
+        state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+        event_creator: impl FnOnce(
+            oneshot::Sender<std::result::Result<T, AtomaStateManagerError>>,
+        ) -> AtomaAtomaStateManagerEvent,
+        event_name: &'static str,
+        endpoint: &str,
+    ) -> Result<T> {
+        let (result_sender, result_receiver) =
+            oneshot::channel::<std::result::Result<T, AtomaStateManagerError>>();
+
+        state_manager_sender
+            .send(event_creator(result_sender))
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to send {event_name} event: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?;
+
+        result_receiver
+            .await
+            .map_err(|err| AtomaProxyError::InternalError {
+                message: format!("Failed to receive {event_name} result: {err:?}"),
+                client_message: None,
+                endpoint: endpoint.to_string(),
+            })?
+            .map_err(|err| match err {
+                AtomaStateManagerError::InsufficientBalance => AtomaProxyError::BalanceError {
+                    message: "Insufficient balance to lock compute units".to_string(),
+                    endpoint: endpoint.to_string(),
+                },
+                _ => AtomaProxyError::InternalError {
+                    message: format!("Failed to get {event_name} result: {err:?}"),
+                    client_message: None,
+                    endpoint: endpoint.to_string(),
+                },
+            })
+    }
+
     /// Authenticates a request and attempts to lock compute units for model execution.
     ///
     /// This function performs several key operations in sequence:
@@ -1184,38 +1276,23 @@ pub mod auth {
 
         let node = get_cheapest_node(state, &model, endpoint).await?;
         // We don't have a stack for the user, lets check if the user is using fiat currency.
-        let (result_sender, result_receiver) = oneshot::channel();
         let fiat_locked_input_amount =
             num_input_tokens as i64 * node.price_per_one_million_compute_units / ONE_MILLION as i64;
         let fiat_locked_output_amount = max_output_tokens as i64
             * node.price_per_one_million_compute_units
             / ONE_MILLION as i64;
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::LockUserFiatBalance {
+        let locked_fiat = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::LockUserFiatBalance {
                 user_id,
                 input_amount: fiat_locked_input_amount,
                 output_amount: fiat_locked_output_amount,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send LockUserFiatBalance event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-
-        let locked_fiat = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive LockUserFiatBalance result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get LockUserFiatBalance result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+            },
+            "LockUserFiatBalance",
+            endpoint,
+        )
+        .await?;
 
         if locked_fiat {
             return Ok(StackMetadata {
@@ -1230,35 +1307,21 @@ pub mod auth {
             });
         }
 
-        let (result_sender, result_receiver) = oneshot::channel();
-
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
-                model: model.to_string(),
-                free_compute_units: (num_input_tokens + max_output_tokens) as i64,
-                user_id,
-                is_confidential: false, // NOTE: This method is only used for non-confidential compute
-                result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetStacksForModel event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-
-        let optional_stack = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetStacksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetStacksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+        let optional_stack = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| {
+                AtomaAtomaStateManagerEvent::GetStacksForModel {
+                    model: model.to_string(),
+                    free_compute_units: (num_input_tokens + max_output_tokens) as i64,
+                    user_id,
+                    is_confidential: false, // NOTE: This method is only used for non-confidential compute
+                    result_sender,
+                }
+            },
+            "GetStacksForModel",
+            endpoint,
+        )
+        .await?;
 
         Ok(StackMetadata {
             optional_stack,
@@ -1301,34 +1364,19 @@ pub mod auth {
         endpoint: &str,
         total_tokens: u64,
     ) -> Result<Option<SelectedNodeMetadata>> {
-        let (result_sender, result_receiver) = oneshot::channel();
-
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetStacksForTask {
+        let optional_stack = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::GetStacksForTask {
                 task_small_id,
                 free_compute_units: total_tokens as i64,
                 user_id,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetStacksForTask event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+            },
+            "GetStacksForTask",
+            endpoint,
+        )
+        .await?;
 
-        let optional_stack = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetStacksForTask result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetStacksForTask result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
         if let Some(stack) = optional_stack {
             Ok(Some(SelectedNodeMetadata {
                 stack_small_id: Some(stack.stack_small_id),
@@ -1387,35 +1435,20 @@ pub mod auth {
         endpoint: &str,
     ) -> Result<ProcessedRequest> {
         // Get node address
-        let (result_sender, result_receiver) = oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetNodePublicAddress {
+        let node_address = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::GetNodePublicAddress {
                 node_small_id: selected_node_id,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetNodePublicAddress event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-
-        let node_address = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetNodePublicAddress result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetNodePublicAddress result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .ok_or_else(|| AtomaProxyError::NotFound {
-                message: format!("No node address found for node {selected_node_id}"),
-                endpoint: endpoint.to_string(),
-            })?;
+            },
+            "GetNodePublicAddress",
+            endpoint,
+        )
+        .await?
+        .ok_or_else(|| AtomaProxyError::NotFound {
+            message: format!("No node address found for node {selected_node_id}"),
+            endpoint: endpoint.to_string(),
+        })?;
 
         // Get signature
         let signature = state
@@ -1659,32 +1692,19 @@ pub mod auth {
         let selected_node_id = event.selected_node_id.inner as i64;
 
         // Send the NewStackAcquired event to the state manager, so we have it in the DB.
-        let (result_sender, result_receiver) = oneshot::channel();
-        state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::NewStackAcquired {
+        send_event_with_response(
+            &state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::NewStackAcquired {
                 event,
                 locked_compute_units: total_tokens as i64,
                 transaction_timestamp: timestamp_to_datetime_or_now(timestamp_ms),
                 user_id,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send NewStackAcquired event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive NewStackAcquired result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive NewStackAcquired result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+            },
+            "NewStackAcquired",
+            &endpoint,
+        )
+        .await?;
         Ok(SelectedNodeMetadata {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
@@ -1725,30 +1745,18 @@ pub mod auth {
         stack_size_to_buy: u64,
         endpoint: String,
     ) -> Result<()> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::DeductFromUsdc {
+        send_event_with_response(
+            &state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::DeductFromUsdc {
                 user_id,
                 amount: (price_per_one_million_compute_units * stack_size_to_buy / ONE_MILLION)
                     as i64,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send DeductFromUsdc event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.clone(),
-            })?;
-        result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive DeductFromUsdc result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.clone(),
-            })?
-            .map_err(|err| AtomaProxyError::BalanceError {
-                message: format!("Balance error : {err:?}"),
-                endpoint,
-            })?;
+            },
+            "DeductFromUsdc",
+            &endpoint,
+        )
+        .await?;
         Ok(())
     }
 
@@ -1782,31 +1790,18 @@ pub mod auth {
         stack_size_to_buy: u64,
         endpoint: String,
     ) -> Result<()> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::RefundUsdc {
+        send_event_with_response(
+            &state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::RefundUsdc {
                 user_id,
                 amount: (price_per_one_million_compute_units * stack_size_to_buy / ONE_MILLION)
                     as i64,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send RefundUsdc event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive RefundUsdc result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to refund USDC: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })
+            },
+            "RefundUsdc",
+            &endpoint,
+        )
+        .await
     }
 
     /// Retrieves stack metadata for a locked user stack based on the endpoint type
@@ -2058,31 +2053,21 @@ pub mod auth {
         model: &str,
         endpoint: &str,
     ) -> Result<CheapestNode> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
-                model: model.to_string(),
-                is_confidential: false,
-                result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetTasksForModel event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let node = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetTasksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get retrieve `CheapestNode` from the state manager with result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+        let node = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| {
+                // Send the GetCheapestNodeForModel event to the state manager
+                AtomaAtomaStateManagerEvent::GetCheapestNodeForModel {
+                    model: model.to_string(),
+                    is_confidential: false,
+                    result_sender,
+                }
+            },
+            "GetCheapestNodeForModel",
+            endpoint,
+        )
+        .await?;
+
         node.map_or_else(
             || {
                 Err(AtomaProxyError::RequestError {
@@ -2205,33 +2190,19 @@ pub mod auth {
         is_confidential: bool,
         endpoint: &str,
     ) -> Result<Option<SelectedNodeMetadata>> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetStacksForModel {
+        let maybe_stack = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::GetStacksForModel {
                 model: model.to_string(),
                 user_id,
                 free_compute_units,
                 is_confidential,
                 result_sender,
-            })
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetStacksForModel event: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let maybe_stack = result_receiver
-            .await
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetStacksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|err| AtomaProxyError::InternalError {
-                message: format!("Failed to get GetStacksForModel result: {err:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+            },
+            "GetStacksForModel",
+            endpoint,
+        )
+        .await?;
         Ok(maybe_stack.map(|stack| SelectedNodeMetadata {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
@@ -2255,13 +2226,15 @@ pub mod utils {
             image_generations::CONFIDENTIAL_IMAGE_GENERATIONS_PATH, update_state_manager,
         },
         http_server::{LockedComputeUnits, StackSmallId},
+        middleware::auth::send_event,
         MODEL,
     };
 
     use super::{
-        auth, constants, instrument, AtomaAtomaStateManagerEvent, AtomaProxyError, Body,
-        HeaderValue, Parts, ProcessedRequest, ProxyState, Request, RequestMetadataExtension,
-        Result, State, Value, CONTENT_LENGTH,
+        auth::{self, send_event_with_response},
+        constants, instrument, AtomaAtomaStateManagerEvent, AtomaProxyError, Body, HeaderValue,
+        Parts, ProcessedRequest, ProxyState, Request, RequestMetadataExtension, Result, State,
+        Value, CONTENT_LENGTH,
     };
 
     /// Validates and prepares a request for processing by a specific stack and node.
@@ -2742,29 +2715,19 @@ pub mod utils {
         stack_small_id: i64,
         endpoint: &str,
     ) -> Result<(String, i64)> {
-        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
-        state
-            .state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetNodePublicUrlAndSmallId {
-                stack_small_id,
-                result_sender,
-            })
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send GetNodePublicAddress event: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
-        let (node_address, node_small_id) = result_receiver
-            .await
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to receive GetNodePublicAddress result: {e:?}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?
-            .map_err(|e| AtomaProxyError::NotFound {
-                message: format!("Failed to get node public address: {e:?}"),
-                endpoint: endpoint.to_string(),
-            })?;
+        let (node_address, node_small_id) = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| {
+                // Send the GetNodePublicUrlAndSmallId event to the state manager
+                AtomaAtomaStateManagerEvent::GetNodePublicUrlAndSmallId {
+                    stack_small_id,
+                    result_sender,
+                }
+            },
+            "GetNodePublicUrlAndSmallId",
+            endpoint,
+        )
+        .await?;
         if let Some(node_address) = node_address {
             return Ok((node_address, node_small_id));
         }
@@ -2843,13 +2806,13 @@ pub mod utils {
             stack_small_id = %stack_small_id,
             "Stack is in locked state for the requested node, trying to acquire a new stack"
         );
-        state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::LockStack { stack_small_id })
-            .map_err(|e| AtomaProxyError::InternalError {
-                message: format!("Failed to send LockStack event: {e}"),
-                client_message: None,
-                endpoint: endpoint.to_string(),
-            })?;
+        send_event(
+            state_manager_sender,
+            AtomaAtomaStateManagerEvent::LockStack { stack_small_id },
+            "LockStack",
+            endpoint,
+        )?;
+
         Ok(())
     }
 
