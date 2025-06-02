@@ -707,7 +707,7 @@ dependencies = [
  "rsa 0.9.8",
  "serde",
  "serde_json",
- "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.1)",
+ "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.49.1)",
  "sui-keys",
  "sui-sdk",
  "sui-sdk-types 0.0.2",
@@ -1668,7 +1668,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1677,7 +1677,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3693,7 +3693,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -4361,7 +4361,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.0",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6893,7 +6893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -8280,7 +8280,7 @@ dependencies = [
 [[package]]
 name = "shared-crypto"
 version = "0.0.0"
-source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.48.1#406f619fd59015e21267916bebfe58727ffcd78a"
+source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.49.1#3b1d6b3bd63f175b774da557f89af3619b74d783"
 dependencies = [
  "bcs",
  "eyre",
@@ -10760,7 +10760,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
