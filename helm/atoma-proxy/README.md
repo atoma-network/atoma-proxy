@@ -152,6 +152,20 @@ Options:
   -h, --help           Show this help message
 ```
 
+### Deployment configuration
+
+You need to ensure there is a `files` folder on the server you which to deploy to, located at `atoma-proxy/helm/atoma-proxy/files` which contains the `config.toml` and `sui_config` folder, as this is what the [sui-config-configmap.yaml](./templates/sui-config-configmap.yaml) and
+
+```
+helm/atoma-proxy/
+├── files/
+│   ├── config.toml           # Your main config file
+│   └── sui_config/          # Your Sui config files
+│       ├── client.yaml
+│       ├── sui.keystore
+│       └── sui.aliases
+```
+
 ## Environment-Specific Configurations
 
 ### Development
