@@ -1,0 +1,14 @@
+# helm/atoma-proxy/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.toml: |-
+{{ .Files.Get "files/config.toml" | indent 4 }}
+  environment: {{ .Values.atomaProxy.config.environment | quote }}
+  log_level: {{ .Values.atomaProxy.config.logLevel | quote }}

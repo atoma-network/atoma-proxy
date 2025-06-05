@@ -1,0 +1,68 @@
+# metallb-install.yaml
+# Installs MetalLB in native mode (recommended for k3s and modern clusters)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+---
+# Install MetalLB components (controller and speaker)
+# You can always get the latest from: https://metallb.universe.tf/installation/
+# This is for v0.14.5 (as of June 2024)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller
+  namespace: metallb-system
+spec:
+  selector:
+    matchLabels:
+      app: metallb
+      component: controller
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: metallb
+        component: controller
+    spec:
+      containers:
+        - name: controller
+          image: quay.io/metallb/controller:v0.14.5
+          args:
+            - controller
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 200m
+              memory: 200Mi
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: speaker
+  namespace: metallb-system
+spec:
+  selector:
+    matchLabels:
+      app: metallb
+      component: speaker
+  template:
+    metadata:
+      labels:
+        app: metallb
+        component: speaker
+    spec:
+      containers:
+        - name: speaker
+          image: quay.io/metallb/speaker:v0.14.5
+          args:
+            - speaker
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 200m
+              memory: 200Mi
