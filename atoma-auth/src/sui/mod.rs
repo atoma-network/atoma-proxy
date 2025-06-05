@@ -75,11 +75,13 @@ impl Sui {
     pub fn new(sui_config: &Config) -> Result<Self> {
         let sui_config_path = sui_config.sui_config_path();
         let sui_config_path = Path::new(&sui_config_path);
-        let wallet_ctx = WalletContext::new(
-            sui_config_path,
-            sui_config.request_timeout(),
-            sui_config.max_concurrent_requests(),
-        )?;
+        let mut wallet_ctx = WalletContext::new(sui_config_path)?;
+        if let Some(request_timeout) = sui_config.request_timeout() {
+            wallet_ctx = wallet_ctx.with_request_timeout(request_timeout);
+        }
+        if let Some(max_concurrent_requests) = sui_config.max_concurrent_requests() {
+            wallet_ctx = wallet_ctx.with_max_concurrent_requests(max_concurrent_requests);
+        }
 
         Ok(Self {
             wallet_ctx,
