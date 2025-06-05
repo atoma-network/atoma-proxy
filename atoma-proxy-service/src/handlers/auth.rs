@@ -276,7 +276,7 @@ pub async fn register(
         .await
         .map_err(|e| {
             error!("Failed to register user: {:?}", e);
-            match e {
+            match *e {
                 AuthError::UserAlreadyRegistered => StatusCode::CONFLICT,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             }
@@ -325,7 +325,7 @@ pub async fn login(
         .await
         .map_err(|e| {
             error!("Failed to login user: {:?}", e);
-            match e {
+            match *e {
                 AuthError::PasswordNotValidOrUserNotFound => StatusCode::UNAUTHORIZED,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             }

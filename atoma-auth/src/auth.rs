@@ -118,7 +118,56 @@ pub enum AuthError {
     TimestampConversionError,
 }
 
-type Result<T> = std::result::Result<T, AuthError>;
+type Result<T> = std::result::Result<T, Box<AuthError>>;
+
+/// Sends an event to the state manager
+///
+/// # Arguments
+/// * `state_manager_sender` - The sender for the state manager
+/// * `event` - The event to be sent
+///
+/// # Returns
+/// * `Result<()>` - If the event was sent successfully
+#[instrument(level = "trace", skip_all)]
+fn send_event(
+    state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+    event: AtomaAtomaStateManagerEvent,
+) -> Result<()> {
+    Ok(state_manager_sender.send(event)?)
+}
+
+/// Sends an event to the state manager and waits for a response
+/// This function is used to send an event to the state manager and wait for a response.
+/// It uses a oneshot channel to send the event and receive the response.
+///
+/// # Arguments
+/// * `state_manager_sender` - The sender for the state manager
+/// * `event_creator` - A closure that creates the event to be sent
+///
+/// # Returns
+/// * `Result<T>` - The result of the event, which can be either a success or an error
+///
+/// # Errors
+/// Returns an error if:
+/// - The event could not be sent to the state manager
+/// - The response could not be received from the oneshot channel
+/// - The response from the state manager is an error
+#[instrument(level = "trace", skip_all)]
+async fn send_event_with_response<T>(
+    state_manager_sender: &Sender<AtomaAtomaStateManagerEvent>,
+    event_creator: impl FnOnce(
+        oneshot::Sender<std::result::Result<T, AtomaStateManagerError>>,
+    ) -> AtomaAtomaStateManagerEvent,
+) -> Result<T> {
+    let (result_sender, result_receiver) =
+        oneshot::channel::<std::result::Result<T, AtomaStateManagerError>>();
+
+    state_manager_sender.send(event_creator(result_sender))?;
+
+    let result = result_receiver.await??;
+    Ok(result)
+}
+
 /// The Auth struct
 #[derive(Clone)]
 pub struct Auth {
@@ -201,11 +250,13 @@ impl Auth {
             &claims,
             &EncodingKey::from_secret(self.secret_key.as_ref()),
         )?;
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::StoreRefreshToken {
+        send_event(
+            &self.state_manager_sender,
+            AtomaAtomaStateManagerEvent::StoreRefreshToken {
                 user_id,
                 refresh_token_hash: self.hash_string(&token),
-            })?;
+            },
+        )?;
         Ok(token)
     }
 
@@ -233,7 +284,7 @@ impl Auth {
 
         let claims = token_data.claims;
         if claims.refresh_token_hash.is_none() != is_refresh {
-            return Err(AuthError::NotRefreshToken);
+            return Err(Box::new(AuthError::NotRefreshToken));
         }
         Ok(claims)
     }
@@ -254,14 +305,14 @@ impl Auth {
         user_id: i64,
         refresh_token_hash: &str,
     ) -> Result<bool> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
+        send_event_with_response(&self.state_manager_sender, |result_receiver| {
+            AtomaAtomaStateManagerEvent::IsRefreshTokenValid {
                 user_id,
                 refresh_token_hash: refresh_token_hash.to_string(),
-                result_sender,
-            })?;
-        Ok(result_receiver.await??)
+                result_sender: result_receiver,
+            }
+        })
+        .await
     }
 
     /// Generate a new access token from a refresh token
@@ -283,7 +334,7 @@ impl Auth {
             .check_refresh_token_validity(claims.user_id, &refresh_token_hash)
             .await?
         {
-            return Err(AuthError::InvalidRefreshToken);
+            return Err(Box::new(AuthError::InvalidRefreshToken));
         }
         let expiration = Utc::now() + Duration::days(self.access_token_lifetime as i64);
 
@@ -330,24 +381,23 @@ impl Auth {
         user_profile: &UserProfile,
         password: &str,
     ) -> Result<(String, String)> {
-        let (result_sender, result_receiver) = oneshot::channel();
         let password_salt = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
             .take(30)
             .map(char::from)
             .collect::<String>();
 
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
+        let user_id = send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::RegisterUserWithPassword {
                 user_profile: user_profile.clone(),
                 password: self.hash_string(&format!("{password_salt}:{password}")),
                 password_salt,
                 result_sender,
-            })?;
-        let user_id = result_receiver
-            .await??
-            .map(|user_id| user_id as u64)
-            .ok_or_else(|| AuthError::UserAlreadyRegistered)?;
+            }
+        })
+        .await?
+        .map(|user_id| user_id as u64)
+        .ok_or_else(|| AuthError::UserAlreadyRegistered)?;
         let refresh_token = self.generate_refresh_token(user_id as i64).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
@@ -363,28 +413,25 @@ impl Auth {
         email: &str,
         password: &str,
     ) -> Result<(String, String)> {
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetPasswordSalt {
+        let password_salt = send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::GetPasswordSalt {
                 email: email.to_string(),
                 result_sender,
-            })?;
-        let password_salt = result_receiver.await??;
+            }
+        })
+        .await?
+        .ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
 
-        let password_salt =
-            password_salt.ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
-
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
+        let user_id = send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::GetUserIdByEmailPassword {
                 email: email.to_string(),
                 password: self.hash_string(&format!("{password_salt}:{password}")),
                 result_sender,
-            })?;
-        let user_id = result_receiver
-            .await??
-            .map(|user_id| user_id as u64)
-            .ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
+            }
+        })
+        .await?
+        .map(|user_id| user_id as u64)
+        .ok_or_else(|| AuthError::PasswordNotValidOrUserNotFound)?;
         let refresh_token = self.generate_refresh_token(user_id as i64).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
@@ -403,26 +450,25 @@ impl Auth {
             &self.google_public_keys,
         )?;
 
-        let (result_sender, result_receiver) = oneshot::channel();
-        let email = match claims.email {
-            Some(email) => email,
-            None => {
-                return Err(google::GoogleError::EmailNotFound)?;
-            }
+        let Some(email) = claims.email else {
+            return Err(google::GoogleError::EmailNotFound)?;
         };
+
         // In case this user doesn't have an account yet, we will add the password salt
         let password_salt = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
             .take(30)
             .map(char::from)
             .collect::<String>();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::OAuth {
+
+        let user_id = send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::OAuth {
                 email,
                 password_salt,
                 result_sender,
-            })?;
-        let user_id = result_receiver.await??;
+            }
+        })
+        .await?;
         let refresh_token = self.generate_refresh_token(user_id).await?;
         let access_token = self.generate_access_token(&refresh_token).await?;
         Ok((refresh_token, access_token))
@@ -448,12 +494,14 @@ impl Auth {
             .take(API_TOKEN_LENGTH)
             .map(char::from)
             .collect();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::StoreNewApiToken {
+        send_event(
+            &self.state_manager_sender,
+            AtomaAtomaStateManagerEvent::StoreNewApiToken {
                 user_id: claims.user_id,
                 api_token: api_token.clone(),
                 name,
-            })?;
+            },
+        )?;
         Ok(api_token)
     }
 
@@ -472,12 +520,14 @@ impl Auth {
     #[instrument(level = "info", skip(self))]
     pub async fn revoke_api_token(&self, jwt: &str, api_token_id: i64) -> Result<()> {
         let claims = self.get_claims_from_token(jwt).await?;
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::RevokeApiToken {
+
+        send_event(
+            &self.state_manager_sender,
+            AtomaAtomaStateManagerEvent::RevokeApiToken {
                 user_id: claims.user_id,
                 api_token_id,
-            })?;
-        Ok(())
+            },
+        )
     }
 
     /// Get all API tokens for a user
@@ -495,13 +545,13 @@ impl Auth {
     pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<TokenResponse>> {
         let claims = self.get_claims_from_token(jwt).await?;
 
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetApiTokensForUser {
+        send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::GetApiTokensForUser {
                 user_id: claims.user_id,
                 result_sender,
-            })?;
-        Ok(result_receiver.await??)
+            }
+        })
+        .await
     }
 
     /// Get the claims from the token
@@ -527,7 +577,7 @@ impl Auth {
             )
             .await?
         {
-            return Err(AuthError::RevokedToken);
+            return Err(Box::new(AuthError::RevokedToken));
         }
         Ok(claims)
     }
@@ -571,21 +621,24 @@ impl Auth {
     ///
     /// Map a base64 string to a bit array by taking each char's index and convert it to binary form with one bit per u8
     /// element in the output. Returns SignatureError if one of the characters is not in the base64 charset.
+    #[allow(clippy::cast_possible_truncation)]
     fn base64_to_bitarray(input: &str) -> Result<Vec<u8>> {
-        use itertools::Itertools;
         const BASE64_URL_CHARSET: &str =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
         input
             .chars()
-            .map(|c| {
+            .flat_map(|c| {
                 BASE64_URL_CHARSET
                     .find(c)
-                    .map(|index| u8::try_from(index).map_err(AuthError::IntConversionError))
-                    .unwrap()
-                    .map(|index| (0..6).rev().map(move |i| index >> i & 1))
+                    .ok_or_else(|| {
+                        Box::new(AuthError::FailedToParseSignature(format!(
+                            "Invalid character: {c}"
+                        )))
+                    })
+                    .map(|index| (0..6).rev().map(move |i| Ok((index >> i & 1) as u8)))
+                    .into_iter()
             })
-            .flatten_ok()
+            .flatten()
             .collect()
     }
 
@@ -701,9 +754,9 @@ impl Auth {
             }
             UserSignature::Simple(simple_signature) => (simple_signature, None),
             _ => {
-                return Err(AuthError::FailedToParseSignature(
+                return Err(Box::new(AuthError::FailedToParseSignature(
                     "Unsupported signature".to_string(),
-                ))
+                )))
             }
         };
         match signature {
@@ -777,12 +830,13 @@ impl Auth {
             ),
         )?;
 
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::UpdateSuiAddress {
+        send_event(
+            &self.state_manager_sender,
+            AtomaAtomaStateManagerEvent::UpdateSuiAddress {
                 user_id: claims.user_id,
                 sui_address: sui_address.to_string(),
-            })?;
-        Ok(())
+            },
+        )
     }
 
     /// Updates the balance of the user
@@ -815,14 +869,13 @@ impl Auth {
     ) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
 
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender.send(
+        send_event_with_response(&self.state_manager_sender, |result_sender| {
             AtomaAtomaStateManagerEvent::InsertNewUsdcPaymentDigest {
                 digest: transaction_digest.to_string(),
                 result_sender,
-            },
-        )?;
-        result_receiver.await??;
+            }
+        })
+        .await?;
         let mut balance_changes = Err(anyhow!("No balance changes found"));
         for _ in 0..SUI_BALANCE_RETRY_COUNT {
             balance_changes = self
@@ -845,14 +898,14 @@ impl Auth {
                 if tag.address.to_hex() == self.sui.read().await.usdc_package_id.to_hex() {
                     if balance_change.amount < 0 {
                         if sender.is_some() {
-                            return Err(AuthError::MultipleSenders);
+                            return Err(Box::new(AuthError::MultipleSenders));
                         }
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
                             sender = Some(*owner);
                         }
                     } else {
                         if receiver.is_some() {
-                            return Err(AuthError::MultipleReceivers);
+                            return Err(Box::new(AuthError::MultipleReceivers));
                         }
                         money_in = Some(balance_change.amount);
                         if let Owner::AddressOwner(owner) = &balance_change.owner {
@@ -863,7 +916,7 @@ impl Auth {
             }
         }
         if sender.is_none() || receiver.is_none() {
-            return Err(AuthError::SenderOrReceiverNotFound);
+            return Err(Box::new(AuthError::SenderOrReceiverNotFound));
         }
         let sender = sender.unwrap();
         let receiver = receiver.unwrap();
@@ -878,37 +931,40 @@ impl Auth {
                         != Self::get_sui_address_from_signature(&signature, transaction_digest)?
                             .to_string()
                     {
-                        return Err(AuthError::PaymentNotForThisUser);
+                        return Err(Box::new(AuthError::PaymentNotForThisUser));
                     }
                 }
                 #[cfg(not(feature = "google-oauth"))]
                 Some(_) => {
-                    return Err(AuthError::ZkLoginNotEnabled);
+                    return Err(Box::new(AuthError::ZkLoginNotEnabled));
                 }
                 None => {
-                    let (result_sender, result_receiver) = oneshot::channel();
-                    self.state_manager_sender
-                        .send(AtomaAtomaStateManagerEvent::ConfirmUser {
-                            sui_address: sender.to_string(),
-                            user_id: claims.user_id,
-                            result_sender,
-                        })?;
-                    let is_their_wallet = result_receiver.await??;
+                    let is_their_wallet =
+                        send_event_with_response(&self.state_manager_sender, |result_sender| {
+                            AtomaAtomaStateManagerEvent::ConfirmUser {
+                                sui_address: sender.to_string(),
+                                user_id: claims.user_id,
+                                result_sender,
+                            }
+                        })
+                        .await?;
 
                     if !is_their_wallet {
-                        return Err(AuthError::PaymentNotForThisUser);
+                        return Err(Box::new(AuthError::PaymentNotForThisUser));
                     }
                 }
             }
 
             // We are the receiver and we know the sender
-            self.state_manager_sender
-                .send(AtomaAtomaStateManagerEvent::TopUpBalance {
+            send_event(
+                &self.state_manager_sender,
+                AtomaAtomaStateManagerEvent::TopUpBalance {
                     user_id: claims.user_id,
                     amount: i64::try_from(money_in.unwrap()).map_err(|e| {
                         AuthError::AnyhowError(anyhow!("Failed to convert amount: {e}"))
                     })?,
-                })?;
+                },
+            )?;
         }
         Ok(())
     }
@@ -928,14 +984,80 @@ impl Auth {
     /// * If the verification fails
     pub async fn get_sui_address(&self, jwt: &str) -> Result<Option<String>> {
         let claims = self.validate_token(jwt, false)?;
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.state_manager_sender
-            .send(AtomaAtomaStateManagerEvent::GetSuiAddress {
+        send_event_with_response(&self.state_manager_sender, |result_sender| {
+            AtomaAtomaStateManagerEvent::GetSuiAddress {
                 user_id: claims.user_id,
                 result_sender,
-            })?;
-        let sui_address = result_receiver.await;
-        Ok(sui_address??)
+            }
+        })
+        .await
+    }
+}
+
+impl From<anyhow::Error> for Box<AuthError> {
+    fn from(err: anyhow::Error) -> Self {
+        Self::new(AuthError::AnyhowError(err))
+    }
+}
+
+impl From<jsonwebtoken::errors::Error> for Box<AuthError> {
+    fn from(err: jsonwebtoken::errors::Error) -> Self {
+        Self::new(AuthError::JsonWebTokenError(err))
+    }
+}
+
+impl From<flume::SendError<AtomaAtomaStateManagerEvent>> for Box<AuthError> {
+    fn from(err: flume::SendError<AtomaAtomaStateManagerEvent>) -> Self {
+        Self::new(AuthError::FlumeError(err))
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for Box<AuthError> {
+    fn from(err: tokio::sync::oneshot::error::RecvError) -> Self {
+        Self::new(AuthError::OneShotReceiveError(err))
+    }
+}
+
+impl From<AtomaStateManagerError> for Box<AuthError> {
+    fn from(err: AtomaStateManagerError) -> Self {
+        Self::new(AuthError::AtomaStateManagerError(err))
+    }
+}
+
+impl From<reqwest::Error> for Box<AuthError> {
+    fn from(err: reqwest::Error) -> Self {
+        Self::new(AuthError::ReqwestError(err))
+    }
+}
+
+impl From<bcs::Error> for Box<AuthError> {
+    fn from(err: bcs::Error) -> Self {
+        Self::new(AuthError::BcsError(err))
+    }
+}
+
+impl From<FastCryptoError> for Box<AuthError> {
+    fn from(err: FastCryptoError) -> Self {
+        Self::new(AuthError::FastCryptoError(err))
+    }
+}
+
+impl From<std::num::TryFromIntError> for Box<AuthError> {
+    fn from(err: std::num::TryFromIntError) -> Self {
+        Self::new(AuthError::IntConversionError(err))
+    }
+}
+
+#[cfg(feature = "google-oauth")]
+impl From<crate::google::GoogleError> for Box<AuthError> {
+    fn from(err: crate::google::GoogleError) -> Self {
+        Self::new(AuthError::GoogleError(err))
+    }
+}
+
+impl From<SuiError> for Box<AuthError> {
+    fn from(err: SuiError) -> Self {
+        Self::new(AuthError::SuiError(err))
     }
 }
 
