@@ -479,7 +479,8 @@ async fn handle_image_generation_response(
 
     let time = Instant::now();
     // Send the request to the AI node
-    let response = state.client
+    let response = state
+        .client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
