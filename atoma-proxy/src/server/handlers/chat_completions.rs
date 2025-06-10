@@ -613,12 +613,12 @@ async fn handle_non_streaming_response(
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
-    let client = reqwest::Client::new();
     let time = Instant::now();
 
     let model_label = model_name.clone();
 
-    let response = client
+    let response = state
+        .client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
@@ -809,12 +809,12 @@ async fn handle_streaming_response(
     endpoint: String,
     model_name: String,
 ) -> Result<Response<Body>> {
-    let client = reqwest::Client::new();
     let start = Instant::now();
 
     let request_id = uuid::Uuid::new_v4().to_string();
     headers.insert(REQUEST_ID, HeaderValue::from_str(&request_id).unwrap());
-    let response = client
+    let response = state
+        .client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
@@ -844,7 +844,7 @@ async fn handle_streaming_response(
     let state_manager_sender = state.state_manager_sender.clone();
     let node_address_clone = node_address.clone();
     let request_id_clone = request_id.clone();
-    let client_clone = client.clone();
+    let client_clone = state.client.clone();
     tokio::spawn(async move {
         tracing::info!(
             target = "atoma-service-chat-completions",

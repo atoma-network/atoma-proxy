@@ -477,10 +477,10 @@ async fn handle_image_generation_response(
     let model_label: String = model_name.clone();
     IMAGE_GEN_NUM_REQUESTS.add(1, &[KeyValue::new("model", model_label.clone())]);
 
-    let client = reqwest::Client::new();
     let time = Instant::now();
     // Send the request to the AI node
-    let response = client
+    let response = state
+        .client
         .post(format!("{node_address}{endpoint}"))
         .headers(headers)
         .json(&payload)
