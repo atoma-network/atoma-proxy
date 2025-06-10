@@ -12,7 +12,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use flume::Sender;
-use reqwest::Method;
+use reqwest::{Client, Method};
 use serde::Serialize;
 use tokenizers::Tokenizer;
 use tokio::sync::watch;
@@ -136,6 +136,9 @@ pub struct ProxyState {
 
     /// Open router models file.
     pub open_router_models_file: String,
+
+    /// HTTP client for making requests.
+    pub client: Client,
 }
 
 #[derive(OpenApi)]
@@ -303,6 +306,7 @@ pub async fn start_server(
         tokenizers: Arc::new(tokenizers),
         models: Arc::new(config.models),
         open_router_models_file: config.open_router_models_file,
+        client: Client::new(),
     };
     let router = create_router(&proxy_state);
     let server =
