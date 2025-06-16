@@ -142,39 +142,83 @@ impl AtomaStateManager {
     /// }
     /// ```
     #[instrument(level = "trace", skip_all)]
-    pub async fn run(self, mut shutdown_signal: Receiver<bool>) -> Result<()> {
-        let mut network_metrics = NetworkMetrics::new();
-        let interval = std::time::Duration::from_secs(15);
-
-        // Create a channel for interval-based updates
-        let (interval_tx, interval_rx) = flume::unbounded();
-
+    pub async fn run(
+        self,
+        state_manager_sender: flume::Sender<AtomaAtomaStateManagerEvent>,
+        mut shutdown_signal: Receiver<bool>,
+    ) -> Result<()> {
         // Spawn a task that sends a message every interval
+        let mut shutdown_signal_clone = shutdown_signal.clone();
         tokio::spawn(async move {
+            let interval = std::time::Duration::from_secs(15);
+            let mut network_metrics = NetworkMetrics::new();
             loop {
-                tokio::time::sleep(interval).await;
-                if interval_tx.send(()).is_err() {
-                    break;
+                tokio::select! {
+                    () = tokio::time::sleep(interval) => {
+                        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
+                        match state_manager_sender.send(
+                            AtomaAtomaStateManagerEvent::RetrieveNodesPublicAddresses { result_sender },
+                        ) {
+                            Ok(()) => match result_receiver.await {
+                                Ok(node_addresses) => match node_addresses {
+                                    Ok(node_addresses) => {
+                                        network_metrics.update_metrics(node_addresses).await;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            target = "network_metrics",
+                                            error = %e,
+                                            "Failed to retrieve node addresses"
+                                        );
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::error!(
+                                        target = "network_metrics",
+                                        error = %e,
+                                        "Failed to receive node addresses"
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!(
+                                    target = "network_metrics",
+                                    error = %e,
+                                    "Failed to send retrieve nodes public addresses event"
+                                );
+                            }
+                        }
+                    }
+                    shutdown_signal_changed = shutdown_signal_clone.changed() => {
+                        match shutdown_signal_changed {
+                            Ok(()) => {
+                                if *shutdown_signal_clone.borrow() {
+                                    tracing::trace!(
+                                        target = "atoma-state-manager",
+                                        event = "shutdown_signal",
+                                        "Shutdown signal received, shutting down"
+                                    );
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    target = "atoma-state-manager",
+                                    event = "shutdown_signal_error",
+                                    error = %e,
+                                    "Shutdown signal channel closed"
+                                );
+                                // NOTE: We want to break here as well, since no one can signal shutdown anymore
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         });
 
         loop {
             tokio::select! {
-                _ = interval_rx.recv_async() => {
-                    match self.state.retrieve_node_public_addresses().await {
-                        Ok(node_addresses) => {
-                            network_metrics.update_metrics(node_addresses).await;
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                target = "network_metrics",
-                                error = %e,
-                                "Failed to retrieve node addresses"
-                            );
-                        }
-                    }
-                }
                 atoma_event = self.event_subscriber_receiver.recv_async() => {
                     match atoma_event {
                         Ok(atoma_event) => {

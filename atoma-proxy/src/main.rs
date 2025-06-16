@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
     .await?;
 
     let state_manager_handle = spawn_with_shutdown(
-        state_manager.run(shutdown_receiver.clone()),
+        state_manager.run(state_manager_sender.clone(), shutdown_receiver.clone()),
         shutdown_sender.clone(),
     );
 

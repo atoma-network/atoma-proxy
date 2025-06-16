@@ -927,4 +927,9 @@ pub enum AtomaAtomaStateManagerEvent {
         /// Number of output tokens
         output_tokens: i64,
     },
+    RetrieveNodesPublicAddresses {
+        /// Channel to send back the list of public addresses
+        /// Returns Ok(Vec<String>) with the list of `public_address` or an error if the query fails
+        result_sender: oneshot::Sender<Result<Vec<String>>>,
+    },
 }

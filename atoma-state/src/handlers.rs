@@ -1468,6 +1468,12 @@ pub async fn handle_state_manager_event(
                     .await?;
             }
         }
+        AtomaAtomaStateManagerEvent::RetrieveNodesPublicAddresses { result_sender } => {
+            let addresses = state_manager.state.retrieve_node_public_addresses().await;
+            result_sender
+                .send(addresses)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
     }
     Ok(())
 }
