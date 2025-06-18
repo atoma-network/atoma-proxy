@@ -1,0 +1,43 @@
+{{- if .Values.atomaProxy.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- with .Values.atomaProxy.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.atomaProxy.ingress.className }}
+  tls:
+    - hosts:
+        {{- range .Values.atomaProxy.ingress.hosts }}
+        - {{ .host }}
+        {{- end }}
+      secretName: {{ .Release.Name }}-tls
+  rules:
+    {{- range .Values.atomaProxy.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $.Release.Name }}
+                port:
+                  {{- if eq .service "http" }}
+                  name: http
+                  {{- else if eq .service "credentials" }}
+                  name: credentials
+                  {{- else if eq .service "prover" }}
+                  number: 8080
+                  {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}
