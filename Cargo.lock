@@ -750,7 +750,7 @@ dependencies = [
  "rsa 0.9.8",
  "serde",
  "serde_json",
- "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.50.1)",
+ "shared-crypto 0.0.0 (git+https://github.com/mystenlabs/sui?tag=testnet-v1.51.2)",
  "sui-keys",
  "sui-sdk",
  "sui-sdk-types 0.0.2",
@@ -8701,7 +8701,7 @@ dependencies = [
 [[package]]
 name = "shared-crypto"
 version = "0.0.0"
-source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.50.1#197ebfbc1ff03d83f908e23281e7269b65cf350d"
+source = "git+https://github.com/mystenlabs/sui?tag=testnet-v1.51.2#597b04d84a64a88ecbc9c2984d61d436ff4ec693"
 dependencies = [
  "bcs",
  "eyre",
