@@ -4778,7 +4778,7 @@ impl AtomaState {
     #[instrument(level = "trace", skip(self))]
     pub async fn get_custom_pricing(&self, user_id: i64, model: &str) -> Result<Option<Pricing>> {
         let pricing = sqlx::query(
-            "SELECT price_per_one_million_input_compute_units, price_per_one_million_output_compute_units FROM user_model_prices WHERE user_id = $1 AND model_name = $2",
+            "SELECT price_per_one_million_input_compute_units, price_per_one_million_output_compute_units FROM user_model_prices WHERE user_id = $1 AND model_name = $2 ORDER BY creation_timestamp DESC LIMIT 1",
         )
         .bind(user_id)
         .bind(model)

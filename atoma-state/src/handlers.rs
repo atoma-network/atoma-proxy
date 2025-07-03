@@ -1464,7 +1464,7 @@ pub async fn handle_state_manager_event(
                     output_amount,
                 )
                 .await?;
-            if output_amount > 0 {
+            if output_tokens > 0 {
                 state_manager
                     .state
                     .update_per_day_table(

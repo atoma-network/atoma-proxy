@@ -1,5 +1,11 @@
 use atoma_state::types::SetPriceForUserForModel;
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+    Json, Router,
+};
+use reqwest::header;
 use tracing::{error, instrument};
 use utoipa::OpenApi;
 
@@ -52,8 +58,21 @@ pub struct SetPricingForUserOpenApi;
 #[instrument(level = "trace", skip_all)]
 pub async fn set_pricing_for_user(
     State(proxy_service_state): State<ProxyServiceState>,
+    headers: HeaderMap,
     body: Json<SetPriceForUserForModel>,
 ) -> Result<Json<()>> {
+    let bearer_token = headers
+        .get(header::AUTHORIZATION)
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if bearer_token != proxy_service_state.settings_password {
+        error!("Invalid password for settings endpoint");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
     proxy_service_state
         .atoma_state
         .set_custom_pricing(

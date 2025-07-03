@@ -43,6 +43,9 @@ pub struct AtomaProxyServiceConfig {
 
     /// Enable Grafana dashboard and stats proxy
     pub enable_grafana_proxy: Option<bool>,
+
+    /// Password for the settings page
+    pub settings_password: String,
 }
 
 impl AtomaProxyServiceConfig {

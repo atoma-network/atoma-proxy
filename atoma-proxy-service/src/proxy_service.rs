@@ -72,6 +72,9 @@ pub struct ProxyServiceState {
 
     /// The tag to use to filter dashboards for stats
     pub stats_tag: String,
+
+    /// Password for the settings page.
+    pub settings_password: String,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
