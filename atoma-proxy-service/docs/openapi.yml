@@ -636,6 +636,36 @@ paths:
               schema: {}
         '500':
           description: Failed to get graphs
+  /set_pricing_for_user:
+    post:
+      tags:
+      - Settings
+      summary: Sets the pricing for a user for a specific model.
+      description: |-
+        # Arguments
+
+        * `State(proxy_service_state)` - The state of the proxy service.
+        * `body` - The JSON body containing the user ID, model name, and pricing information.
+
+        # Returns
+
+        * `Result<Json<()>>` - A result containing an empty JSON response on success,
+          or an error status code on failure.
+
+        # Errors
+        * Returns `StatusCode::INTERNAL_SERVER_ERROR` if the pricing update fails.
+      operationId: set_pricing_for_user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPriceForUserForModel'
+        required: true
+      responses:
+        '200':
+          description: Pricing updated successfully
+        '500':
+          description: Failed to update pricing
   /google_oauth:
     post:
       tags:
@@ -730,6 +760,30 @@ components:
           type: integer
           format: int64
           description: The API token id to be revoked
+    SetPriceForUserForModel:
+      type: object
+      description: Request payload for setting custom pricing for a user for a specific model
+      required:
+      - user_id
+      - model_name
+      - price_per_one_million_input_compute_units
+      - price_per_one_million_output_compute_units
+      properties:
+        model_name:
+          type: string
+          description: The model name for which the pricing is set
+        price_per_one_million_input_compute_units:
+          type: integer
+          format: int64
+          description: Price per one million input compute units
+        price_per_one_million_output_compute_units:
+          type: integer
+          format: int64
+          description: Price per one million output compute units
+        user_id:
+          type: integer
+          format: int64
+          description: The user id for which the pricing is set
     UsdcPaymentRequest:
       type: object
       description: |-
