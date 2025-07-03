@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.atomaProxy.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      initContainers:
+        - name: init-sui-config
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /root/.sui/sui_config
+              cp /tmp-sui-config/* /root/.sui/sui_config/
+              chmod -R 777 /root/.sui/sui_config
+          volumeMounts:
+            - name: tmp-sui-config
+              mountPath: /tmp-sui-config
+              readOnly: true
+            - name: sui-config-volume
+              mountPath: /root/.sui/sui_config
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.atomaProxy.image.repository }}:{{ .Values.atomaProxy.image.tag }}"
+          imagePullPolicy: {{ .Values.atomaProxy.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.atomaProxy.service.http.port }}
+            - name: credentials
+              containerPort: {{ .Values.atomaProxy.service.credentials.port }}
+            - name: p2p
+              containerPort: {{ .Values.atomaProxy.service.p2p.port }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.atomaProxy.config.logLevel | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Release.Name }}-otel-collector:4317"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.toml
+              subPath: config.toml
+            - name: open-router
+              mountPath: /app/open_router.json
+              subPath: open_router.json
+            - name: logs
+              mountPath: /app/logs
+            - name: data
+              mountPath: /app/data
+            - name: sui-config-volume
+              mountPath: /root/.sui/sui_config
+          resources:
+            {{- toYaml .Values.atomaProxy.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config
+        - name: open-router
+          secret:
+            secretName: {{ .Release.Name }}-open-router
+        - name: logs
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: tmp-sui-config
+          configMap:
+            name: {{ .Release.Name }}-sui-config
+            defaultMode: 0644
+        - name: sui-config-volume
+          emptyDir: {}
