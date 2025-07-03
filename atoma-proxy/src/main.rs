@@ -227,6 +227,7 @@ async fn main() -> Result<()> {
         grafana,
         dashboard_tag: config.proxy_service.grafana_dashboard_tag,
         stats_tag: config.proxy_service.grafana_stats_tag,
+        settings_password: config.proxy_service.settings_password,
     };
 
     let proxy_service_handle = spawn_with_shutdown(
