@@ -224,7 +224,8 @@ pub async fn embeddings_create(
                             num_input_tokens,
                             0,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -277,7 +278,8 @@ pub async fn embeddings_create(
                             0,
                             0,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -392,7 +394,8 @@ pub async fn confidential_embeddings_create(
                             total_tokens,
                             0,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name.clone(),
                             &metadata.endpoint,
                         )?;
@@ -449,7 +452,8 @@ pub async fn confidential_embeddings_create(
                             0,
                             0,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;

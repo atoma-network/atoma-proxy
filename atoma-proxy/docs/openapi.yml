@@ -613,7 +613,8 @@ components:
           type: integer
           format: int32
           description: The index of this choice in the list of choices.
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
         logprobs:
           oneOf:
           - type: 'null'
@@ -646,7 +647,8 @@ components:
           type: integer
           format: int64
           description: The Unix timestamp (in seconds) of when the chunk was created.
-          example: 1677652288
+          example:
+            $serde_json::private::Number: '1677652288'
         id:
           type: string
           description: A unique identifier for the chat completion chunk.
@@ -687,7 +689,8 @@ components:
           type: integer
           format: int32
           description: The index of this choice in the list of choices.
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
         logprobs:
           oneOf:
           - type: 'null'
@@ -980,7 +983,8 @@ components:
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on their
             existing frequency in the text so far
-          example: 0.0
+          example:
+            $serde_json::private::Number: '0.0'
         function_call:
           description: Controls how the model responds to function calls
         functions:
@@ -1020,15 +1024,18 @@ components:
             format: int32
             minimum: 0
           example:
-            '1234567890': 0.5
-            '1234567891': -0.5
+            '1234567890':
+              $serde_json::private::Number: '0.5'
+            '1234567891':
+              $serde_json::private::Number: '-0.5'
         max_completion_tokens:
           type:
           - integer
           - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
-          example: 4096
+          example:
+            $serde_json::private::Number: '4096'
         max_tokens:
           type:
           - integer
@@ -1036,7 +1043,8 @@ components:
           format: int32
           description: The maximum number of tokens to generate in the chat completion
           deprecated: true
-          example: 4096
+          example:
+            $serde_json::private::Number: '4096'
         messages:
           type: array
           items:
@@ -1059,7 +1067,8 @@ components:
           - 'null'
           format: int32
           description: How many chat completion choices to generate for each input message
-          example: 1
+          example:
+            $serde_json::private::Number: '1'
         parallel_tool_calls:
           type:
           - boolean
@@ -1074,7 +1083,8 @@ components:
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on
             whether they appear in the text so far
-          example: 0.0
+          example:
+            $serde_json::private::Number: '0.0'
         response_format:
           oneOf:
           - type: 'null'
@@ -1086,7 +1096,8 @@ components:
           - 'null'
           format: int64
           description: If specified, our system will make a best effort to sample deterministically
-          example: 123
+          example:
+            $serde_json::private::Number: '123'
         service_tier:
           type:
           - string
@@ -1125,7 +1136,8 @@ components:
           - 'null'
           format: float
           description: What sampling temperature to use, between 0 and 2
-          example: 0.7
+          example:
+            $serde_json::private::Number: '0.7'
         tool_choice:
           oneOf:
           - type: 'null'
@@ -1159,14 +1171,16 @@ components:
           description: |-
             An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
             logprobs must be set to true if this parameter is used.
-          example: 1
+          example:
+            $serde_json::private::Number: '1'
         top_p:
           type:
           - number
           - 'null'
           format: float
           description: An alternative to sampling with temperature
-          example: 1.0
+          example:
+            $serde_json::private::Number: '1.0'
         user:
           type:
           - string
@@ -1197,7 +1211,8 @@ components:
           type: integer
           format: int64
           description: The Unix timestamp (in seconds) of when the chat completion was created.
-          example: 1677652288
+          example:
+            $serde_json::private::Number: '1677652288'
         id:
           type: string
           description: A unique identifier for the chat completion.
@@ -1296,7 +1311,8 @@ components:
           type: integer
           format: int32
           description: The index of the choice in the list of choices
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
         logprobs:
           oneOf:
           - type: 'null'
@@ -1319,25 +1335,29 @@ components:
           type: integer
           format: int32
           description: The number of tokens in the completion
-          example: 10
+          example:
+            $serde_json::private::Number: '10'
           minimum: 0
         audio_tokens:
           type: integer
           format: int32
           description: The number of audio tokens
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
           minimum: 0
         reasoning_tokens:
           type: integer
           format: int32
           description: The number of reasoning tokens
-          example: 10
+          example:
+            $serde_json::private::Number: '10'
           minimum: 0
         rejected_prediction_tokens:
           type: integer
           format: int32
           description: The number of rejected prediction tokens
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
           minimum: 0
     CompletionUsage:
       type: object
@@ -1355,12 +1375,14 @@ components:
           type: integer
           format: int32
           description: Number of tokens in the completion.
-          example: 12
+          example:
+            $serde_json::private::Number: '12'
         prompt_tokens:
           type: integer
           format: int32
           description: Number of tokens in the prompt.
-          example: 9
+          example:
+            $serde_json::private::Number: '9'
         prompt_tokens_details:
           oneOf:
           - type: 'null'
@@ -1370,7 +1392,8 @@ components:
           type: integer
           format: int32
           description: Total number of tokens used (prompt + completion).
-          example: 21
+          example:
+            $serde_json::private::Number: '21'
     CompletionsPrompt:
       oneOf:
       - type: string
@@ -1404,8 +1427,10 @@ components:
           - integer
           - 'null'
           format: int32
-          default: 1
-          example: 1
+          default:
+            $serde_json::private::Number: '1'
+          example:
+            $serde_json::private::Number: '1'
         echo:
           type:
           - boolean
@@ -1420,7 +1445,8 @@ components:
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on their
             existing frequency in the text so far
-          example: 0.0
+          example:
+            $serde_json::private::Number: '0.0'
         logit_bias:
           type:
           - object
@@ -1439,23 +1465,28 @@ components:
           propertyNames:
             type: string
           example:
-            '1234567890': 0.5
-            '1234567891': -0.5
+            '1234567890':
+              $serde_json::private::Number: '0.5'
+            '1234567891':
+              $serde_json::private::Number: '-0.5'
         logprobs:
           type:
           - integer
           - 'null'
           format: int32
           description: An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability.
-          example: 1
+          example:
+            $serde_json::private::Number: '1'
         max_tokens:
           type:
           - integer
           - 'null'
           format: int32
           description: The maximum number of tokens to generate in the chat completion
-          default: 16
-          example: 4096
+          default:
+            $serde_json::private::Number: '16'
+          example:
+            $serde_json::private::Number: '4096'
         model:
           type: string
           description: ID of the model to use
@@ -1466,7 +1497,8 @@ components:
           - 'null'
           format: int32
           description: How many chat completion choices to generate for each input message
-          example: 1
+          example:
+            $serde_json::private::Number: '1'
         presence_penalty:
           type:
           - number
@@ -1475,7 +1507,8 @@ components:
           description: |-
             Number between -2.0 and 2.0. Positive values penalize new tokens based on
             whether they appear in the text so far
-          example: 0.0
+          example:
+            $serde_json::private::Number: '0.0'
         prompt:
           $ref: '#/components/schemas/CompletionsPrompt'
           description: The prompt to generate completions for
@@ -1485,7 +1518,8 @@ components:
           - 'null'
           format: int64
           description: If specified, our system will make a best effort to sample deterministically
-          example: 123
+          example:
+            $serde_json::private::Number: '123'
         stop:
           type:
           - array
@@ -1518,14 +1552,16 @@ components:
           - 'null'
           format: float
           description: What sampling temperature to use, between 0 and 2
-          example: 0.7
+          example:
+            $serde_json::private::Number: '0.7'
         top_p:
           type:
           - number
           - 'null'
           format: float
           description: An alternative to sampling with temperature
-          example: 1.0
+          example:
+            $serde_json::private::Number: '1.0'
         user:
           type:
           - string
@@ -1550,7 +1586,8 @@ components:
           description: Array of completion choices response
           example:
           - text: This is a test
-            index: 0
+            index:
+              $serde_json::private::Number: '0'
             logprobs: null
             finish_reason: stop
         created:
@@ -1594,7 +1631,8 @@ components:
           description: Array of completion choices response
           example:
           - text: This is a test
-            index: 0
+            index:
+              $serde_json::private::Number: '0'
             logprobs: null
             finish_reason: stop
         created:
@@ -1825,7 +1863,8 @@ components:
           - 'null'
           format: int32
           description: The number of images to generate. Defaults to 1.
-          example: 1
+          example:
+            $serde_json::private::Number: '1'
           minimum: 0
         prompt:
           type: string
@@ -1873,7 +1912,8 @@ components:
         created:
           type: integer
           format: int64
-          example: 1677649420
+          example:
+            $serde_json::private::Number: '1677649420'
         data:
           type: array
           items:
@@ -1904,7 +1944,8 @@ components:
         index:
           type: integer
           description: Index of the embedding in the list of embeddings
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
           minimum: 0
         object:
           type: string
@@ -1921,13 +1962,15 @@ components:
           type: integer
           format: int32
           description: Number of tokens in the prompt
-          example: 8
+          example:
+            $serde_json::private::Number: '8'
           minimum: 0
         total_tokens:
           type: integer
           format: int32
           description: Total tokens used in the request
-          example: 8
+          example:
+            $serde_json::private::Number: '8'
           minimum: 0
     HealthResponse:
       type: object
@@ -1992,8 +2035,8 @@ components:
             minimum: 0
           description: The text offset of the tokens
           example:
-          - 0
-          - 10
+          - $serde_json::private::Number: '0'
+          - $serde_json::private::Number: '10'
         token_logprobs:
           type: array
           items:
@@ -2001,8 +2044,8 @@ components:
             format: float
           description: The log probabilities of the tokens
           example:
-          - 0.5
-          - -0.5
+          - $serde_json::private::Number: '0.5'
+          - $serde_json::private::Number: '-0.5'
         tokens:
           type: array
           items:
@@ -2022,8 +2065,10 @@ components:
               type: string
           description: The top log probabilities
           example:
-          - 'Hello ': -0.2
-            world: -0.8
+          - 'Hello ':
+              $serde_json::private::Number: '-0.2'
+            world:
+              $serde_json::private::Number: '-0.8'
     MessageContent:
       oneOf:
       - type: string
@@ -2231,13 +2276,15 @@ components:
           type: integer
           format: int32
           description: The number of audio tokens
-          example: 0
+          example:
+            $serde_json::private::Number: '0'
           minimum: 0
         cached_tokens:
           type: integer
           format: int32
           description: The number of cached tokens
-          example: 10
+          example:
+            $serde_json::private::Number: '10'
           minimum: 0
     ResponseFormat:
       type: object
@@ -2424,7 +2471,8 @@ components:
           type: integer
           format: int32
           description: The number of completion tokens used
-          example: 10
+          example:
+            $serde_json::private::Number: '10'
           minimum: 0
         completion_tokens_details:
           $ref: '#/components/schemas/CompletionTokensDetails'
@@ -2433,7 +2481,8 @@ components:
           type: integer
           format: int32
           description: The number of prompt tokens used
-          example: 10
+          example:
+            $serde_json::private::Number: '10'
           minimum: 0
         prompt_tokens_details:
           $ref: '#/components/schemas/PromptTokensDetails'
@@ -2442,7 +2491,8 @@ components:
           type: integer
           format: int32
           description: The total number of tokens used
-          example: 20
+          example:
+            $serde_json::private::Number: '20'
           minimum: 0
   securitySchemes:
     bearerAuth:
