@@ -961,6 +961,7 @@ pub async fn handle_node_registration_event(
 /// 10. For `GetCheapestNodeForModel`, it retrieves the cheapest node for a given model.
 #[allow(clippy::too_many_lines)]
 #[instrument(level = "trace", skip_all)]
+#[allow(clippy::too_many_lines)]
 pub async fn handle_state_manager_event(
     state_manager: &AtomaStateManager,
     event: AtomaAtomaStateManagerEvent,
@@ -1486,6 +1487,35 @@ pub async fn handle_state_manager_event(
             result_sender
                 .send(addresses)
                 .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::GetCustomPricing {
+            user_id,
+            model,
+            result_sender,
+        } => {
+            let custom_pricing = state_manager
+                .state
+                .get_custom_pricing(user_id, &model)
+                .await;
+            result_sender
+                .send(custom_pricing)
+                .map_err(|_| AtomaStateManagerError::ChannelSendError)?;
+        }
+        AtomaAtomaStateManagerEvent::SetCustomPricing {
+            user_id,
+            model,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
+        } => {
+            state_manager
+                .state
+                .set_custom_pricing(
+                    user_id,
+                    &model,
+                    price_per_one_million_input_compute_units,
+                    price_per_one_million_output_compute_units,
+                )
+                .await?;
         }
     }
     Ok(())

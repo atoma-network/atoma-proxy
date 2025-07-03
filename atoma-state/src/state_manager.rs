@@ -4,7 +4,7 @@ use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager
 use crate::network::NetworkMetrics;
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, Stack, StackAttestationDispute,
+    NodeDistribution, NodePublicKey, NodeSubscription, Pricing, Stack, StackAttestationDispute,
     StackSettlementTicket, StatsStackResponse, Task, TokenResponse, UserProfile,
 };
 use crate::{build_query_with_in, AtomaStateManagerError};
@@ -4693,6 +4693,101 @@ impl AtomaState {
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+
+    /// Sets the price for a user for a specific model.
+    ///
+    /// This method inserts or updates the price for a user for a specific model in the `user_model_prices` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `model_name` - The name of the model.
+    /// * `price_per_one_million_input_compute_units` - The price per one million input compute units.
+    /// * `price_per_one_million_output_compute_units` - The price per one million output compute units.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The user_id or model_name is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    /// async fn set_custom_pricing(state_manager: &AtomaStateManager, user_id: i64, model_name: String, price_per_one_million_input_compute_units: i64, price_per_one_million_output_compute_units: i64) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.set_custom_pricing(user_id, model_name, price_per_one_million_input_compute_units, price_per_one_million_output_compute_units).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn set_custom_pricing(
+        &self,
+        user_id: i64,
+        model: &str,
+        price_per_one_million_input_compute_units: i64,
+        price_per_one_million_output_compute_units: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO user_model_prices (user_id, model_name, price_per_one_million_input_compute_units,price_per_one_million_output_compute_units) VALUES ($1, $2, $3, $4)"
+        )
+        .bind(user_id)
+        .bind(model)
+        .bind(price_per_one_million_input_compute_units)
+        .bind(price_per_one_million_output_compute_units)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Gets the price for a user for a specific model.
+    ///
+    /// This method retrieves the price for a user for a specific model from the `user_model_prices` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The unique identifier of the user.
+    /// * `model_name` - The name of the model.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<Pricing>>`: A result containing either:
+    ///   - `Ok(Some(Pricing))`: The pricing information for the user and model.
+    ///   - `Ok(None)`: If no pricing information is found for the user and model.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - The user_id or model_name is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, Pricing};
+    ///
+    /// async fn get_custom_pricing(state_manager: &AtomaStateManager, user_id: i64, model: &str) -> Result<Option<Pricing>, AtomaStateManagerError> {
+    ///     state_manager.get_custom_pricing(user_id, model).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip(self))]
+    pub async fn get_custom_pricing(&self, user_id: i64, model: &str) -> Result<Option<Pricing>> {
+        let pricing = sqlx::query(
+            "SELECT price_per_one_million_input_compute_units, price_per_one_million_output_compute_units FROM user_model_prices WHERE user_id = $1 AND model_name = $2",
+        )
+        .bind(user_id)
+        .bind(model)
+        .fetch_optional(&self.db)
+        .await?;
+
+        pricing
+            .map(|pricing| Pricing::from_row(&pricing).map_err(AtomaStateManagerError::from))
+            .transpose()
     }
 }
 
