@@ -81,8 +81,11 @@ pub struct RequestMetadataExtension {
     /// Selected stack small id for this request.
     pub selected_stack_small_id: Option<i64>,
 
-    /// Price per million tokens for this request.
-    pub price_per_million: i64,
+    /// Price per one million input compute units
+    pub price_per_one_million_input_compute_units: i64,
+
+    /// Price per one million output compute units
+    pub price_per_one_million_output_compute_units: i64,
 
     /// The endpoint path for this request.
     pub endpoint: String,
@@ -319,7 +322,8 @@ pub async fn authenticate_middleware(
             model,
             user_id,
             selected_node_id,
-            price_per_million,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
             is_fiat_request,
         } = auth::handle_authenticate_and_lock_compute_units(
             &state,
@@ -339,13 +343,15 @@ pub async fn authenticate_middleware(
             stack_small_id,
             selected_node_id,
             tx_digest,
-            price_per_million,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
         } = if is_fiat_request {
             SelectedNodeMetadata {
                 stack_small_id: None,
                 selected_node_id,
                 tx_digest: None,
-                price_per_million,
+                price_per_one_million_input_compute_units,
+                price_per_one_million_output_compute_units,
             }
         } else {
             auth::get_selected_node(GetSelectedNodeArgs {
@@ -377,7 +383,8 @@ pub async fn authenticate_middleware(
                     stack_small_id,
                     num_input_tokens,
                     max_output_tokens,
-                    price_per_million,
+                    price_per_one_million_input_compute_units,
+                    price_per_one_million_output_compute_units,
                     tx_digest,
                     user_id,
                     &endpoint,
@@ -403,7 +410,8 @@ pub async fn authenticate_middleware(
                     &body_json,
                     &mut req_parts,
                     selected_node_id,
-                    price_per_million,
+                    price_per_one_million_input_compute_units,
+                    price_per_one_million_output_compute_units,
                     num_input_tokens,
                     max_output_tokens,
                     user_id,
@@ -420,7 +428,8 @@ pub async fn authenticate_middleware(
                             0,
                             max_output_tokens as i64,
                             0,
-                            price_per_million,
+                            price_per_one_million_input_compute_units,
+                            price_per_one_million_output_compute_units,
                             model,
                             &endpoint,
                         )?;
@@ -812,7 +821,10 @@ pub async fn handle_locked_stack_middleware(
                     selected_node_id: stack.selected_node_id,
                     stack_small_id: stack.stack_small_id,
                     tx_digest: None,
-                    price_per_million: stack.price_per_million,
+                    price_per_one_million_input_compute_units: stack
+                        .price_per_one_million_input_compute_units,
+                    price_per_one_million_output_compute_units: stack
+                        .price_per_one_million_output_compute_units,
                 },
                 None => {
                     // 2. Acquire a new stack for the request, this will also lock compute units for the new acquired stack
@@ -863,7 +875,8 @@ pub async fn handle_locked_stack_middleware(
                 })?,
                 request_metadata.num_input_tokens.unwrap_or_default(),
                 max_output_tokens,
-                selected_node_metadata.price_per_million,
+                selected_node_metadata.price_per_one_million_input_compute_units,
+                selected_node_metadata.price_per_one_million_output_compute_units,
                 selected_node_metadata.tx_digest,
                 user_id,
                 &endpoint,
@@ -957,8 +970,10 @@ pub mod auth {
         pub user_id: i64,
         /// Node ID that was selected for fiat request.
         pub selected_node_id: i64,
-        /// Price per million tokens for fiat request.
-        pub price_per_million: i64,
+        /// Price per one million input compute units
+        pub price_per_one_million_input_compute_units: i64,
+        /// Price per one million output compute units
+        pub price_per_one_million_output_compute_units: i64,
         /// Is fiat request.
         pub is_fiat_request: bool,
     }
@@ -1248,6 +1263,7 @@ pub mod auth {
         fields(endpoint = %endpoint),
         err
     )]
+    #[allow(clippy::too_many_lines)]
     pub async fn authenticate_and_lock_compute_units(
         state: &ProxyState,
         headers: &HeaderMap,
@@ -1278,11 +1294,37 @@ pub mod auth {
         };
 
         let node = get_cheapest_node(state, &model, endpoint).await?;
+
+        let custom_pricing = send_event_with_response(
+            &state.state_manager_sender,
+            |result_sender| AtomaAtomaStateManagerEvent::GetCustomPricing {
+                user_id,
+                model: model.to_string(),
+                result_sender,
+            },
+            "GetCustomPricing",
+            endpoint,
+        )
+        .await?;
+        let (price_per_one_million_input_compute_units, price_per_one_million_output_compute_units) =
+            custom_pricing.map_or(
+                (
+                    node.price_per_one_million_compute_units,
+                    node.price_per_one_million_compute_units,
+                ),
+                |pricing| {
+                    (
+                        pricing.price_per_one_million_input_compute_units,
+                        pricing.price_per_one_million_output_compute_units,
+                    )
+                },
+            );
         // We don't have a stack for the user, lets check if the user is using fiat currency.
-        let fiat_locked_input_amount =
-            num_input_tokens as i64 * node.price_per_one_million_compute_units / ONE_MILLION as i64;
+        let fiat_locked_input_amount = num_input_tokens as i64
+            * price_per_one_million_input_compute_units
+            / ONE_MILLION as i64;
         let fiat_locked_output_amount = max_output_tokens as i64
-            * node.price_per_one_million_compute_units
+            * price_per_one_million_output_compute_units
             / ONE_MILLION as i64;
         let locked_fiat = send_event_with_response(
             &state.state_manager_sender,
@@ -1305,7 +1347,8 @@ pub mod auth {
                 model,
                 user_id,
                 selected_node_id: node.node_small_id,
-                price_per_million: node.price_per_one_million_compute_units,
+                price_per_one_million_input_compute_units,
+                price_per_one_million_output_compute_units,
                 is_fiat_request: true,
             });
         }
@@ -1333,7 +1376,8 @@ pub mod auth {
             model,
             user_id,
             selected_node_id: node.node_small_id,
-            price_per_million: node.price_per_one_million_compute_units,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
             is_fiat_request: false,
         })
     }
@@ -1385,7 +1429,10 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                price_per_million: stack.price_per_one_million_compute_units,
+                price_per_one_million_input_compute_units: stack
+                    .price_per_one_million_compute_units,
+                price_per_one_million_output_compute_units: stack
+                    .price_per_one_million_compute_units,
             }))
         } else {
             Ok(None)
@@ -1480,8 +1527,10 @@ pub mod auth {
         pub selected_node_id: i64,
         /// The transaction digest of the stack entry creation transaction
         pub tx_digest: Option<TransactionDigest>,
-        /// The price per million compute units (this is used for the fiat request)
-        pub price_per_million: i64,
+        /// Price per one million input compute units
+        pub price_per_one_million_input_compute_units: i64,
+        /// Price per one million output compute units
+        pub price_per_one_million_output_compute_units: i64,
     }
 
     /// Acquires a new stack entry for the cheapest node.
@@ -1712,7 +1761,8 @@ pub mod auth {
             stack_small_id: Some(stack_small_id),
             selected_node_id,
             tx_digest: Some(tx_digest),
-            price_per_million: price_per_million_compute_units as i64,
+            price_per_one_million_input_compute_units: price_per_million_compute_units as i64,
+            price_per_one_million_output_compute_units: price_per_million_compute_units as i64,
         })
     }
 
@@ -2001,7 +2051,10 @@ pub mod auth {
                 stack_small_id: Some(stack.stack_small_id),
                 selected_node_id: stack.selected_node_id,
                 tx_digest: None,
-                price_per_million: stack.price_per_one_million_compute_units,
+                price_per_one_million_input_compute_units: stack
+                    .price_per_one_million_compute_units,
+                price_per_one_million_output_compute_units: stack
+                    .price_per_one_million_compute_units,
             });
         }
         // WARN: This temporary check is to prevent users from trying to buy more compute units than the allowed stack size,
@@ -2208,7 +2261,8 @@ pub mod auth {
             selected_node_id: stack.selected_node_id,
             stack_small_id: Some(stack.stack_small_id),
             tx_digest: None,
-            price_per_million: stack.price_per_one_million_compute_units,
+            price_per_one_million_input_compute_units: stack.price_per_one_million_compute_units,
+            price_per_one_million_output_compute_units: stack.price_per_one_million_compute_units,
         }))
     }
 }
@@ -2317,7 +2371,8 @@ pub mod utils {
         selected_stack_small_id: i64,
         num_input_tokens: u64,
         max_output_tokens: u64,
-        price_per_million: i64,
+        price_per_one_million_input_compute_units: i64,
+        price_per_one_million_output_compute_units: i64,
         tx_digest: Option<TransactionDigest>,
         user_id: i64,
         endpoint: &str,
@@ -2382,7 +2437,8 @@ pub mod utils {
             max_output_tokens,
             user_id,
             selected_stack_small_id: Some(selected_stack_small_id),
-            price_per_million,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });
@@ -2463,7 +2519,8 @@ pub mod utils {
         body_json: &Value,
         req_parts: &mut Parts,
         selected_node_id: i64,
-        price_per_million: i64,
+        price_per_one_million_input_compute_units: i64,
+        price_per_one_million_output_compute_units: i64,
         num_input_tokens: u64,
         max_output_tokens: u64,
         user_id: i64,
@@ -2511,7 +2568,8 @@ pub mod utils {
             max_output_tokens,
             user_id,
             selected_stack_small_id: None,
-            price_per_million,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
             endpoint: endpoint.to_string(),
             model_name: request_model.to_string(),
         });

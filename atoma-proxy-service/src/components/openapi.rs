@@ -18,6 +18,7 @@ use crate::{
             LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH,
             USDC_PAYMENT_PATH,
         },
+        settings::{SetPricingForUserOpenApi, SET_PRICE_FOR_USER_PATH},
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
             GET_CURRENT_STACKS_PATH,
@@ -61,6 +62,7 @@ pub fn openapi_router() -> Router {
             (path = GET_NODES_DISTRIBUTION_PATH, api = GetNodeDistribution, tags = ["Stats"]),
             (path = GET_GRAPHS_PATH, api = GetGraphs, tags = ["Stats"]),
             (path = GET_STATS_PATH, api = GetStats, tags = ["Stats"]),
+            (path = SET_PRICE_FOR_USER_PATH, api = SetPricingForUserOpenApi, tags = ["Settings"]),
         ),
         tags(
             (name = "Health", description = "Health check endpoints"),

@@ -374,7 +374,8 @@ pub async fn nodes_create_lock(
                     stack_small_id,
                     selected_node_id,
                     tx_digest,
-                    price_per_million: _,
+                    price_per_one_million_input_compute_units: _,
+                    price_per_one_million_output_compute_units: _,
                 } = if let Some(lock_guard) = acquire_stack_lock::LockGuard::try_lock(
                     &state.users_buy_stack_lock_map,
                     (user_id, task_small_id),

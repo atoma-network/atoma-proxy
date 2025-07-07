@@ -9,6 +9,28 @@ use utoipa::ToSchema;
 
 use crate::state_manager::Result;
 
+/// Represents the pricing for a model
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct Pricing {
+    /// Price per one million input compute units
+    pub price_per_one_million_input_compute_units: i64,
+    /// Price per one million output compute units
+    pub price_per_one_million_output_compute_units: i64,
+}
+
+/// Request payload for setting custom pricing for a user for a specific model
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct SetPriceForUserForModel {
+    /// The user id for which the pricing is set
+    pub user_id: i64,
+    /// The model name for which the pricing is set
+    pub model_name: String,
+    /// Price per one million input compute units
+    pub price_per_one_million_input_compute_units: i64,
+    /// Price per one million output compute units
+    pub price_per_one_million_output_compute_units: i64,
+}
+
 /// The modalities that can be used to collect metrics, for each of the
 /// currently supported modalities.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -926,6 +948,24 @@ pub enum AtomaAtomaStateManagerEvent {
         output_amount: i64,
         /// Number of output tokens
         output_tokens: i64,
+    },
+    SetCustomPricing {
+        /// The user ID
+        user_id: i64,
+        /// The model name
+        model: String,
+        /// Price per one million input compute units
+        price_per_one_million_input_compute_units: i64,
+        /// Price per one million output compute units
+        price_per_one_million_output_compute_units: i64,
+    },
+    GetCustomPricing {
+        /// The user ID
+        user_id: i64,
+        /// The model name
+        model: String,
+        /// Channel to send back the custom pricing
+        result_sender: oneshot::Sender<Result<Option<Pricing>>>,
     },
     RetrieveNodesPublicAddresses {
         /// Channel to send back the list of public addresses

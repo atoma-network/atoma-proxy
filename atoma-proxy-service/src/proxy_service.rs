@@ -16,7 +16,7 @@ use utoipa::OpenApi;
 use crate::{
     components::{grafana::Grafana, openapi::openapi_router},
     handlers::{
-        auth::auth_router, stacks::stacks_router, stats::stats_router,
+        auth::auth_router, settings::settings_router, stacks::stacks_router, stats::stats_router,
         subscriptions::subscriptions_router, tasks::tasks_router,
     },
     ModelModality,
@@ -72,6 +72,9 @@ pub struct ProxyServiceState {
 
     /// The tag to use to filter dashboards for stats
     pub stats_tag: String,
+
+    /// Password for the settings page.
+    pub settings_password: String,
 }
 
 /// Starts and runs the Atoma proxy service service, handling HTTP requests and graceful shutdown.
@@ -162,6 +165,7 @@ pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Ro
         .allow_headers(Any);
     Router::new()
         .merge(auth_router())
+        .merge(settings_router())
         .merge(stacks_router())
         .merge(subscriptions_router())
         .merge(tasks_router())

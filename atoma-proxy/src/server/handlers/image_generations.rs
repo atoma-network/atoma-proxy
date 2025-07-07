@@ -217,7 +217,8 @@ pub async fn image_generations_create(
                             metadata.num_input_tokens.unwrap_or_default() as i64,
                             metadata.max_output_tokens as i64,
                             metadata.max_output_tokens as i64,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -273,7 +274,8 @@ pub async fn image_generations_create(
                             0,
                             metadata.max_output_tokens as i64,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;
@@ -408,7 +410,8 @@ pub async fn confidential_image_generations_create(
                             0,
                             metadata.max_output_tokens as i64,
                             0,
-                            metadata.price_per_million,
+                            metadata.price_per_one_million_input_compute_units,
+                            metadata.price_per_one_million_output_compute_units,
                             metadata.model_name,
                             &metadata.endpoint,
                         )?;

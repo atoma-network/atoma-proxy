@@ -61,8 +61,10 @@ pub struct Streamer {
     estimated_input_tokens: i64,
     /// Estimated output tokens for the stream
     estimated_output_tokens: i64,
-    /// Price per million tokens for this request.
-    price_per_million: i64,
+    /// Price per one million input compute units
+    price_per_one_million_input_compute_units: i64,
+    /// Price per one million output compute units
+    price_per_one_million_output_compute_units: i64,
     /// Stack small id
     stack_small_id: Option<i64>,
     /// State manager sender
@@ -118,7 +120,8 @@ impl Streamer {
         stack_small_id: Option<i64>,
         estimated_input_tokens: i64,
         estimated_output_tokens: i64,
-        price_per_million: i64,
+        price_per_one_million_input_compute_units: i64,
+        price_per_one_million_output_compute_units: i64,
         start: Instant,
         user_id: i64,
         model_name: String,
@@ -141,7 +144,8 @@ impl Streamer {
             inter_stream_token_latency_timer: None,
             is_final_chunk_handled: false,
             num_generated_tokens: 0,
-            price_per_million,
+            price_per_one_million_input_compute_units,
+            price_per_one_million_output_compute_units,
         }
     }
 
@@ -273,7 +277,8 @@ impl Streamer {
                     input_tokens,
                     self.estimated_output_tokens,
                     output_tokens,
-                    self.price_per_million,
+                    self.price_per_one_million_input_compute_units,
+                    self.price_per_one_million_output_compute_units,
                     self.model_name.clone(),
                     &self.endpoint,
                 ) {
@@ -605,7 +610,8 @@ impl Drop for Streamer {
                     self.estimated_input_tokens,
                     self.estimated_output_tokens,
                     self.num_generated_tokens,
-                    self.price_per_million,
+                    self.price_per_one_million_input_compute_units,
+                    self.price_per_one_million_output_compute_units,
                     self.model_name.clone(),
                     &self.endpoint,
                 ) {
