@@ -9,4 +9,5 @@ config.test.toml
 /config.toml
 local_key
 .rest/
+helm/atoma-proxy/charts/
 open_router.json
