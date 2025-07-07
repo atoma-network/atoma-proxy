@@ -1263,6 +1263,7 @@ pub mod auth {
         fields(endpoint = %endpoint),
         err
     )]
+    #[allow(clippy::too_many_lines)]
     pub async fn authenticate_and_lock_compute_units(
         state: &ProxyState,
         headers: &HeaderMap,
@@ -1306,17 +1307,18 @@ pub mod auth {
         )
         .await?;
         let (price_per_one_million_input_compute_units, price_per_one_million_output_compute_units) =
-            if let Some(pricing) = custom_pricing {
-                (
-                    pricing.price_per_one_million_input_compute_units,
-                    pricing.price_per_one_million_output_compute_units,
-                )
-            } else {
+            custom_pricing.map_or(
                 (
                     node.price_per_one_million_compute_units,
                     node.price_per_one_million_compute_units,
-                )
-            };
+                ),
+                |pricing| {
+                    (
+                        pricing.price_per_one_million_input_compute_units,
+                        pricing.price_per_one_million_output_compute_units,
+                    )
+                },
+            );
         // We don't have a stack for the user, lets check if the user is using fiat currency.
         let fiat_locked_input_amount = num_input_tokens as i64
             * price_per_one_million_input_compute_units
