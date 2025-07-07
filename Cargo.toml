@@ -54,8 +54,8 @@ serde_yaml                  = "0.9.34"
 serial_test                 = "3.1.1"
 shared-crypto               = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.51.2" }
 sqlx                        = { version = "0.8.6", features = [ "postgres", "runtime-tokio-native-tls" ] }
-sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.49.1" }
-sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.49.1" }
+sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.51.2" }
+sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.51.2" }
 sui-sdk-types               = "0.0.2"
 thiserror                   = "2.0.12"
 tokenizers                  = "0.21.0"

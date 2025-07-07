@@ -217,6 +217,7 @@ pub fn update_state_manager_fiat(
 /// This function will return an error if:
 /// - The payload format is invalid
 /// - The signature verification fails
+#[allow(clippy::too_many_lines)]
 #[instrument(level = "debug", skip_all)]
 pub fn verify_response_hash_and_signature(
     payload: &serde_json::Value,

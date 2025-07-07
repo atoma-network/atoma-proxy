@@ -169,6 +169,7 @@ impl RequestModel for RequestModelImageGenerations {
     skip_all,
     fields(endpoint = metadata.endpoint)
 )]
+#[allow(clippy::too_many_lines)]
 pub async fn image_generations_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,

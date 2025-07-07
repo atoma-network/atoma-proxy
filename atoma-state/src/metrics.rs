@@ -56,6 +56,14 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 ///
 /// Returns a [`JoinHandle`] that resolves to a `Result<()>`. The task can be joined to await its completion.
 ///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The metrics collection fails
+/// * The best available nodes cannot be collected
+/// * The channel send operation fails
+/// * The shutdown signal channel is closed
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -426,6 +434,13 @@ impl NodeMetricsCollector {
     /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
     /// (best performing nodes first). Returns an error if the Prometheus query fails.
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The Prometheus query fails
+    /// * The response cannot be parsed
+    /// * A node ID cannot be parsed as an i64
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -472,6 +487,12 @@ impl NodeMetricsCollector {
     /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
     /// (best performing nodes first). Returns an error if the Prometheus query fails.
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The Prometheus query fails
+    /// * The response cannot be parsed
+    /// * A node ID cannot be parsed as an i64
     /// # Example
     ///
     /// ```rust,ignore
@@ -518,6 +539,12 @@ impl NodeMetricsCollector {
     /// Returns a `Result` containing a vector of node small IDs, sorted by their performance score
     /// (best performing nodes first). Returns an error if the Prometheus query fails.
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The Prometheus query fails
+    /// * The response cannot be parsed
+    /// * A node ID cannot be parsed as an i64
     /// # Example
     ///
     /// ```rust,ignore

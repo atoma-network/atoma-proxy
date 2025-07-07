@@ -170,6 +170,10 @@ impl Sui {
     /// # Errors
     ///
     /// Returns an error if the transaction fails.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it fails to get the active address.
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
     pub async fn acquire_new_stack_entry(
         &mut self,
@@ -392,6 +396,10 @@ impl Sui {
     /// # Errors
     ///
     /// Returns an error if it fails to get the active address.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it fails to get the active address.
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
     pub fn get_sui_signature(&mut self, request: &Value) -> Result<String> {
         let active_address = self.wallet_ctx.active_address()?;
@@ -420,6 +428,10 @@ impl Sui {
     /// Returns an error if:
     /// * It fails to get the active address
     /// * The signing operation fails
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the signing operation fails.
     #[instrument(level = "info", skip_all, fields(address = %self.wallet_ctx.active_address().unwrap()))]
     pub fn sign_hash(&mut self, hash: &[u8]) -> Result<String> {
         let active_address = self.wallet_ctx.active_address()?;
@@ -442,8 +454,14 @@ impl Sui {
     ///
     /// # Errors
     ///
-    /// Returns an error if the transaction digest is invalid or if the transaction is not found
-    /// or if the balance changes are not found.
+    /// This function will return an error if:
+    /// * The transaction digest is invalid
+    /// * The transaction is not found
+    /// * The balance changes are not found
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the transaction digest is invalid.
     #[instrument(level = "info", skip(self))]
     pub async fn get_balance_changes(
         &self,

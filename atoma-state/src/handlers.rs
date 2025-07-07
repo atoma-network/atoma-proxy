@@ -81,6 +81,12 @@ use crate::{
 /// The function uses the `#[instrument]` attribute for tracing with `skip_all` to prevent logging
 /// of potentially sensitive parameters. Many events are currently just logged for monitoring
 /// purposes and may be expanded with additional handling logic in the future.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * The underlying handlers fail to process the event
+/// * Database operations fail during event processing
 #[instrument(level = "trace", skip_all)]
 pub async fn handle_atoma_event(
     event: AtomaEvent,
@@ -947,6 +953,13 @@ pub async fn handle_node_registration_event(
 /// 2. For `GetAvailableStackWithComputeUnits`, it retrieves the available stack and sends the result.
 /// 3. For `UpdateStackNumTokens`, it updates the number of tokens for the specified stack.
 /// 4. For `UpdateStackTotalHash`, it updates the total hash for the specified stack.
+/// 5. For `LockStack`, it locks the specified stack.
+/// 6. For `UpdateStackNumTokens`, it updates the number of tokens for the specified stack.
+/// 7. For `GetStacksForModel`, it retrieves stacks for a given model.
+/// 8. For `GetStacksForTask`, it retrieves stacks for a given task.
+/// 9. For `GetTasksForModel`, it retrieves tasks for a given model.
+/// 10. For `GetCheapestNodeForModel`, it retrieves the cheapest node for a given model.
+#[allow(clippy::too_many_lines)]
 #[instrument(level = "trace", skip_all)]
 pub async fn handle_state_manager_event(
     state_manager: &AtomaStateManager,

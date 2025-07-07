@@ -141,6 +141,7 @@ impl AtomaStateManager {
     ///     state_manager.run(shutdown_rx).await
     /// }
     /// ```
+    #[allow(clippy::too_many_lines)]
     #[instrument(level = "trace", skip_all)]
     pub async fn run(
         self,
@@ -605,6 +606,10 @@ impl AtomaState {
     /// - `Ok(None)` - If no valid node subscription exists for the model
     /// - `Err(AtomaStateManagerError)` - If a database error occurs
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    ///
     /// The returned `CheapestNode` contains:
     /// - The task's small ID
     /// - The price per one million compute units
@@ -719,6 +724,10 @@ impl AtomaState {
     /// - `Ok(None)` - If no suitable node is found
     /// - `Err(AtomaStateManagerError)` - If a database error occurs
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    ///
     /// # Database Query Details
     ///
     /// The method joins three tables:
@@ -819,6 +828,10 @@ impl AtomaState {
     /// - `Ok(Some(NodePublicKey))` - If a valid public key is found for the node
     /// - `Ok(None)` - If no public key exists for the specified node
     /// - `Err(AtomaStateManagerError)` - If a database error occurs
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
     ///
     /// # Example
     ///
@@ -1138,6 +1151,10 @@ impl AtomaState {
     ///   - `Ok(Vec<Stack>)`: A vector of `Stack` objects representing all stacks that are not in the settle period.
     ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
     ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    ///
     /// - The database query fails to execute.
     ///
     /// # Example
@@ -1173,6 +1190,10 @@ impl AtomaState {
     /// - `Result<Vec<StatsStackResponse>>`: A result containing either:
     ///   - `Ok(Vec<StatsStackResponse>)`: The stacks stats for the last `last_hours` hours.
     ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
     ///
     /// - The database query fails to execute.
     ///
@@ -3288,6 +3309,24 @@ impl AtomaState {
     /// # Returns
     ///
     /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the database query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::AtomaStateManager;
+    ///
+    /// async fn insert_node(state_manager: &AtomaStateManager) -> Result<(), AtomaStateManagerError> {
+    ///     let node_small_id = 1;
+    ///     let node_id = "node123".to_string();
+    ///     let sui_address = "0x1234567890".to_string();
+    ///
+    ///     state_manager.insert_new_node(node_small_id, node_id, sui_address).await
+    /// }
+    /// ```
     #[instrument(level = "trace", skip(self))]
     pub async fn insert_new_node(
         &self,

@@ -171,6 +171,7 @@ impl RequestModel for RequestModelEmbeddings {
     skip_all,
     fields(endpoint = metadata.endpoint)
 )]
+#[allow(clippy::too_many_lines)]
 pub async fn embeddings_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,
@@ -335,6 +336,7 @@ pub struct ConfidentialEmbeddingsOpenApi;
     skip_all,
     fields(endpoint = metadata.endpoint)
 )]
+#[allow(clippy::too_many_lines)]
 pub async fn confidential_embeddings_create(
     Extension(metadata): Extension<RequestMetadataExtension>,
     State(state): State<ProxyState>,

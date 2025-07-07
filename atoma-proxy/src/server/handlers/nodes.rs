@@ -278,6 +278,7 @@ pub struct NodesCreateLockRequest {
     skip_all,
     fields(endpoint = NODES_CREATE_LOCK_PATH)
 )]
+#[allow(clippy::too_many_lines)]
 pub async fn nodes_create_lock(
     State(state): State<ProxyState>,
     headers: HeaderMap,

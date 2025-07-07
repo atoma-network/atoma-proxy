@@ -271,6 +271,12 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<Claims>` - The claims of the token
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The token is not valid
+    /// * The token is not a refresh token
     #[instrument(level = "trace", skip(self))]
     pub fn validate_token(&self, token: &str, is_refresh: bool) -> Result<Claims> {
         let mut validation = Validation::default();
@@ -325,6 +331,15 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<String>` - The new access token
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The refresh token is invalid
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the timestamp conversion fails.
     #[instrument(level = "trace", skip(self))]
     pub async fn generate_access_token(&self, refresh_token: &str) -> Result<String> {
         let claims = self.validate_token(refresh_token, true)?;
@@ -375,6 +390,21 @@ impl Auth {
     /// This method will register a new user with a email and password
     /// The password is hashed and stored in the DB
     /// The method will generate a new refresh and access token
+    ///
+    /// # Arguments
+    ///
+    /// * `user_profile` - The user profile
+    /// * `password` - The password of the user
+    ///
+    /// # Returns
+    ///
+    /// * `Result<(String, String)>` - The refresh and access tokens
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The user is already registered
+    /// * The password is not valid
     #[instrument(level = "info", skip(self, password))]
     pub async fn register(
         &self,
@@ -407,6 +437,20 @@ impl Auth {
     /// This method will check if the user password is correct
     /// The password is hashed and compared with the hashed password in the DB
     /// If the password is correct, the method will generate a new refresh and access token
+    ///
+    /// # Arguments
+    ///
+    /// * `email` - The email of the user
+    /// * `password` - The password of the user
+    ///
+    /// # Returns
+    ///
+    /// * `Result<(String, String)>` - The refresh and access tokens
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The password is not valid
+    /// * The user is not found
     #[instrument(level = "info", skip(self, password))]
     pub async fn check_user_password(
         &self,
@@ -486,6 +530,12 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<String>` - The generated API token
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The access token is invalid
+    /// * The refresh token is invalid
     #[instrument(level = "info", skip(self))]
     pub async fn generate_api_token(&self, jwt: &str, name: String) -> Result<String> {
         let claims = self.get_claims_from_token(jwt).await?;
@@ -517,6 +567,12 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<()>` - If the API token was revoked
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The access token is invalid
+    /// * The refresh token is invalid
     #[instrument(level = "info", skip(self))]
     pub async fn revoke_api_token(&self, jwt: &str, api_token_id: i64) -> Result<()> {
         let claims = self.get_claims_from_token(jwt).await?;
@@ -541,6 +597,12 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<Vec<String>>` - The list of API tokens
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The access token is invalid
+    /// * The refresh token is invalid
     #[instrument(level = "info", skip(self))]
     pub async fn get_all_api_tokens(&self, jwt: &str) -> Result<Vec<TokenResponse>> {
         let claims = self.get_claims_from_token(jwt).await?;
@@ -819,6 +881,14 @@ impl Auth {
     /// # Returns
     ///
     /// * `Result<()>` - If the wallet address was stored
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The signature is not valid
+    /// * The signature is not supported
+    /// * The public key is not found
+    /// * The public key is not verified
     #[instrument(level = "info", skip(self))]
     pub async fn update_sui_address(&self, jwt: &str, signature: &str) -> Result<()> {
         let claims = self.validate_token(jwt, false)?;
@@ -860,6 +930,10 @@ impl Auth {
     /// * If the user is not found
     /// * If the user balance is not updated
     /// * If the user provided invalid zk_proof_signature
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the transaction digest is invalid.
     #[instrument(level = "info", skip(self))]
     pub async fn usdc_payment(
         &self,
