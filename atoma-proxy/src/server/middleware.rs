@@ -261,6 +261,7 @@ impl RequestMetadataExtension {
 ///     .route("/", get(handler))
 ///     .layer(middleware::from_fn(authenticate_middleware));
 /// ```
+#[allow(clippy::too_many_lines)]
 #[instrument(
     level = "info",
     name = "authenticate_middleware",
@@ -499,6 +500,7 @@ pub async fn authenticate_middleware(
 ///     .route("/confidential/*", post(handler))
 ///     .layer(middleware::from_fn(confidential_compute_router_middleware));
 /// ```
+#[allow(clippy::too_many_lines)]
 #[instrument(
     level = "info",
     name = "confidential_compute_middleware",
@@ -679,6 +681,7 @@ pub async fn confidential_compute_middleware(
 ///   - Failed to convert body to bytes
 ///   - Failed to send LockStack event
 ///   - Failed to convert stack small id to string
+#[allow(clippy::too_many_lines)]
 #[instrument(level = "info", name = "handle_locked_stack_middleware", skip_all, err)]
 pub async fn handle_locked_stack_middleware(
     state: State<ProxyState>,
@@ -1984,9 +1987,7 @@ pub mod auth {
     /// println!("Selected stack ID: {}", metadata.stack_small_id);
     /// ```
     #[instrument(level = "info", skip_all, fields(model =%args.model), err)]
-    pub async fn get_selected_node<'a>(
-        args: GetSelectedNodeArgs<'a>,
-    ) -> Result<SelectedNodeMetadata> {
+    pub async fn get_selected_node(args: GetSelectedNodeArgs<'_>) -> Result<SelectedNodeMetadata> {
         let GetSelectedNodeArgs {
             model,
             state,

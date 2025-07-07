@@ -600,6 +600,7 @@ pub fn confidential_chat_completions_create_stream(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 async fn handle_non_streaming_response(
     state: &ProxyState,
     node_address: &String,
@@ -796,6 +797,7 @@ async fn handle_non_streaming_response(
     )
 )]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 async fn handle_streaming_response(
     state: &ProxyState,
     node_address: &String,

@@ -232,6 +232,12 @@ impl Grafana {
     /// # Returns
     ///
     /// The data for the query
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// * The request fails
+    /// * The response cannot be parsed
     #[instrument(level = "info", skip_all)]
     pub async fn get_query_data(&self, query: &Query) -> Result<Value, GrafanaError> {
         let request_url = format!("{}/api/ds/query", self.url);
