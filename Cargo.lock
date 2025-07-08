@@ -773,7 +773,7 @@ dependencies = [
 [[package]]
 name = "atoma-p2p"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#0141a87fc31c52dba2afd0cdabb837b8a760d9e1"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#c69f008cc265d30d6be94cb24293a278f7328fec"
 dependencies = [
  "blake3",
  "bytes",
@@ -920,7 +920,7 @@ dependencies = [
 [[package]]
 name = "atoma-sui"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#0141a87fc31c52dba2afd0cdabb837b8a760d9e1"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#c69f008cc265d30d6be94cb24293a278f7328fec"
 dependencies = [
  "anyhow",
  "config",
@@ -939,7 +939,7 @@ dependencies = [
 [[package]]
 name = "atoma-utils"
 version = "0.1.0"
-source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#0141a87fc31c52dba2afd0cdabb837b8a760d9e1"
+source = "git+https://github.com/atoma-network/atoma-node.git?branch=main#c69f008cc265d30d6be94cb24293a278f7328fec"
 dependencies = [
  "aes-gcm",
  "anyhow",
