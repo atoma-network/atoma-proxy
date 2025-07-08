@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libssl3 \
+    libclang-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
