@@ -29,9 +29,7 @@ use super::handlers::metrics::{
     CHAT_COMPLETIONS_TOTAL_TOKENS, CHAT_COMPLETIONS_TOTAL_TOKENS_PER_USER,
     CHAT_COMPLETION_REQUESTS_PER_USER, TOTAL_COMPLETED_REQUESTS,
 };
-use super::handlers::{
-    update_state_manager_fiat, verify_response_hash_and_signature, RESPONSE_HASH_KEY,
-};
+use super::handlers::{update_state_manager_fiat, verify_response_hash_and_signature};
 
 /// The chunk that indicates the end of a streaming response
 const DONE_CHUNK: &str = "[DONE]";
@@ -94,6 +92,8 @@ pub struct Streamer {
     /// Number of generated tokens so far. It is only used when the client
     /// drops the connection, before the final chunk is processed.
     num_generated_tokens: i64,
+    /// Last seen usage
+    usage: Option<Value>,
 }
 
 /// Represents the various states of a streaming process
@@ -146,6 +146,7 @@ impl Streamer {
             num_generated_tokens: 0,
             price_per_one_million_input_compute_units,
             price_per_one_million_output_compute_units,
+            usage: None,
         }
     }
 
@@ -181,19 +182,18 @@ impl Streamer {
     /// * `UpdateStackTotalHash` - Updates the combined hash of payload and response
     #[instrument(
         level = "info",
-        skip(self, usage),
+        skip(self),
         fields(
             endpoint = "handle_final_chunk",
             estimated_total_tokens = self.estimated_input_tokens + self.estimated_output_tokens,
+            usage = self.usage.as_ref().map(std::string::ToString::to_string),
         )
     )]
-    fn handle_final_chunk(
-        &mut self,
-        usage: &Value,
-        response_hash: Option<&Value>,
-    ) -> Result<(), Error> {
-        let input_tokens = usage
-            .get("prompt_tokens")
+    fn handle_final_chunk(&mut self) -> Result<(), Error> {
+        let input_tokens = self
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.get("prompt_tokens"))
             .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
@@ -203,8 +203,10 @@ impl Streamer {
                 );
                 Error::new("Error getting prompt tokens from usage")
             })?;
-        let output_tokens = usage
-            .get("completion_tokens")
+        let output_tokens = self
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.get("completion_tokens"))
             .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
@@ -214,8 +216,10 @@ impl Streamer {
                 );
                 Error::new("Error getting completion tokens from usage")
             })?;
-        let total_tokens = usage
-            .get("total_tokens")
+        let total_tokens = self
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.get("total_tokens"))
             .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| {
                 error!(
@@ -375,6 +379,7 @@ impl Stream for Streamer {
                 if chunk_str.starts_with(DONE_CHUNK) {
                     // This is the last chunk, meaning the inference streaming is complete
                     self.status = StreamStatus::Completed;
+                    self.handle_final_chunk()?;
                     return Poll::Ready(None);
                 }
 
@@ -478,8 +483,7 @@ impl Stream for Streamer {
                 if self.endpoint == CHAT_COMPLETIONS_PATH || self.endpoint == COMPLETIONS_PATH {
                     if let Some(usage) = chunk.get(USAGE) {
                         if !usage.is_null() {
-                            self.status = StreamStatus::Completed;
-                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                            self.usage = Some(usage.to_owned());
                         }
                     }
                 } else if self.endpoint == COMPLETIONS_PATH {
@@ -497,8 +501,7 @@ impl Stream for Streamer {
 
                     if let Some(usage) = chunk.get(USAGE) {
                         if !usage.is_null() {
-                            self.status = StreamStatus::Completed;
-                            self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                            self.usage = Some(usage.to_owned());
                         }
                         if !choices.is_empty() {
                             trace!(
@@ -510,8 +513,7 @@ impl Stream for Streamer {
                     }
                 } else if let Some(usage) = chunk.get(USAGE) {
                     if !usage.is_null() {
-                        self.status = StreamStatus::Completed;
-                        self.handle_final_chunk(usage, chunk.get(RESPONSE_HASH_KEY))?;
+                        self.usage = Some(usage.to_owned());
                     }
                 }
                 self.num_generated_tokens += 1;
