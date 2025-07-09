@@ -21,6 +21,8 @@ use serde_json::Value;
 use tracing::instrument;
 use utils::is_confidential_compute_endpoint;
 
+use crate::server::{DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS};
+
 use super::{
     check_auth,
     error::AtomaProxyError,
@@ -302,11 +304,20 @@ pub async fn authenticate_middleware(
                 endpoint: req_parts.uri.path().to_string(),
             }
         })?;
-    let body_json: Value =
+    let mut body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to parse body as JSON: {e}"),
             endpoint: req_parts.uri.path().to_string(),
         })?;
+
+    if let Some(obj) = body_json.as_object_mut() {
+        if !obj.contains_key(MAX_TOKENS) && !obj.contains_key(MAX_COMPLETION_TOKENS) {
+            obj.insert(
+                MAX_COMPLETION_TOKENS.to_string(),
+                Value::from(DEFAULT_MAX_TOKENS),
+            );
+        }
+    }
 
     // Authenticate request and lock compute units for a Stack.
     //
