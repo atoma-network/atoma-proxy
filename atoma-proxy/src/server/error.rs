@@ -126,6 +126,14 @@ pub enum AtomaProxyError {
         /// The endpoint that the error occurred on
         endpoint: String,
     },
+
+    #[error("Only fiat payments are supported")]
+    FiatPaymentsOnly {
+        /// Description of the fiat payments only error
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
 }
 
 impl AtomaProxyError {
