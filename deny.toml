@@ -29,7 +29,7 @@ ignore = [
     # backoff is unmaintned, essentially used by sui-sdk
     "RUSTSEC-2025-0012",
     # backoff is unmaintned, used by the backoff above
-    "RUSTSEC-2024-0384"
+    "RUSTSEC-2024-0384",
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
