@@ -213,7 +213,7 @@ impl AtomaProxyError {
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
     pub const fn status_code(&self) -> StatusCode {
         match self {
-            Self::RequestError { .. } => StatusCode::BAD_REQUEST,
+            Self::FiatPaymentsOnly { .. } | Self::RequestError { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
@@ -223,7 +223,6 @@ impl AtomaProxyError {
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::UnavailableStack { .. } => StatusCode::TOO_EARLY,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
-            Self::FiatPaymentsOnly { .. } => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -278,9 +277,7 @@ impl AtomaProxyError {
             Self::Locked { message, .. } => format!("Locked: {message}"),
             Self::UnavailableStack { message, .. } => format!("Stack unavailable: {message}"),
             Self::TooManyRequests { message, .. } => format!("Too many requests: {message}"),
-            Self::FiatPaymentsOnly { .. } => {
-                format!("Only fiat payments are supported")
-            }
+            Self::FiatPaymentsOnly { .. } => "Only fiat payments are supported".to_string(),
         }
     }
 }
