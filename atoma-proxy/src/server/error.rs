@@ -164,6 +164,7 @@ impl AtomaProxyError {
             Self::Locked { .. } => "LOCKED",
             Self::UnavailableStack { .. } => "UNAVAILABLE_STACK",
             Self::TooManyRequests { .. } => "TOO_MANY_REQUESTS",
+            Self::FiatPaymentsOnly { .. } => "FIAT_PAYMENTS_ONLY",
         }
     }
 
@@ -196,6 +197,7 @@ impl AtomaProxyError {
             Self::Locked { .. } => "Locked".to_string(),
             Self::UnavailableStack { .. } => "Stack unavailable".to_string(),
             Self::TooManyRequests { .. } => "Too many requests".to_string(),
+            Self::FiatPaymentsOnly { .. } => "Only fiat payments are supported".to_string(),
         }
     }
 
@@ -221,6 +223,7 @@ impl AtomaProxyError {
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::UnavailableStack { .. } => StatusCode::TOO_EARLY,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::FiatPaymentsOnly { .. } => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -243,7 +246,8 @@ impl AtomaProxyError {
             | Self::BalanceError { endpoint, .. }
             | Self::Locked { endpoint, .. }
             | Self::UnavailableStack { endpoint, .. }
-            | Self::TooManyRequests { endpoint, .. } => endpoint.clone(),
+            | Self::TooManyRequests { endpoint, .. }
+            | Self::FiatPaymentsOnly { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -274,6 +278,9 @@ impl AtomaProxyError {
             Self::Locked { message, .. } => format!("Locked: {message}"),
             Self::UnavailableStack { message, .. } => format!("Stack unavailable: {message}"),
             Self::TooManyRequests { message, .. } => format!("Too many requests: {message}"),
+            Self::FiatPaymentsOnly { .. } => {
+                format!("Only fiat payments are supported")
+            }
         }
     }
 }
