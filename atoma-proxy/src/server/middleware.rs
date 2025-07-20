@@ -1363,33 +1363,9 @@ pub mod auth {
                 is_fiat_request: true,
             });
         }
-
-        let optional_stack = send_event_with_response(
-            &state.state_manager_sender,
-            |result_sender| {
-                AtomaAtomaStateManagerEvent::GetStacksForModel {
-                    model: model.to_string(),
-                    free_compute_units: (num_input_tokens + max_output_tokens) as i64,
-                    user_id,
-                    is_confidential: false, // NOTE: This method is only used for non-confidential compute
-                    result_sender,
-                }
-            },
-            "GetStacksForModel",
-            endpoint,
-        )
-        .await?;
-
-        Ok(StackMetadata {
-            optional_stack,
-            num_input_tokens,
-            max_output_tokens,
-            model,
-            user_id,
-            selected_node_id: node.node_small_id,
-            price_per_one_million_input_compute_units,
-            price_per_one_million_output_compute_units,
-            is_fiat_request: false,
+        Err(AtomaProxyError::FiatPaymentsOnly {
+            message: "Fiat payments only, no stacks available".to_string(),
+            endpoint: endpoint.to_string(),
         })
     }
 
