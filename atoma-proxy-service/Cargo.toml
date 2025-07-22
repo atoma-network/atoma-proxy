@@ -11,8 +11,10 @@ atoma-state.workspace        = true
 atoma-sui.workspace          = true
 axum.workspace               = true
 base64.workspace             = true
+blake2.workspace             = true
 chrono.workspace             = true
 config.workspace             = true
+fastcrypto.workspace         = true
 rand.workspace               = true
 reqwest.workspace            = true
 serde                        = { workspace = true, features = [ "derive" ] }

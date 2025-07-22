@@ -18,6 +18,10 @@ use crate::{
             LOGIN_PATH, REGISTER_PATH, REVOKE_API_TOKEN_PATH, UPDATE_SUI_ADDRESS_PATH,
             USDC_PAYMENT_PATH,
         },
+        nodes::{
+            GetNodeAttestationOpenApi, UpdateNodeAttestationOpenApi, GET_NODE_ATTESTATION_PATH,
+            UPDATE_NODE_ATTESTATION_PATH,
+        },
         settings::{SetPricingForUserOpenApi, SET_PRICE_FOR_USER_PATH},
         stacks::{
             GetCurrentStacksOpenApi, GetStacksByUserId, GET_ALL_STACKS_FOR_USER_PATH,
@@ -63,6 +67,8 @@ pub fn openapi_router() -> Router {
             (path = GET_GRAPHS_PATH, api = GetGraphs, tags = ["Stats"]),
             (path = GET_STATS_PATH, api = GetStats, tags = ["Stats"]),
             (path = SET_PRICE_FOR_USER_PATH, api = SetPricingForUserOpenApi, tags = ["Settings"]),
+            (path = GET_NODE_ATTESTATION_PATH, api = GetNodeAttestationOpenApi, tags = ["Nodes"]),
+            (path = UPDATE_NODE_ATTESTATION_PATH, api = UpdateNodeAttestationOpenApi, tags = ["Nodes"]),
         ),
         tags(
             (name = "Health", description = "Health check endpoints"),
