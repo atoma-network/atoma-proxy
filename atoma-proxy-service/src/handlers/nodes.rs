@@ -1,5 +1,3 @@
-use std::hash::Hash;
-
 use atoma_state::types::{NodeAttestation, UpdateNodeAttestation};
 use axum::{
     extract::{Path, State},
