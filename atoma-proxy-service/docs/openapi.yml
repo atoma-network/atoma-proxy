@@ -734,7 +734,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateNodeAttestation'
+              $ref: '#/components/schemas/NodeAttestation'
         required: true
       responses:
         '200':
@@ -842,20 +842,6 @@ components:
           type: integer
           format: int64
           description: The user id for which the pricing is set
-    UpdateNodeAttestation:
-      type: object
-      required:
-      - attestation
-      - signature
-      properties:
-        attestation:
-          $ref: '#/components/schemas/NodeAttestation'
-        signature:
-          type: array
-          items:
-            type: integer
-            format: int32
-            minimum: 0
     UsdcPaymentRequest:
       type: object
       description: |-
