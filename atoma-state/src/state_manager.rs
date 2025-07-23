@@ -4,8 +4,9 @@ use crate::handlers::{handle_atoma_event, handle_p2p_event, handle_state_manager
 use crate::network::NetworkMetrics;
 use crate::types::{
     AtomaAtomaStateManagerEvent, CheapestNode, ComputedUnitsProcessedResponse, LatencyResponse,
-    NodeDistribution, NodePublicKey, NodeSubscription, Pricing, Stack, StackAttestationDispute,
-    StackSettlementTicket, StatsStackResponse, Task, TokenResponse, UserProfile,
+    NodeAttestation, NodeDistribution, NodePublicKey, NodeSubscription, Pricing, Stack,
+    StackAttestationDispute, StackSettlementTicket, StatsStackResponse, Task, TokenResponse,
+    UserProfile,
 };
 use crate::{build_query_with_in, AtomaStateManagerError};
 
@@ -1139,6 +1140,95 @@ impl AtomaState {
                 NodeSubscription::from_row(&subscription).map_err(AtomaStateManagerError::from)
             })
             .collect()
+    }
+
+    /// Retrieves the attestation for a specific node.
+    /// This method fetches the attestation record from the `node_attestations` table
+    /// for a given node identified by its small ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_small_id` - The unique identifier of the node for which the attestation is requested
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Option<NodeAttestation>>`: A result containing either:
+    ///   - `Ok(Some(NodeAttestation))`: The `NodeAttestation` object if found.
+    ///   - `Ok(None)`: If no attestation exists for the specified node.
+    ///   - `Err(AtomaStateManagerError)`: An error if the database query fails or if there's an issue parsing the results.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue converting the database row into a `NodeAttestation` object.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, NodeAttestation};
+    ///
+    /// async fn get_node_attestation(state_manager: &AtomaStateManager, node_small_id: i64) -> Result<Option<NodeAttestation>, AtomaStateManagerError> {
+    ///     state_manager.get_node_attestation(node_small_id).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(%node_small_id))]
+    pub async fn get_node_attestation(
+        &self,
+        node_small_id: i64,
+    ) -> Result<Option<NodeAttestation>> {
+        let attestation = sqlx::query("SELECT * FROM node_attestations WHERE node_small_id = $1")
+            .bind(node_small_id)
+            .fetch_optional(&self.db)
+            .await?;
+        attestation
+            .map(|attestation| {
+                NodeAttestation::from_row(&attestation).map_err(AtomaStateManagerError::from)
+            })
+            .transpose()
+    }
+
+    /// Updates or inserts a node attestation in the database.
+    /// This method either updates an existing attestation for a node or inserts a new one
+    /// if it does not already exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `attestation` - The `NodeAttestation` object containing the node's small ID,
+    ///   the attestation data, and its validity status.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<()>`: A result indicating success (Ok(())) or failure (Err(AtomaStateManagerError)).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database query fails to execute.
+    /// - There's an issue with the data being inserted or updated.
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use atoma_node::atoma_state::{AtomaStateManager, NodeAttestation};
+    ///
+    /// async fn update_node_attestation(state_manager: &AtomaStateManager, attestation: NodeAttestation) -> Result<(), AtomaStateManagerError> {
+    ///     state_manager.update_node_attestation(attestation).await
+    /// }
+    /// ```
+    #[instrument(level = "trace", skip_all, fields(node_small_id = %attestation.node_small_id))]
+    pub async fn update_node_attestation(&self, attestation: NodeAttestation) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO node_attestations (node_small_id, attestation)
+             VALUES ($1, $2)
+             ON CONFLICT (node_small_id) DO UPDATE SET
+             attestation = EXCLUDED.attestation,
+             updated_at = NOW()",
+        )
+        .bind(attestation.node_small_id)
+        .bind(attestation.attestation)
+        .execute(&self.db)
+        .await?;
+        Ok(())
     }
 
     /// Retrieves all stacks that are not settled.

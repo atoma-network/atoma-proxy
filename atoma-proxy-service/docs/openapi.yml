@@ -666,38 +666,81 @@ paths:
           description: Pricing updated successfully
         '500':
           description: Failed to update pricing
-  /google_oauth:
-    post:
+  /v1/get_node_attestation/{node_small_id}:
+    get:
       tags:
-      - Auth
-      summary: |-
-        Logs in a user with the proxy service using Google OAuth.
-        This endpoint is used to verify a Google ID token and return an access token.
+      - Nodes
+      summary: Retrieves the node attestation for a specific node.
+      description: |-
+        # Arguments
+        * `proxy_service_state` - The shared state containing the state manager
+        * `node_small_id` - The small ID of the node for which to retrieve the attestation
+
+        # Returns
+        * `Result<Json<NodeAttestation>>` - A JSON response containing the node attestation
+          - `Ok(Json<NodeAttestation>)` - Successfully retrieved node attestation
+          - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to retrieve node attestation from state manager
+
+        # Example Response
+        Returns a JSON object representing the node attestation:
+        ```json
+        {
+            "node_small_id": 123,
+            "attestation": [0,1,2,3]
+        }
+      operationId: get_node_attestation
+      parameters:
+      - name: node_small_id
+        in: path
+        description: The small ID of the node for which to retrieve the attestation
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Retrieves node attestation for a specific node
+        '500':
+          description: Failed to get node attestation
+  /v1/update_node_attestation:
+    put:
+      tags:
+      - Nodes
+      summary: ' Updates the node attestation for a specific node.'
       description: |-
         # Arguments
 
-        * `proxy_service_state` - The shared state containing the state manager
-        * `body` - The request body containing the Google ID token
+         * `proxy_service_state` - The shared state containing the state manager
+         * `node_small_id` - The small ID of the node for which to update the attestation
+         * `attestation` - The new attestation data for the node
 
-        # Returns
+         # Returns
 
-        * `Result<Json<AuthResponse>>` - A JSON response containing the access and refresh tokens
-      operationId: google_oauth
+         * `Result<StatusCode>` - A status code indicating the result of the operation
+          - `Ok(StatusCode::OK)` - Successfully updated node attestation
+         - `Err(StatusCode::INTERNAL_SERVER_ERROR)` - Failed to update node attestation in state manager
+
+         # Example Request
+
+         ```json
+         {
+             "node_small_id": 123,
+             "attestation": [0,1,2,3],
+             "signature": [4,5,6,7]
+         }
+         ```
+      operationId: update_node_attestation
       requestBody:
         content:
-          text/plain:
+          application/json:
             schema:
-              type: string
+              $ref: '#/components/schemas/NodeAttestation'
         required: true
       responses:
         '200':
-          description: Logs in a user with Google OAuth
-          content:
-            text/plain:
-              schema:
-                type: string
+          description: Successfully updated node attestation
         '500':
-          description: Failed to verify Google ID token
+          description: Failed to update node attestation
 components:
   schemas:
     CreateTokenRequest:
@@ -725,6 +768,21 @@ components:
         password:
           type: string
           description: The user's password
+    NodeAttestation:
+      type: object
+      required:
+      - node_small_id
+      - attestation
+      properties:
+        attestation:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+        node_small_id:
+          type: integer
+          format: int64
     ProofRequest:
       type: object
       description: |-

@@ -16,8 +16,8 @@ use utoipa::OpenApi;
 use crate::{
     components::{grafana::Grafana, openapi::openapi_router},
     handlers::{
-        auth::auth_router, settings::settings_router, stacks::stacks_router, stats::stats_router,
-        subscriptions::subscriptions_router, tasks::tasks_router,
+        auth::auth_router, nodes::nodes_router, settings::settings_router, stacks::stacks_router,
+        stats::stats_router, subscriptions::subscriptions_router, tasks::tasks_router,
     },
     ModelModality,
 };
@@ -161,7 +161,7 @@ pub async fn run_proxy_service(
 pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_methods(vec![Method::GET, Method::POST, Method::PUT])
         .allow_headers(Any);
     Router::new()
         .merge(auth_router())
@@ -170,6 +170,7 @@ pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Ro
         .merge(subscriptions_router())
         .merge(tasks_router())
         .merge(stats_router())
+        .merge(nodes_router())
         .layer(cors)
         .with_state(proxy_service_state)
         .route(HEALTH_PATH, get(health))

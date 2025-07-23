@@ -598,6 +598,12 @@ pub struct NodePublicKey {
     pub stack_small_id: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct NodeAttestation {
+    pub node_small_id: i64,
+    pub attestation: Vec<u8>,
+}
+
 pub enum AtomaAtomaStateManagerEvent {
     /// Locks a stack
     LockStack {
