@@ -145,15 +145,15 @@ pub async fn update_node_attestation(
 
     let public_address = proxy_service_state
         .atoma_state
-        .get_node_public_address(update_attestation.attestation.node_small_id)
+        .get_node_sui_address(update_attestation.attestation.node_small_id)
         .await
         .map_err(|_| {
-            error!("Failed to get node public address");
+            error!("Failed to get node sui address");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or_else(|| {
             error!(
-                "Node public address not found for node_small_id: {}",
+                "Node sui address not found for node_small_id: {}",
                 update_attestation.attestation.node_small_id
             );
             StatusCode::NOT_FOUND
