@@ -599,12 +599,6 @@ pub struct NodePublicKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
-pub struct UpdateNodeAttestation {
-    pub attestation: NodeAttestation,
-    pub signature: Vec<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct NodeAttestation {
     pub node_small_id: i64,
     pub attestation: Vec<u8>,

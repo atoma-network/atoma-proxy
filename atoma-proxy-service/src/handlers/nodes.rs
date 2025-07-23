@@ -1,7 +1,10 @@
-use atoma_state::types::{NodeAttestation, UpdateNodeAttestation};
+use std::str::FromStr;
+
+use atoma_state::types::NodeAttestation;
+use atoma_utils::constants::SIGNATURE;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{get, put},
     Json, Router,
 };
@@ -77,7 +80,7 @@ pub struct UpdateNodeAttestationOpenApi;
 #[utoipa::path(
     put,
     path = "",
-    request_body = UpdateNodeAttestation,
+    request_body = NodeAttestation,
     responses(
         (status = OK, description = "Successfully updated node attestation"),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to update node attestation")
@@ -86,9 +89,21 @@ pub struct UpdateNodeAttestationOpenApi;
 #[instrument(level = "trace", skip_all)]
 pub async fn update_node_attestation(
     State(proxy_service_state): State<ProxyServiceState>,
-    Json(update_attestation): Json<UpdateNodeAttestation>,
+    headers: HeaderMap,
+    Json(update_attestation): Json<NodeAttestation>,
 ) -> Result<StatusCode> {
-    let signature = Signature::from_bytes(&update_attestation.signature).map_err(|_| {
+    let signature = headers
+        .get(SIGNATURE)
+        .ok_or_else(|| {
+            error!("Signature header is missing");
+            StatusCode::BAD_REQUEST
+        })?
+        .to_str()
+        .map_err(|_| {
+            error!("Invalid signature format");
+            StatusCode::BAD_REQUEST
+        })?;
+    let signature = Signature::from_str(signature).map_err(|_| {
         error!("Invalid signature format");
         StatusCode::BAD_REQUEST
     })?;
@@ -102,8 +117,8 @@ pub async fn update_node_attestation(
             StatusCode::BAD_REQUEST
         })?;
     let mut hasher = blake2::Blake2b::new();
-    hasher.update(update_attestation.attestation.node_small_id.to_le_bytes());
-    hasher.update(&update_attestation.attestation.attestation);
+    hasher.update(update_attestation.node_small_id.to_le_bytes());
+    hasher.update(&update_attestation.attestation);
     let attestation_hash: [u8; 32] = hasher.finalize().into();
 
     match signature_scheme {
@@ -145,7 +160,7 @@ pub async fn update_node_attestation(
 
     let public_address = proxy_service_state
         .atoma_state
-        .get_node_sui_address(update_attestation.attestation.node_small_id)
+        .get_node_sui_address(update_attestation.node_small_id)
         .await
         .map_err(|_| {
             error!("Failed to get node sui address");
@@ -154,7 +169,7 @@ pub async fn update_node_attestation(
         .ok_or_else(|| {
             error!(
                 "Node sui address not found for node_small_id: {}",
-                update_attestation.attestation.node_small_id
+                update_attestation.node_small_id
             );
             StatusCode::NOT_FOUND
         })?;
@@ -164,14 +179,14 @@ pub async fn update_node_attestation(
     if public_address != sui_address.to_string() {
         error!(
             "Public key does not match the sui address for node_small_id: {}",
-            update_attestation.attestation.node_small_id
+            update_attestation.node_small_id
         );
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     proxy_service_state
         .atoma_state
-        .update_node_attestation(update_attestation.attestation)
+        .update_node_attestation(update_attestation)
         .await
         .map_err(|_| {
             error!("Failed to update node attestation");

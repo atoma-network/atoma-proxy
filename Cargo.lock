@@ -861,6 +861,7 @@ dependencies = [
  "atoma-auth",
  "atoma-state",
  "atoma-sui",
+ "atoma-utils",
  "axum 0.8.4",
  "base64 0.22.1",
  "blake2",
