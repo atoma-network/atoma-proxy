@@ -24,10 +24,10 @@ use crate::ProxyServiceState;
 type Result<T> = std::result::Result<T, StatusCode>;
 
 /// The path for the update of node attestation endpoint.
-pub const UPDATE_NODE_ATTESTATION_PATH: &str = "/update_node_attestation";
+pub const UPDATE_NODE_ATTESTATION_PATH: &str = "/v1/update_node_attestation";
 
 /// The path for the get node attestation endpoint.
-pub const GET_NODE_ATTESTATION_PATH: &str = "/get_node_attestation";
+pub const GET_NODE_ATTESTATION_PATH: &str = "/v1/get_node_attestation";
 
 /// Returns a router with the subscriptions endpoint.
 ///
