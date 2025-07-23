@@ -161,7 +161,7 @@ pub async fn run_proxy_service(
 pub fn create_proxy_service_router(proxy_service_state: ProxyServiceState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_methods(vec![Method::GET, Method::POST, Method::PUT])
         .allow_headers(Any);
     Router::new()
         .merge(auth_router())
