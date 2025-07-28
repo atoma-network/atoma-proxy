@@ -1218,14 +1218,14 @@ impl AtomaState {
     #[instrument(level = "trace", skip_all, fields(node_small_id = %attestation.node_small_id))]
     pub async fn update_node_attestation(&self, attestation: NodeAttestation) -> Result<()> {
         sqlx::query(
-            "INSERT INTO node_attestations (node_small_id, attestation)
+            "INSERT INTO node_attestations (node_small_id, compressed_evidence)
              VALUES ($1, $2)
              ON CONFLICT (node_small_id) DO UPDATE SET
-             attestation = EXCLUDED.attestation,
+             compressed_evidence = EXCLUDED.compressed_evidence,
              updated_at = NOW()",
         )
         .bind(attestation.node_small_id)
-        .bind(attestation.attestation)
+        .bind(attestation.compressed_evidence)
         .execute(&self.db)
         .await?;
         Ok(())

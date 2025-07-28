@@ -601,7 +601,7 @@ pub struct NodePublicKey {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct NodeAttestation {
     pub node_small_id: i64,
-    pub attestation: Vec<u8>,
+    pub compressed_evidence: Vec<u8>,
 }
 
 pub enum AtomaAtomaStateManagerEvent {

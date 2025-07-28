@@ -118,7 +118,7 @@ pub async fn update_node_attestation(
         })?;
     let mut hasher = blake2::Blake2b::new();
     hasher.update(update_attestation.node_small_id.to_le_bytes());
-    hasher.update(&update_attestation.attestation);
+    hasher.update(&update_attestation.compressed_evidence);
     let attestation_hash: [u8; 32] = hasher.finalize().into();
 
     match signature_scheme {
