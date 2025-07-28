@@ -1,2 +1,2 @@
-ALTER TABLE node_attestation
+ALTER TABLE node_attestations
 RENAME COLUMN attestation TO compressed_evidence;
