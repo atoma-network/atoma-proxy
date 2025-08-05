@@ -46,12 +46,6 @@ const KEEP_ALIVE_CHUNK_STR: &str = ": keep-alive\n\n";
 /// The choices key
 const CHOICES: &str = "choices";
 
-/// The delta key
-const DELTA: &str = "delta";
-
-/// The content key
-const CONTENT: &str = "content";
-
 /// The usage key
 const USAGE: &str = "usage";
 
@@ -471,13 +465,6 @@ impl Stream for Streamer {
                         }
                     }
                 };
-
-                if let Some(content) = chunk[CHOICES][0][DELTA].get(CONTENT) {
-                    if content.is_null() {
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending;
-                    }
-                }
 
                 // We need to verify the hash when the endpoint is not confidential, as the node
                 // is not running within a secure enclave. Otherwise, the fact that the node can process requests

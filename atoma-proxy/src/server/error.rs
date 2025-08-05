@@ -126,6 +126,14 @@ pub enum AtomaProxyError {
         /// The endpoint that the error occurred on
         endpoint: String,
     },
+
+    #[error("Only fiat payments are supported")]
+    FiatPaymentsOnly {
+        /// Description of the fiat payments only error
+        message: String,
+        /// The endpoint that the error occurred on
+        endpoint: String,
+    },
 }
 
 impl AtomaProxyError {
@@ -156,6 +164,7 @@ impl AtomaProxyError {
             Self::Locked { .. } => "LOCKED",
             Self::UnavailableStack { .. } => "UNAVAILABLE_STACK",
             Self::TooManyRequests { .. } => "TOO_MANY_REQUESTS",
+            Self::FiatPaymentsOnly { .. } => "FIAT_PAYMENTS_ONLY",
         }
     }
 
@@ -188,6 +197,7 @@ impl AtomaProxyError {
             Self::Locked { .. } => "Locked".to_string(),
             Self::UnavailableStack { .. } => "Stack unavailable".to_string(),
             Self::TooManyRequests { .. } => "Too many requests".to_string(),
+            Self::FiatPaymentsOnly { .. } => "Only fiat payments are supported".to_string(),
         }
     }
 
@@ -203,7 +213,7 @@ impl AtomaProxyError {
     /// An [`axum::http::StatusCode`] representing the appropriate HTTP response code for this error
     pub const fn status_code(&self) -> StatusCode {
         match self {
-            Self::RequestError { .. } => StatusCode::BAD_REQUEST,
+            Self::FiatPaymentsOnly { .. } | Self::RequestError { .. } => StatusCode::BAD_REQUEST,
             Self::AuthError { .. } => StatusCode::UNAUTHORIZED,
             Self::InternalError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
@@ -235,7 +245,8 @@ impl AtomaProxyError {
             | Self::BalanceError { endpoint, .. }
             | Self::Locked { endpoint, .. }
             | Self::UnavailableStack { endpoint, .. }
-            | Self::TooManyRequests { endpoint, .. } => endpoint.clone(),
+            | Self::TooManyRequests { endpoint, .. }
+            | Self::FiatPaymentsOnly { endpoint, .. } => endpoint.clone(),
         }
     }
 
@@ -266,6 +277,7 @@ impl AtomaProxyError {
             Self::Locked { message, .. } => format!("Locked: {message}"),
             Self::UnavailableStack { message, .. } => format!("Stack unavailable: {message}"),
             Self::TooManyRequests { message, .. } => format!("Too many requests: {message}"),
+            Self::FiatPaymentsOnly { .. } => "Only fiat payments are supported".to_string(),
         }
     }
 }

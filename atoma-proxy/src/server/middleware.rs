@@ -21,6 +21,8 @@ use serde_json::Value;
 use tracing::instrument;
 use utils::is_confidential_compute_endpoint;
 
+use crate::server::{DEFAULT_MAX_TOKENS, MAX_COMPLETION_TOKENS, MAX_TOKENS};
+
 use super::{
     check_auth,
     error::AtomaProxyError,
@@ -302,11 +304,20 @@ pub async fn authenticate_middleware(
                 endpoint: req_parts.uri.path().to_string(),
             }
         })?;
-    let body_json: Value =
+    let mut body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|e| AtomaProxyError::RequestError {
             message: format!("Failed to parse body as JSON: {e}"),
             endpoint: req_parts.uri.path().to_string(),
         })?;
+
+    if let Some(obj) = body_json.as_object_mut() {
+        if !obj.contains_key(MAX_TOKENS) && !obj.contains_key(MAX_COMPLETION_TOKENS) {
+            obj.insert(
+                MAX_COMPLETION_TOKENS.to_string(),
+                Value::from(DEFAULT_MAX_TOKENS),
+            );
+        }
+    }
 
     // Authenticate request and lock compute units for a Stack.
     //
@@ -1352,33 +1363,9 @@ pub mod auth {
                 is_fiat_request: true,
             });
         }
-
-        let optional_stack = send_event_with_response(
-            &state.state_manager_sender,
-            |result_sender| {
-                AtomaAtomaStateManagerEvent::GetStacksForModel {
-                    model: model.to_string(),
-                    free_compute_units: (num_input_tokens + max_output_tokens) as i64,
-                    user_id,
-                    is_confidential: false, // NOTE: This method is only used for non-confidential compute
-                    result_sender,
-                }
-            },
-            "GetStacksForModel",
-            endpoint,
-        )
-        .await?;
-
-        Ok(StackMetadata {
-            optional_stack,
-            num_input_tokens,
-            max_output_tokens,
-            model,
-            user_id,
-            selected_node_id: node.node_small_id,
-            price_per_one_million_input_compute_units,
-            price_per_one_million_output_compute_units,
-            is_fiat_request: false,
+        Err(AtomaProxyError::FiatPaymentsOnly {
+            message: "Fiat payments only, no stacks available".to_string(),
+            endpoint: endpoint.to_string(),
         })
     }
 
