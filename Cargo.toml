@@ -25,8 +25,8 @@ chrono                      = "0.4.41"
 clap                        = "4.5.40"
 config                      = "0.14.1"
 dashmap                     = "6.1.0"
-fastcrypto                  = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto" }
-fastcrypto-zkp              = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c71fb37e3d22fe85e5bbfd4256d61422b9", package = "fastcrypto-zkp" }
+fastcrypto                  = { git = "https://github.com/MystenLabs/fastcrypto", rev = "16fa86d0dd943024a9088d46850a72ecd55b7f46", package = "fastcrypto" }
+fastcrypto-zkp              = { git = "https://github.com/MystenLabs/fastcrypto", rev = "16fa86d0dd943024a9088d46850a72ecd55b7f46", package = "fastcrypto-zkp" }
 fastrand                    = "2.3.0"
 flume                       = "0.11.1"
 futures                     = "0.3.31"
@@ -52,10 +52,10 @@ serde                       = "1.0.214"
 serde_json                  = "1.0.140"
 serde_yaml                  = "0.9.34"
 serial_test                 = "3.1.1"
-shared-crypto               = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.51.2" }
+shared-crypto               = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto", tag = "testnet-v1.53.1" }
 sqlx                        = { version = "0.8.6", features = [ "postgres", "runtime-tokio-native-tls" ] }
-sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.51.2" }
-sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.51.2" }
+sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.53.1" }
+sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.53.1" }
 sui-sdk-types               = "0.0.2"
 thiserror                   = "2.0.12"
 tokenizers                  = "0.21.0"
