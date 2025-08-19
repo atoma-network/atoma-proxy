@@ -57,7 +57,7 @@ sqlx                        = { version = "0.8.6", features = [ "postgres", "run
 sui-keys                    = { git = "https://github.com/mystenlabs/sui", package = "sui-keys", tag = "testnet-v1.53.1" }
 sui-sdk                     = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk", tag = "testnet-v1.53.1" }
 sui-sdk-types               = "0.0.2"
-thiserror                   = "2.0.12"
+thiserror                   = "2.0.15"
 tokenizers                  = "0.21.0"
 tokio                       = "1.45.1"
 toml                        = "0.8.19"
