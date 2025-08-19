@@ -9,7 +9,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 anyhow                      = "1.0.98"
-async-trait                 = "0.1.88"
+async-trait                 = "0.1.89"
 atoma-auth                  = { path = "./atoma-auth" }
 atoma-p2p                   = { git = "https://github.com/atoma-network/atoma-node.git", package = "atoma-p2p", branch = "main" }
 atoma-proxy-service         = { path = "./atoma-proxy-service" }
